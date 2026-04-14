@@ -70,6 +70,7 @@ const emptyTask = (id) => ({
   progressPercent: 0,
   subtasks: [],
   dependentTask: "",
+  finalizedAt: null,
 });
 
 // ─── calcAporte ────────────────────────────────────────────
@@ -144,11 +145,16 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
     });
 
   const addSubtask = () => {
-    if (task.subtasks.length < 20) upd("subtasks", [...task.subtasks, ""]);
+    if (task.subtasks.length < 20) upd("subtasks", [...task.subtasks, { text: "", done: false }]);
   };
   const updSubtask = (i, v) => {
     const arr = [...task.subtasks];
-    arr[i] = v;
+    arr[i] = { ...arr[i], text: v };
+    upd("subtasks", arr);
+  };
+  const toggleSubtask = (i) => {
+    const arr = [...task.subtasks];
+    arr[i] = { ...arr[i], done: !arr[i].done };
     upd("subtasks", arr);
   };
   const delSubtask = (i) => upd("subtasks", task.subtasks.filter((_, idx) => idx !== i));
@@ -162,6 +168,10 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
       <F label="ID" half><input style={readonlyInp} readOnly value={task.id ?? "(auto)"} /></F>
       <F label="Fecha de creación" half><input style={readonlyInp} readOnly value={task.createdAt} /></F>
+
+      {task.finalizedAt && (
+        <F label="Fecha de finalización"><input style={readonlyInp} readOnly value={task.finalizedAt} /></F>
+      )}
 
       {aporteDisplay !== null && (
         <div style={{ gridColumn: "span 2", background: "linear-gradient(135deg, #ec6c04 0%, #149cac 100%)", backgroundSize: "200% auto", animation: "shimmer 3s linear infinite", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
@@ -276,8 +286,19 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
           <F label={`Subtareas (${task.subtasks.length}/20)`}>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {task.subtasks.map((st, i) => (
-                <div key={i} style={{ display: "flex", gap: 6 }}>
-                  <input style={{ ...inp, flex: 1 }} value={st} onChange={(e) => updSubtask(i, e.target.value)} placeholder={`Subtarea ${i + 1}`} />
+                <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={st.done}
+                    onChange={() => toggleSubtask(i)}
+                    style={{ width: 16, height: 16, accentColor: "#542c9c", cursor: "pointer", flexShrink: 0 }}
+                  />
+                  <input
+                    style={{ ...inp, flex: 1, textDecoration: st.done ? "line-through" : "none", color: st.done ? "#969696" : undefined }}
+                    value={st.text}
+                    onChange={(e) => updSubtask(i, e.target.value)}
+                    placeholder={`Subtarea ${i + 1}`}
+                  />
                   <button onClick={() => delSubtask(i)} style={{
                     background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)",
                     color: "var(--color-text-danger)", borderRadius: 6, padding: "0 10px", cursor: "pointer", fontSize: 14,
@@ -351,6 +372,11 @@ function TaskCard({ task, onClick }) {
       {task.responsible && (
         <div style={{ fontSize: 10, color: "#149cac", fontWeight: 500, marginTop: 6 }}>
           👤 {task.responsible}
+        </div>
+      )}
+      {task.subtasks?.length > 0 && (
+        <div style={{ fontSize: 10, color: "#542c9c", fontWeight: 500, marginTop: 4 }}>
+          ☑ {task.subtasks.filter(s => s.done).length}/{task.subtasks.length} subtareas
         </div>
       )}
     </div>
@@ -1082,6 +1108,60 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, w
   const [newP, setNewP] = useState("");
   const [newI, setNewI] = useState("");
 
+  // Email config state
+  const [emails, setEmails] = useState([]);
+  const [newEmail, setNewEmail] = useState("");
+  const [sendDay, setSendDay] = useState("lunes");
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [emailMsg, setEmailMsg] = useState("");
+
+  useEffect(() => {
+    supabase.from('email_config').select('*').then(({ data }) => {
+      if (data && data.length > 0) {
+        const row = data[0];
+        setEmails(row.emails || []);
+        setSendDay(row.send_day || "lunes");
+      }
+    });
+  }, []);
+
+  const saveEmailConfig = async (updatedEmails, updatedDay) => {
+    setEmailSaving(true);
+    setEmailMsg("");
+    const { data } = await supabase.from('email_config').select('id').limit(1);
+    const payload = { emails: updatedEmails, send_day: updatedDay };
+    let error;
+    if (data && data.length > 0) {
+      ({ error } = await supabase.from('email_config').update(payload).eq('id', data[0].id));
+    } else {
+      ({ error } = await supabase.from('email_config').insert(payload));
+    }
+    setEmailSaving(false);
+    setEmailMsg(error ? "Error al guardar" : "Guardado correctamente");
+    setTimeout(() => setEmailMsg(""), 3000);
+  };
+
+  const addEmail = () => {
+    const e = newEmail.trim().toLowerCase();
+    if (!e || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return;
+    if (emails.includes(e)) return;
+    const updated = [...emails, e];
+    setEmails(updated);
+    setNewEmail("");
+    saveEmailConfig(updated, sendDay);
+  };
+
+  const removeEmail = (e) => {
+    const updated = emails.filter(x => x !== e);
+    setEmails(updated);
+    saveEmailConfig(updated, sendDay);
+  };
+
+  const updateDay = (day) => {
+    setSendDay(day);
+    saveEmailConfig(emails, day);
+  };
+
   const addP = () => {
     const name = newP.trim();
     if (!name || participants.some((p) => p.name.toLowerCase() === name.toLowerCase())) return;
@@ -1179,6 +1259,49 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, w
 
       <Sec title="⚖️ Calculadora de Valor de Aporte">
         <WeightCalculator weights={weights} setWeights={setWeights} />
+      </Sec>
+
+      <Sec title="📧 Reporte semanal por correo">
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 12 }}>
+          Configura los correos que recibirán el reporte semanal de tareas.
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <input
+            style={si}
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addEmail()}
+            placeholder="correo@ejemplo.com"
+            type="email"
+          />
+          <button onClick={addEmail} style={addBtn}>Agregar</button>
+        </div>
+        {emails.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", textAlign: "center" }}>No hay correos configurados.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
+            {emails.map((e) => (
+              <div key={e} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "#fafafa", borderRadius: 8, border: "1px solid rgba(84,44,156,0.08)" }}>
+                <span style={{ fontSize: 13, flex: 1, color: "var(--color-text-primary)" }}>✉️ {e}</span>
+                <button onClick={() => removeEmail(e)} style={{ background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 13 }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+          <span style={{ fontSize: 13, color: "var(--color-text-primary)", fontWeight: 500 }}>Día de envío:</span>
+          <select
+            value={sendDay}
+            onChange={(e) => updateDay(e.target.value)}
+            style={{ ...si, flex: "0 0 auto", minWidth: 130 }}
+          >
+            {["lunes","martes","miércoles","jueves","viernes","sábado","domingo"].map(d => (
+              <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>
+            ))}
+          </select>
+          {emailSaving && <span style={{ fontSize: 12, color: "#542c9c" }}>Guardando...</span>}
+          {emailMsg && <span style={{ fontSize: 12, color: emailMsg.startsWith("Error") ? "var(--color-text-danger)" : "var(--color-text-success)" }}>{emailMsg}</span>}
+        </div>
       </Sec>
     </div>
   );
@@ -1410,9 +1533,12 @@ const dbToTask = (r) => ({
   responsible: r.responsible || '',
   comments: r.comments || '',
   progressPercent: r.progress_percent ?? 0,
-  subtasks: r.subtasks || [],
+  subtasks: (r.subtasks || []).map(s =>
+    typeof s === 'string' ? { text: s, done: false } : s
+  ),
   dependentTask: r.dependent_task || '',
   aporteSnapshot: r.aporte_snapshot ?? null,
+  finalizedAt: r.finalized_at || null,
 });
 
 const taskToDb = (t) => ({
@@ -1437,6 +1563,7 @@ const taskToDb = (t) => ({
   subtasks: t.subtasks,
   dependent_task: t.dependentTask,
   aporte_snapshot: t.aporteSnapshot,
+  finalized_at: t.finalizedAt,
 });
 
 export default function App() {
@@ -1554,6 +1681,9 @@ export default function App() {
   }, []);
 
   const createTask = async (task) => {
+    if (task.status === 'Finalizada' && !task.finalizedAt) {
+      task = { ...task, finalizedAt: getColombiaNow() };
+    }
     const { error } = await supabase.from('tasks').insert(taskToDb(task));
     if (!error) {
       setTasks(prev => [...prev, task]);
@@ -1566,6 +1696,9 @@ export default function App() {
   };
 
   const updateTask = async (task) => {
+    if (task.status === 'Finalizada' && !task.finalizedAt) {
+      task = { ...task, finalizedAt: getColombiaNow() };
+    }
     const { error } = await supabase.from('tasks').update(taskToDb(task)).eq('id', task.id);
     if (!error) {
       setTasks(prev => prev.map(t => t.id === task.id ? task : t));
@@ -1645,7 +1778,7 @@ export default function App() {
       "Responsable": t.responsible,
       "Comentarios": t.comments,
       "Porcentaje de avance": `${Number(t.progressPercent || 0).toFixed(1)}%`,
-      "Subtareas": t.subtasks.filter(Boolean).join(" | "),
+      "Subtareas": t.subtasks.map(s => `[${s.done ? 'x' : ' '}] ${s.text}`).join(" | "),
       "Tarea dependiente (ID)": t.dependentTask || "",
     }));
     const ws = XLSX.utils.json_to_sheet(data);

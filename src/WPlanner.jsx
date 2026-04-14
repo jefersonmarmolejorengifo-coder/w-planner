@@ -795,7 +795,7 @@ function MetricsTab({ tasks, participants, indicators }) {
     const ptsByIndicator = {};
     let totalPts = 0;
     filtered.forEach((t) => {
-      const pts = t.difficulty || 0;
+      const pts = parseFloat(t.aporteSnapshot) || 0;
       totalPts += pts;
       if (t.indicator) {
         byIndicator[t.indicator] = (byIndicator[t.indicator] || 0) + 1;
@@ -870,7 +870,7 @@ function MetricsTab({ tasks, participants, indicators }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
             <MetCard label="Total tareas" value={filtered.length} />
             <MetCard label="Finalizadas" value={metrics.finalizadas} color="#3B6D11" />
-            <MetCard label="Puntos totales" value={metrics.totalPts} color="#BA7517" />
+            <MetCard label="Valor de Aporte total" value={metrics.totalPts} color="#BA7517" />
           </div>
 
           <Sec title="Tareas por estado">
@@ -896,7 +896,7 @@ function MetricsTab({ tasks, participants, indicators }) {
                   <span style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{ind}</span>
                   <div style={{ display: "flex", gap: 20 }}>
                     <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{cnt} tareas</span>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "#BA7517" }}>{metrics.ptsByIndicator[ind] || 0} pts</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#BA7517" }}>{metrics.ptsByIndicator[ind] || 0} aporte</span>
                   </div>
                 </div>
               ))}

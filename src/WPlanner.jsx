@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import * as XLSX from "xlsx";
+import { supabase } from './supabaseClient';
 
 const STATUS_COLORS = {
   "No programada": "#969696",
@@ -30,7 +31,6 @@ const TYPE_COLORS = {
 const TIPOS = ["Administrativa","Operativa","Apadrinamiento","Seguimiento","Creativa","Otra"];
 const ESTADOS = ["No programada","Sin iniciar","En proceso","Bloqueada","En pausa","Cancelada","Finalizada"];
 const CLOSE_STATES = ["Finalizada","Cancelada"];
-const STORAGE_KEY = "w_planner_v1";
 const CONFIG_PIN = "020419*";
 
 const getColombiaNow = () => {
@@ -47,10 +47,6 @@ const daysBetween = (a, b) => {
   return Math.round((new Date(b) - new Date(a)) / 86400000);
 };
 
-const loadState = () => {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; }
-  catch { return null; }
-};
 
 const emptyTask = (id) => ({
   id,
@@ -412,7 +408,7 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 }
 
 // ─── BoardTab ──────────────────────────────────────────────
-function BoardTab({ tasks, setTasks, participants, indicators, currentUser, nextId, setNextId, weights }) {
+function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, nextId, weights }) {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
   const [fStatus, setFStatus] = useState("");
@@ -426,22 +422,21 @@ function BoardTab({ tasks, setTasks, participants, indicators, currentUser, next
   const openNew = () => { setForm(emptyTask(nextId)); setModal("new"); };
   const openEdit = (t) => { setForm({ ...t }); setModal(t.id); };
 
-  const save = () => {
+  const save = async () => {
     if (!form.title.trim()) { alert("El título es obligatorio"); return; }
-    if (modal === "new") {
-      const taskToSave = { ...form, aporteSnapshot: parseFloat(calcAporte(form, weights).toFixed(1)) };
-      setTasks((p) => [...p, taskToSave]);
-      setNextId((n) => n + 1);
-    } else {
-      setTasks((p) => p.map((t) => (t.id === form.id ? form : t)));
-    }
     setModal(null);
+    if (modal === "new") {
+      const newTask = { ...form, aporteSnapshot: parseFloat(calcAporte(form, weights).toFixed(1)) };
+      await createTask(newTask);
+    } else {
+      await updateTask(form);
+    }
   };
 
-  const del = () => {
+  const del = async () => {
     if (!confirm(`¿Eliminar la tarea #${form.id}?`)) return;
-    setTasks((p) => p.filter((t) => t.id !== form.id));
     setModal(null);
+    await deleteTask(form.id);
   };
 
   const filtered = useMemo(() => tasks.filter((t) => {
@@ -1396,27 +1391,176 @@ function IntroScreen({ onFinish }) {
 // ─── Main App ──────────────────────────────────────────────
 const DEFAULT_WEIGHTS = { tiempo: 33, dificultad: 34, estrategico: 33 };
 
+const dbToTask = (r) => ({
+  id: r.id,
+  createdAt: r.created_at_colombia,
+  indicator: r.indicator || '',
+  title: r.title || '',
+  startDate: r.start_date || '',
+  endDate: r.end_date || '',
+  estimatedTime: r.estimated_time ?? 5,
+  type: r.type || 'Operativa',
+  status: r.status || 'Sin iniciar',
+  validationClose: r.validation_close || null,
+  extProgress1: r.ext_progress1 || '',
+  extProgress2: r.ext_progress2 || '',
+  difficulty: r.difficulty ?? 5,
+  strategicValue: r.strategic_value ?? 5,
+  expectedDelivery: r.expected_delivery || '',
+  responsible: r.responsible || '',
+  comments: r.comments || '',
+  progressPercent: r.progress_percent ?? 0,
+  subtasks: r.subtasks || [],
+  dependentTask: r.dependent_task || '',
+  aporteSnapshot: r.aporte_snapshot ?? null,
+});
+
+const taskToDb = (t) => ({
+  id: t.id,
+  created_at_colombia: t.createdAt,
+  indicator: t.indicator,
+  title: t.title,
+  start_date: t.startDate,
+  end_date: t.endDate,
+  estimated_time: t.estimatedTime,
+  type: t.type,
+  status: t.status,
+  validation_close: t.validationClose,
+  ext_progress1: t.extProgress1,
+  ext_progress2: t.extProgress2,
+  difficulty: t.difficulty,
+  strategic_value: t.strategicValue,
+  expected_delivery: t.expectedDelivery,
+  responsible: t.responsible,
+  comments: t.comments,
+  progress_percent: t.progressPercent,
+  subtasks: t.subtasks,
+  dependent_task: t.dependentTask,
+  aporte_snapshot: t.aporteSnapshot,
+});
+
 export default function App() {
-  const saved = loadState();
-  const [tasks, setTasks] = useState(saved?.tasks || []);
-  const [participants, setParticipants] = useState(
-    saved?.participants?.length ? saved.participants : [{ id: 1, name: "Jeferson Marmolejo", isSuperUser: true }]
-  );
-  const [indicators, setIndicators] = useState(saved?.indicators || []);
-  const [nextId, setNextId] = useState(saved?.nextId || 1);
+  const [tasks, setTasks] = useState([]);
+  const [participants, setParticipants] = useState([]);
+  const [indicators, setIndicators] = useState([]);
+  const [nextId, setNextId] = useState(1);
   const [activeTab, setActiveTab] = useState("board");
-  const [currentUserId, setCurrentUserId] = useState(saved?.currentUserId || null);
-  const [weights, setWeights] = useState(saved?.weights || DEFAULT_WEIGHTS);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
   const [configUnlocked, setConfigUnlocked] = useState(false);
   const [configPin, setConfigPin] = useState("");
   const [pinError, setPinError] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, participants, indicators, nextId, currentUserId, weights }));
-    } catch {}
-  }, [tasks, participants, indicators, nextId, currentUserId, weights]);
+    const loadAll = async () => {
+      setLoading(true);
+      try {
+        const [
+          { data: tasksData },
+          { data: partsData },
+          { data: indsData },
+          { data: configData },
+        ] = await Promise.all([
+          supabase.from('tasks').select('*').order('id'),
+          supabase.from('participants').select('*').order('id'),
+          supabase.from('indicators').select('*').order('id'),
+          supabase.from('app_config').select('*'),
+        ]);
+
+        if (tasksData) setTasks(tasksData.map(dbToTask));
+        if (partsData) setParticipants(partsData.map(p => ({
+          id: p.id, name: p.name, isSuperUser: p.is_super_user,
+        })));
+        if (indsData) setIndicators(indsData);
+        if (configData) {
+          configData.forEach((row) => {
+            if (row.key === 'nextId') setNextId(Number(row.value));
+            if (row.key === 'weights') setWeights(row.value);
+            if (row.key === 'currentUserId') setCurrentUserId(row.value === null ? null : Number(row.value));
+          });
+        }
+        if (!partsData?.length) {
+          const defaultUser = { id: 1, name: 'Jeferson Marmolejo', is_super_user: true };
+          await supabase.from('participants').insert(defaultUser);
+          setParticipants([{ id: 1, name: 'Jeferson Marmolejo', isSuperUser: true }]);
+        }
+      } catch (err) {
+        console.error('Error cargando datos:', err);
+      }
+      setLoading(false);
+    };
+    loadAll();
+  }, []);
+
+  const createTask = async (task) => {
+    const { error } = await supabase.from('tasks').insert(taskToDb(task));
+    if (!error) {
+      setTasks(prev => [...prev, task]);
+      await supabase.from('app_config').update({ value: String(task.id + 1) }).eq('key', 'nextId');
+      setNextId(task.id + 1);
+    } else {
+      console.error('Error creando tarea:', error);
+      alert('Error al guardar la tarea: ' + error.message);
+    }
+  };
+
+  const updateTask = async (task) => {
+    const { error } = await supabase.from('tasks').update(taskToDb(task)).eq('id', task.id);
+    if (!error) {
+      setTasks(prev => prev.map(t => t.id === task.id ? task : t));
+    } else {
+      console.error('Error actualizando tarea:', error);
+      alert('Error al actualizar la tarea: ' + error.message);
+    }
+  };
+
+  const deleteTask = async (id) => {
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (!error) {
+      setTasks(prev => prev.filter(t => t.id !== id));
+    } else {
+      console.error('Error eliminando tarea:', error);
+    }
+  };
+
+  const saveParticipants = async (updaterFn) => {
+    const prev = participants;
+    const next = typeof updaterFn === 'function' ? updaterFn(prev) : updaterFn;
+    const toInsert = next.filter(n => !prev.find(p => p.id === n.id));
+    const toUpdate = next.filter(n => prev.find(p => p.id === n.id));
+    const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
+    for (const p of toInsert)
+      await supabase.from('participants').insert({ id: p.id, name: p.name, is_super_user: p.isSuperUser });
+    for (const p of toUpdate)
+      await supabase.from('participants').update({ name: p.name, is_super_user: p.isSuperUser }).eq('id', p.id);
+    for (const p of toDelete)
+      await supabase.from('participants').delete().eq('id', p.id);
+    setParticipants(next);
+  };
+
+  const saveIndicators = async (updaterFn) => {
+    const prev = indicators;
+    const next = typeof updaterFn === 'function' ? updaterFn(prev) : updaterFn;
+    const toInsert = next.filter(n => !prev.find(p => p.id === n.id));
+    const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
+    for (const i of toInsert)
+      await supabase.from('indicators').insert({ id: i.id, name: i.name });
+    for (const i of toDelete)
+      await supabase.from('indicators').delete().eq('id', i.id);
+    setIndicators(next);
+  };
+
+  const saveWeights = async (w) => {
+    setWeights(w);
+    await supabase.from('app_config').update({ value: w }).eq('key', 'weights');
+  };
+
+  const saveCurrentUser = async (id) => {
+    setCurrentUserId(id);
+    await supabase.from('app_config').update({ value: id }).eq('key', 'currentUserId');
+  };
 
   const currentUser = useMemo(() => participants.find((p) => p.id === currentUserId) || null, [participants, currentUserId]);
 
@@ -1460,7 +1604,30 @@ export default function App() {
 
   return (
     <>
-      {showIntro && <IntroScreen onFinish={() => setShowIntro(false)} />}
+      {loading && (
+        <div style={{
+          position: 'fixed', inset: 0, background: '#0d0d1a',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          zIndex: 99999, gap: 20,
+        }}>
+          <div style={{
+            fontSize: 72, fontWeight: 900,
+            background: 'linear-gradient(135deg, #ec6c04, #149cac)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+          }}>W</div>
+          <div style={{ width: 200, height: 2, background: 'rgba(255,255,255,0.1)', borderRadius: 1, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', background: 'linear-gradient(90deg, #ec6c04, #149cac)',
+              borderRadius: 1, animation: 'expandLine 1.5s ease infinite alternate',
+            }} />
+          </div>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', letterSpacing: 4, textTransform: 'uppercase' }}>
+            Conectando base de datos...
+          </span>
+        </div>
+      )}
+      {!loading && showIntro && <IntroScreen onFinish={() => setShowIntro(false)} />}
       <div style={{ opacity: showIntro ? 0 : 1, transition: "opacity 0.6s ease 0.2s" }}>
     <style>{`
       @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -1480,7 +1647,7 @@ export default function App() {
           <select
             style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#ffffff", borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer", outline: "none", fontFamily: "inherit" }}
             value={currentUserId || ""}
-            onChange={(e) => setCurrentUserId(e.target.value ? parseInt(e.target.value) : null)}
+            onChange={(e) => saveCurrentUser(e.target.value ? parseInt(e.target.value) : null)}
           >
             <option value="" style={{ background: "#1a1a2e" }}>— Seleccionar usuario —</option>
             {participants.map((p) => (
@@ -1523,13 +1690,13 @@ export default function App() {
 
       <div style={{ padding: "20px 20px 40px" }}>
         {activeTab === "board" && (
-          <BoardTab tasks={tasks} setTasks={setTasks} participants={participants} indicators={indicators} currentUser={currentUser} nextId={nextId} setNextId={setNextId} weights={weights} />
+          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} nextId={nextId} weights={weights} />
         )}
         {activeTab === "gantt" && <GanttTab tasks={tasks} indicators={indicators} />}
         {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} />}
         {activeTab === "config" && (
           configUnlocked ? (
-            <ConfigTab participants={participants} setParticipants={setParticipants} indicators={indicators} setIndicators={setIndicators} weights={weights} setWeights={setWeights} />
+            <ConfigTab participants={participants} setParticipants={saveParticipants} indicators={indicators} setIndicators={saveIndicators} weights={weights} setWeights={saveWeights} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 340, gap: 16 }}>
               <div style={{ background: "#ffffff", borderRadius: 16, padding: "32px 36px", boxShadow: "0 4px 32px rgba(84,44,156,0.12)", border: "1px solid rgba(84,44,156,0.12)", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, minWidth: 300 }}>

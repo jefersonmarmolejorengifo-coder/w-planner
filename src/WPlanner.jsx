@@ -552,9 +552,9 @@ function GanttTab({ tasks, indicators }) {
   const totalMs = Math.max(1, endMs - startMs);
   const [labelWidth, setLabelWidth] = useState(210);
   const isResizing = useRef(false);
-  const ROW_H = 34;
   const CHART_W = 660;
   const HDR_H = 44;
+  const getRowH = (title) => title && title.length > (labelWidth / 8) ? 50 : 34;
 
   const months = useMemo(() => {
     const ms = [];
@@ -603,7 +603,8 @@ function GanttTab({ tasks, indicators }) {
 
   const ss = { background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-secondary)", borderRadius: 6, padding: "6px 8px", fontSize: 12, cursor: "pointer", outline: "none", fontFamily: "inherit" };
   const si = { ...ss, color: "var(--color-text-primary)" };
-  const svgH = HDR_H + filtered.length * ROW_H + 8;
+  const totalRowsH = filtered.reduce((a, t) => a + getRowH(t.title), 0);
+  const svgH = HDR_H + totalRowsH + 8;
 
   return (
     <div>
@@ -662,12 +663,23 @@ function GanttTab({ tasks, indicators }) {
               </div>
               {filtered.map((t, i) => (
                 <div key={t.id} style={{
-                  height: ROW_H, display: "flex", alignItems: "center", padding: "0 10px",
+                  height: getRowH(t.title), display: "flex", alignItems: "center", padding: "0 10px",
                   borderBottom: "0.5px solid var(--color-border-tertiary)",
                   background: i % 2 === 0 ? "transparent" : "var(--color-background-secondary)",
                 }}>
-                  <span style={{ fontSize: 10, color: "var(--color-text-secondary)", marginRight: 6 }}>#{t.id}</span>
-                  <span style={{ fontSize: 12, color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{t.title}</span>
+                  <span style={{ fontSize: 10, color: "var(--color-text-secondary)", marginRight: 6, flexShrink: 0 }}>#{t.id}</span>
+                  <span style={{
+                    fontSize: 12,
+                    color: "var(--color-text-primary)",
+                    wordBreak: "break-word",
+                    whiteSpace: "normal",
+                    lineHeight: 1.35,
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                    maxWidth: labelWidth - 40,
+                  }}>{t.title}</span>
                 </div>
               ))}
             </div>
@@ -695,35 +707,42 @@ function GanttTab({ tasks, indicators }) {
                 ))}
                 <line x1={0} y1={HDR_H} x2={CHART_W} y2={HDR_H} stroke="var(--color-border-secondary)" strokeWidth={0.5} />
 
-                {filtered.map((t, i) => {
-                  const rx = bx(t.startDate);
-                  const rw = bw(t.startDate, t.endDate);
-                  const ry = HDR_H + i * ROW_H + 6;
-                  const rh = ROW_H - 12;
-                  const col = STATUS_COLORS[t.status] || "#888";
-                  const light = STATUS_LIGHT[t.status] || "#eee";
-                  const prog = Math.min(100, t.progressPercent || 0) / 100;
-                  const showDates = rw > 120;
-                  return (
-                    <g key={t.id}>
-                      {!showDates && (
-                        <title>{`#${t.id} · ${t.title} · inicio: ${fmtFull(t.startDate)} → fin: ${fmtFull(t.endDate)} · progreso: ${Number(t.progressPercent || 0).toFixed(0)}%`}</title>
-                      )}
-                      <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill={col} opacity={0.25} stroke={col} strokeWidth={1.5} />
-                      <rect x={rx} y={ry} width={rw * prog} height={rh} rx={3} fill={col} opacity={1} />
-                      {showDates ? (
-                        <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fontSize={9} fontWeight="700" fill="#ffffff" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
-                          {fmtShort(t.startDate)} → {fmtShort(t.endDate)}
-                        </text>
-                      ) : rw > 30 ? (
-                        <text x={rx + 5} y={ry + rh / 2 + 4} fontSize={9} fontWeight="500" fill={col}>
-                          {Number(t.progressPercent || 0).toFixed(0)}%
-                        </text>
-                      ) : null}
-                      <line x1={0} y1={HDR_H + (i + 1) * ROW_H} x2={CHART_W} y2={HDR_H + (i + 1) * ROW_H} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
-                    </g>
-                  );
-                })}
+                {(() => {
+                  const elements = [];
+                  let yOffset = HDR_H;
+                  for (let i = 0; i < filtered.length; i++) {
+                    const t = filtered[i];
+                    const rowH = getRowH(t.title);
+                    const rx = bx(t.startDate);
+                    const rw = bw(t.startDate, t.endDate);
+                    const ry = yOffset + 6;
+                    const rh = rowH - 12;
+                    const col = STATUS_COLORS[t.status] || "#888";
+                    const prog = Math.min(100, t.progressPercent || 0) / 100;
+                    const showDates = rw > 120;
+                    elements.push(
+                      <g key={t.id}>
+                        {!showDates && (
+                          <title>{`#${t.id} · ${t.title} · inicio: ${fmtFull(t.startDate)} → fin: ${fmtFull(t.endDate)} · progreso: ${Number(t.progressPercent || 0).toFixed(0)}%`}</title>
+                        )}
+                        <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill={col} opacity={0.25} stroke={col} strokeWidth={1.5} />
+                        <rect x={rx} y={ry} width={rw * prog} height={rh} rx={3} fill={col} opacity={1} />
+                        {showDates ? (
+                          <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fontSize={9} fontWeight="700" fill="#ffffff" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
+                            {fmtShort(t.startDate)} → {fmtShort(t.endDate)}
+                          </text>
+                        ) : rw > 30 ? (
+                          <text x={rx + 5} y={ry + rh / 2 + 4} fontSize={9} fontWeight="500" fill={col}>
+                            {Number(t.progressPercent || 0).toFixed(0)}%
+                          </text>
+                        ) : null}
+                        <line x1={0} y1={yOffset + rowH} x2={CHART_W} y2={yOffset + rowH} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
+                      </g>
+                    );
+                    yOffset += rowH;
+                  }
+                  return elements;
+                })()}
 
                 {todayX >= 0 && todayX <= CHART_W && (
                   <g>

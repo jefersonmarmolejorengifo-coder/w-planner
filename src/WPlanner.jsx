@@ -685,10 +685,10 @@ function GanttTab({ tasks, indicators }) {
                       {!showDates && (
                         <title>{`#${t.id} · ${t.title} · inicio: ${fmtFull(t.startDate)} → fin: ${fmtFull(t.endDate)} · progreso: ${Number(t.progressPercent || 0).toFixed(0)}%`}</title>
                       )}
-                      <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill={light} stroke={col} strokeWidth={1} />
-                      <rect x={rx} y={ry} width={rw * prog} height={rh} rx={3} fill={col} opacity={0.5} />
+                      <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill={col} opacity={0.25} stroke={col} strokeWidth={1.5} />
+                      <rect x={rx} y={ry} width={rw * prog} height={rh} rx={3} fill={col} opacity={1} />
                       {showDates ? (
-                        <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fontSize={9} fontWeight="600" fill="#ffffff">
+                        <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fontSize={9} fontWeight="700" fill="#ffffff" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
                           {fmtShort(t.startDate)} → {fmtShort(t.endDate)}
                         </text>
                       ) : rw > 30 ? (

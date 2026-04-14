@@ -1494,6 +1494,65 @@ export default function App() {
     loadAll();
   }, []);
 
+  // ── Suscripciones Realtime ─────────────────────────────────
+  useEffect(() => {
+    const channel = supabase
+      .channel('w-planner-realtime')
+
+      // TASKS
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' }, (payload) => {
+        setTasks(prev => {
+          if (prev.find(t => t.id === payload.new.id)) return prev;
+          return [...prev, dbToTask(payload.new)].sort((a, b) => a.id - b.id);
+        });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' }, (payload) => {
+        setTasks(prev => prev.map(t => t.id === payload.new.id ? dbToTask(payload.new) : t));
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' }, (payload) => {
+        setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+      })
+
+      // PARTICIPANTS
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants' }, (payload) => {
+        setParticipants(prev => {
+          if (prev.find(p => p.id === payload.new.id)) return prev;
+          return [...prev, { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user }];
+        });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participants' }, (payload) => {
+        setParticipants(prev => prev.map(p =>
+          p.id === payload.new.id ? { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user } : p
+        ));
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'participants' }, (payload) => {
+        setParticipants(prev => prev.filter(p => p.id !== payload.old.id));
+      })
+
+      // INDICATORS
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'indicators' }, (payload) => {
+        setIndicators(prev => {
+          if (prev.find(i => i.id === payload.new.id)) return prev;
+          return [...prev, { id: payload.new.id, name: payload.new.name }];
+        });
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'indicators' }, (payload) => {
+        setIndicators(prev => prev.filter(i => i.id !== payload.old.id));
+      })
+
+      // APP_CONFIG
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_config' }, (payload) => {
+        const { key, value } = payload.new;
+        if (key === 'nextId') setNextId(Number(value));
+        if (key === 'weights') setWeights(value);
+        if (key === 'currentUserId') setCurrentUserId(value === null ? null : Number(value));
+      })
+
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   const createTask = async (task) => {
     const { error } = await supabase.from('tasks').insert(taskToDb(task));
     if (!error) {

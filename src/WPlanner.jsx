@@ -31,6 +31,7 @@ const TIPOS = ["Administrativa","Operativa","Apadrinamiento","Seguimiento","Crea
 const ESTADOS = ["No programada","Sin iniciar","En proceso","Bloqueada","En pausa","Cancelada","Finalizada"];
 const CLOSE_STATES = ["Finalizada","Cancelada"];
 const STORAGE_KEY = "w_planner_v1";
+const CONFIG_PIN = "020419*";
 
 const getColombiaNow = () => {
   const d = new Date();
@@ -552,7 +553,7 @@ function GanttTab({ tasks, indicators }) {
   const ROW_H = 34;
   const LABEL_W = 210;
   const CHART_W = 660;
-  const HDR_H = 26;
+  const HDR_H = 44;
 
   const months = useMemo(() => {
     const ms = [];
@@ -567,6 +568,28 @@ function GanttTab({ tasks, indicators }) {
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     }
     return ms;
+  }, [dateFrom, dateTo, startMs, endMs, totalMs]);
+
+  const fmtShort = (d) => { if (!d) return ""; const [, m, day] = d.split("-"); return `${day}/${m}`; };
+  const fmtFull  = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${day}/${m}/${y}`; };
+
+  const days = useMemo(() => {
+    const result = [];
+    let cur = new Date(dateFrom);
+    const end = new Date(dateTo);
+    while (cur <= end) {
+      const dayMs = cur.getTime();
+      const nextMs = dayMs + 86400000;
+      const x = ((dayMs - startMs) / totalMs) * CHART_W;
+      const w = ((nextMs - dayMs) / totalMs) * CHART_W;
+      const dow = cur.getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      const weekNum = Math.floor((cur.getTime() - new Date(cur.getFullYear(), 0, 1).getTime()) / (7 * 86400000));
+      const fill = isWeekend ? "#fff3ea" : weekNum % 2 === 0 ? "#fafafa" : "#f4f0fb";
+      result.push({ label: cur.getDate(), x, w, fill });
+      cur = new Date(nextMs);
+    }
+    return result;
   }, [dateFrom, dateTo, startMs, endMs, totalMs]);
 
   const todayX = ((new Date(today).getTime() - startMs) / totalMs) * CHART_W;
@@ -627,11 +650,23 @@ function GanttTab({ tasks, indicators }) {
 
             <div style={{ flex: 1, overflowX: "auto" }}>
               <svg width={CHART_W} height={svgH} style={{ display: "block" }}>
+                {/* ── Nivel superior: meses (0–22 px) ── */}
                 {months.map((m, i) => (
                   <g key={i}>
-                    <rect x={m.x} y={0} width={m.w} height={HDR_H} fill={i % 2 === 0 ? "#fafafa" : "#f4f0fb"} />
-                    <text x={m.x + m.w / 2} y={17} textAnchor="middle" fontSize={10} fontWeight="600" fill="#542c9c">{m.label}</text>
-                    <line x1={m.x} y1={0} x2={m.x} y2={svgH} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
+                    <rect x={m.x} y={0} width={m.w} height={22} fill={i % 2 === 0 ? "#fafafa" : "#f4f0fb"} />
+                    <text x={m.x + m.w / 2} y={14} textAnchor="middle" fontSize={10} fontWeight="600" fill="#542c9c">{m.label}</text>
+                    <line x1={m.x} y1={0} x2={m.x} y2={22} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
+                  </g>
+                ))}
+                <line x1={0} y1={22} x2={CHART_W} y2={22} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
+                {/* ── Nivel inferior: días (22–44 px) ── */}
+                {days.map((d, i) => (
+                  <g key={i}>
+                    <rect x={d.x} y={22} width={d.w} height={22} fill={d.fill} />
+                    {d.w > 14 && (
+                      <text x={d.x + d.w / 2} y={36} textAnchor="middle" fontSize={8} fill="#888888">{d.label}</text>
+                    )}
+                    <line x1={d.x} y1={22} x2={d.x} y2={svgH} stroke="var(--color-border-tertiary)" strokeWidth={0.3} opacity={0.4} />
                   </g>
                 ))}
                 <line x1={0} y1={HDR_H} x2={CHART_W} y2={HDR_H} stroke="var(--color-border-secondary)" strokeWidth={0.5} />
@@ -644,15 +679,23 @@ function GanttTab({ tasks, indicators }) {
                   const col = STATUS_COLORS[t.status] || "#888";
                   const light = STATUS_LIGHT[t.status] || "#eee";
                   const prog = Math.min(100, t.progressPercent || 0) / 100;
+                  const showDates = rw > 120;
                   return (
                     <g key={t.id}>
+                      {!showDates && (
+                        <title>{`#${t.id} · ${t.title} · inicio: ${fmtFull(t.startDate)} → fin: ${fmtFull(t.endDate)} · progreso: ${Number(t.progressPercent || 0).toFixed(0)}%`}</title>
+                      )}
                       <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill={light} stroke={col} strokeWidth={1} />
                       <rect x={rx} y={ry} width={rw * prog} height={rh} rx={3} fill={col} opacity={0.5} />
-                      {rw > 30 && (
+                      {showDates ? (
+                        <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fontSize={9} fontWeight="600" fill="#ffffff">
+                          {fmtShort(t.startDate)} → {fmtShort(t.endDate)}
+                        </text>
+                      ) : rw > 30 ? (
                         <text x={rx + 5} y={ry + rh / 2 + 4} fontSize={9} fontWeight="500" fill={col}>
                           {Number(t.progressPercent || 0).toFixed(0)}%
                         </text>
-                      )}
+                      ) : null}
                       <line x1={0} y1={HDR_H + (i + 1) * ROW_H} x2={CHART_W} y2={HDR_H + (i + 1) * ROW_H} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
                     </g>
                   );
@@ -1117,6 +1160,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(saved?.currentUserId || null);
   const [weights, setWeights] = useState(saved?.weights || DEFAULT_WEIGHTS);
+  const [configUnlocked, setConfigUnlocked] = useState(false);
+  const [configPin, setConfigPin] = useState("");
+  const [pinError, setPinError] = useState(false);
 
   useEffect(() => {
     try {
@@ -1212,7 +1258,7 @@ export default function App() {
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => { if (tab.id !== "config") setConfigUnlocked(false); setActiveTab(tab.id); }}
             style={{
               background: "none", border: "none",
               borderBottom: activeTab === tab.id ? "2.5px solid #542c9c" : "2.5px solid transparent",
@@ -1232,8 +1278,50 @@ export default function App() {
         {activeTab === "gantt" && <GanttTab tasks={tasks} indicators={indicators} />}
         {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} />}
         {activeTab === "config" && (
-          <ConfigTab participants={participants} setParticipants={setParticipants} indicators={indicators} setIndicators={setIndicators} weights={weights} setWeights={setWeights} />
+          configUnlocked ? (
+            <ConfigTab participants={participants} setParticipants={setParticipants} indicators={indicators} setIndicators={setIndicators} weights={weights} setWeights={setWeights} />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 340, gap: 16 }}>
+              <div style={{ background: "#ffffff", borderRadius: 16, padding: "32px 36px", boxShadow: "0 4px 32px rgba(84,44,156,0.12)", border: "1px solid rgba(84,44,156,0.12)", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, minWidth: 300 }}>
+                <div style={{ width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg, #542c9c, #6e3ebf)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: "#fff" }}>🔒</div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#542c9c", marginBottom: 4 }}>Acceso restringido</div>
+                  <div style={{ fontSize: 12, color: "#969696" }}>Ingresa la clave para acceder a Configuración</div>
+                </div>
+                <input
+                  type="password"
+                  placeholder="Clave de acceso"
+                  value={configPin}
+                  onChange={(e) => { setConfigPin(e.target.value); setPinError(false); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      if (configPin === CONFIG_PIN) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
+                      else { setPinError(true); setConfigPin(""); }
+                    }
+                  }}
+                  style={{ width: "100%", border: pinError ? "1.5px solid #c0392b" : "1.5px solid #e0e0e0", borderRadius: 8, padding: "10px 14px", fontSize: 14, textAlign: "center", letterSpacing: "0.2em", outline: "none", background: pinError ? "#fde8e8" : "#fafafa", color: "#2d2d2d", fontFamily: "inherit", transition: "border-color 0.2s" }}
+                  autoFocus
+                />
+                {pinError && (
+                  <div style={{ fontSize: 12, color: "#c0392b", fontWeight: 500 }}>Clave incorrecta. Intenta de nuevo.</div>
+                )}
+                <button
+                  onClick={() => {
+                    if (configPin === CONFIG_PIN) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
+                    else { setPinError(true); setConfigPin(""); }
+                  }}
+                  style={{ width: "100%", background: "linear-gradient(135deg, #542c9c, #6e3ebf)", color: "#ffffff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 3px 12px rgba(84,44,156,0.3)" }}
+                >
+                  Ingresar
+                </button>
+              </div>
+            </div>
+          )
         )}
+      </div>
+      <div style={{ position: "fixed", bottom: 12, left: 16, display: "flex", flexDirection: "column", gap: 1, zIndex: 50 }}>
+        <span style={{ fontSize: 10, color: "#969696", fontWeight: 400, letterSpacing: "0.03em" }}>Desarrollado por Jeferson Marmolejo</span>
+        <span style={{ fontSize: 9, color: "#b0b0b0", letterSpacing: "0.05em" }}>W Planner v1.0.0</span>
       </div>
     </div>
     </>

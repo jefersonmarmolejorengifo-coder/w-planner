@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import * as XLSX from "xlsx";
 
 const STATUS_COLORS = {
@@ -550,8 +550,9 @@ function GanttTab({ tasks, indicators }) {
   const startMs = new Date(dateFrom).getTime();
   const endMs = new Date(dateTo).getTime();
   const totalMs = Math.max(1, endMs - startMs);
+  const [labelWidth, setLabelWidth] = useState(210);
+  const isResizing = useRef(false);
   const ROW_H = 34;
-  const LABEL_W = 210;
   const CHART_W = 660;
   const HDR_H = 44;
 
@@ -631,8 +632,31 @@ function GanttTab({ tasks, indicators }) {
         </div>
       ) : (
         <div style={{ overflowX: "auto", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 10, background: "var(--color-background-primary)" }}>
-          <div style={{ display: "flex", minWidth: LABEL_W + CHART_W }}>
-            <div style={{ width: LABEL_W, flexShrink: 0, borderRight: "0.5px solid var(--color-border-tertiary)" }}>
+          <div style={{ display: "flex", minWidth: labelWidth + CHART_W }}>
+            <div style={{ position: "relative", width: labelWidth, flexShrink: 0, borderRight: "0.5px solid var(--color-border-tertiary)" }}>
+              <div
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  isResizing.current = true;
+                  const startX = e.clientX;
+                  const startW = labelWidth;
+                  const onMove = (ev) => {
+                    if (!isResizing.current) return;
+                    const newW = Math.max(120, Math.min(400, startW + ev.clientX - startX));
+                    setLabelWidth(newW);
+                  };
+                  const onUp = () => {
+                    isResizing.current = false;
+                    window.removeEventListener("mousemove", onMove);
+                    window.removeEventListener("mouseup", onUp);
+                  };
+                  window.addEventListener("mousemove", onMove);
+                  window.addEventListener("mouseup", onUp);
+                }}
+                style={{ position: "absolute", top: 0, right: 0, width: 6, height: "100%", cursor: "col-resize", background: "transparent", zIndex: 10, transition: "background 0.15s" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(236,108,4,0.35)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              />
               <div style={{ height: HDR_H, borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "6px 10px" }}>
                 <span style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tarea</span>
               </div>

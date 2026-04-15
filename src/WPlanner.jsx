@@ -169,10 +169,6 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
       <F label="ID" half><input style={readonlyInp} readOnly value={task.id ?? "(auto)"} /></F>
       <F label="Fecha de creación" half><input style={readonlyInp} readOnly value={task.createdAt} /></F>
 
-      {task.finalizedAt && (
-        <F label="Fecha de finalización"><input style={readonlyInp} readOnly value={task.finalizedAt} /></F>
-      )}
-
       {aporteDisplay !== null && (
         <div style={{ gridColumn: "span 2", background: "linear-gradient(135deg, #ec6c04 0%, #149cac 100%)", backgroundSize: "200% auto", animation: "shimmer 3s linear infinite", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
           <div>
@@ -218,6 +214,12 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
               {ESTADOS.map((s) => <option key={s}>{s}</option>)}
             </select>
           </F>
+
+          {task.finalizedAt && (
+            <F label="Fecha de finalización" half>
+              <input style={readonlyInp} readOnly value={task.finalizedAt || "—"} />
+            </F>
+          )}
 
           {isClose && (
             <F label={`Validación de cierre${!isSuperUser ? " (sólo super usuario)" : ""}`} half>
@@ -291,7 +293,7 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
                     type="checkbox"
                     checked={st.done}
                     onChange={() => toggleSubtask(i)}
-                    style={{ width: 16, height: 16, accentColor: "#542c9c", cursor: "pointer", flexShrink: 0 }}
+                    style={{ width: 16, height: 16, accentColor: "#ec6c04", cursor: "pointer", flexShrink: 0 }}
                   />
                   <input
                     style={{ ...inp, flex: 1, textDecoration: st.done ? "line-through" : "none", color: st.done ? "#969696" : undefined }}
@@ -1104,62 +1106,87 @@ function WeightCalculator({ weights, setWeights }) {
 }
 
 // ─── ConfigTab ─────────────────────────────────────────────
-function ConfigTab({ participants, setParticipants, indicators, setIndicators, weights, setWeights }) {
+function ConfigTab({ participants, setParticipants, indicators, setIndicators, weights, setWeights, tasks }) {
   const [newP, setNewP] = useState("");
   const [newI, setNewI] = useState("");
 
   // Email config state
   const [emails, setEmails] = useState([]);
   const [newEmail, setNewEmail] = useState("");
-  const [sendDay, setSendDay] = useState("lunes");
+  const [sendDay, setSendDay] = useState("monday");
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailMsg, setEmailMsg] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [reportMsg, setReportMsg] = useState("");
 
   useEffect(() => {
-    supabase.from('email_config').select('*').then(({ data }) => {
-      if (data && data.length > 0) {
-        const row = data[0];
-        setEmails(row.emails || []);
-        setSendDay(row.send_day || "lunes");
-      }
-    });
+    supabase.from('email_config').select('*').eq('id', 1).single()
+      .then(({ data }) => {
+        if (data) {
+          setEmails(data.emails || []);
+          setSendDay(data.send_day || 'monday');
+        }
+      });
   }, []);
 
-  const saveEmailConfig = async (updatedEmails, updatedDay) => {
+  const saveEmailConfig = async () => {
     setEmailSaving(true);
-    setEmailMsg("");
-    const { data } = await supabase.from('email_config').select('id').limit(1);
-    const payload = { emails: updatedEmails, send_day: updatedDay };
-    let error;
-    if (data && data.length > 0) {
-      ({ error } = await supabase.from('email_config').update(payload).eq('id', data[0].id));
-    } else {
-      ({ error } = await supabase.from('email_config').insert(payload));
-    }
+    await supabase.from('email_config')
+      .update({ emails, send_day: sendDay })
+      .eq('id', 1);
     setEmailSaving(false);
-    setEmailMsg(error ? "Error al guardar" : "Guardado correctamente");
+    setEmailMsg("Configuración guardada ✓");
     setTimeout(() => setEmailMsg(""), 3000);
   };
 
-  const addEmail = () => {
-    const e = newEmail.trim().toLowerCase();
-    if (!e || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return;
-    if (emails.includes(e)) return;
-    const updated = [...emails, e];
-    setEmails(updated);
-    setNewEmail("");
-    saveEmailConfig(updated, sendDay);
-  };
+  const generateAndSend = async () => {
+    if (!emails.length) {
+      setReportMsg("Agrega al menos un correo antes de enviar.");
+      setTimeout(() => setReportMsg(""), 4000);
+      return;
+    }
+    setGenerating(true);
+    setReportMsg("Generando reporte con IA... esto puede tomar 30 segundos.");
 
-  const removeEmail = (e) => {
-    const updated = emails.filter(x => x !== e);
-    setEmails(updated);
-    saveEmailConfig(updated, sendDay);
-  };
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const diffToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const fmt = (d) => d.toISOString().split("T")[0];
+    const weekStart = fmt(monday);
+    const weekEnd = fmt(sunday);
 
-  const updateDay = (day) => {
-    setSendDay(day);
-    saveEmailConfig(emails, day);
+    try {
+      const genRes = await fetch('/api/generate-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks, participants, indicators, weekStart, weekEnd }),
+      });
+      const { html, error: genErr } = await genRes.json();
+      if (genErr) throw new Error(genErr);
+
+      setReportMsg("Reporte generado. Enviando correos...");
+
+      const sendRes = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails, html, weekStart, weekEnd }),
+      });
+      const { error: sendErr } = await sendRes.json();
+      if (sendErr) throw new Error(sendErr);
+
+      await supabase.from('email_config')
+        .update({ last_sent: new Date().toISOString() })
+        .eq('id', 1);
+
+      setReportMsg("✓ Reporte enviado a " + emails.length + " correo(s)");
+    } catch (err) {
+      setReportMsg("Error: " + err.message);
+    }
+    setGenerating(false);
   };
 
   const addP = () => {
@@ -1261,48 +1288,104 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, w
         <WeightCalculator weights={weights} setWeights={setWeights} />
       </Sec>
 
-      <Sec title="📧 Reporte semanal por correo">
-        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 12 }}>
-          Configura los correos que recibirán el reporte semanal de tareas.
+      <div style={{ background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)", border: "1px solid rgba(84,44,156,0.1)" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#542c9c", borderBottom: "2px solid #ede8f8", paddingBottom: 10, marginBottom: 16 }}>
+          📧 Reporte semanal por correo
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <input
-            style={si}
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addEmail()}
-            placeholder="correo@ejemplo.com"
-            type="email"
-          />
-          <button onClick={addEmail} style={addBtn}>Agregar</button>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+            Día de envío automático
+          </label>
+          <select value={sendDay} onChange={(e) => setSendDay(e.target.value)} style={{ ...si, maxWidth: 200 }}>
+            <option value="monday">Lunes</option>
+            <option value="tuesday">Martes</option>
+            <option value="wednesday">Miércoles</option>
+            <option value="thursday">Jueves</option>
+            <option value="friday">Viernes</option>
+          </select>
         </div>
-        {emails.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", textAlign: "center" }}>No hay correos configurados.</p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
-            {emails.map((e) => (
-              <div key={e} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "#fafafa", borderRadius: 8, border: "1px solid rgba(84,44,156,0.08)" }}>
-                <span style={{ fontSize: 13, flex: 1, color: "var(--color-text-primary)" }}>✉️ {e}</span>
-                <button onClick={() => removeEmail(e)} style={{ background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 13 }}>✕</button>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
+            Destinatarios ({emails.length}/10)
+          </label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+            {emails.map((email, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#fafafa", border: "1px solid #f0f0f0", borderRadius: 8 }}>
+                <span style={{ fontSize: 13, color: "#2d2d2d", flex: 1 }}>📬 {email}</span>
+                <button onClick={() => setEmails(prev => prev.filter((_, idx) => idx !== i))} style={{ background: "#fde8e8", border: "1px solid #f5c6c6", color: "#c0392b", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 13 }}>✕</button>
               </div>
             ))}
           </div>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-          <span style={{ fontSize: 13, color: "var(--color-text-primary)", fontWeight: 500 }}>Día de envío:</span>
-          <select
-            value={sendDay}
-            onChange={(e) => updateDay(e.target.value)}
-            style={{ ...si, flex: "0 0 auto", minWidth: 130 }}
-          >
-            {["lunes","martes","miércoles","jueves","viernes","sábado","domingo"].map(d => (
-              <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>
-            ))}
-          </select>
-          {emailSaving && <span style={{ fontSize: 12, color: "#542c9c" }}>Guardando...</span>}
-          {emailMsg && <span style={{ fontSize: 12, color: emailMsg.startsWith("Error") ? "var(--color-text-danger)" : "var(--color-text-success)" }}>{emailMsg}</span>}
+          {emails.length < 10 && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="email" style={{ ...si, flex: 1 }}
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newEmail.includes("@")) {
+                    if (!emails.includes(newEmail)) setEmails(p => [...p, newEmail]);
+                    setNewEmail("");
+                  }
+                }}
+                placeholder="correo@ejemplo.com" />
+              <button
+                onClick={() => {
+                  if (newEmail.includes("@") && !emails.includes(newEmail)) {
+                    setEmails(p => [...p, newEmail]);
+                    setNewEmail("");
+                  }
+                }}
+                style={{ background: "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px", cursor: "pointer", fontWeight: 700, fontSize: 13, boxShadow: "0 2px 10px rgba(84,44,156,0.3)" }}>
+                Agregar
+              </button>
+            </div>
+          )}
         </div>
-      </Sec>
+
+        <button onClick={saveEmailConfig} disabled={emailSaving}
+          style={{ background: "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", cursor: "pointer", fontWeight: 700, fontSize: 13, marginBottom: 8, boxShadow: "0 2px 10px rgba(84,44,156,0.3)" }}>
+          {emailSaving ? "Guardando..." : "Guardar configuración"}
+        </button>
+
+        {emailMsg && (
+          <div style={{ fontSize: 12, color: "#27ae60", marginBottom: 12, fontWeight: 500 }}>
+            {emailMsg}
+          </div>
+        )}
+
+        <div style={{ height: 1, background: "#f0f0f0", margin: "16px 0" }} />
+
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "#969696", marginBottom: 10, lineHeight: 1.5 }}>
+            El reporte incluye las tareas con fecha de inicio o fin dentro de la semana actual.
+            Claude IA analiza cada tarea, usuario y resultado en lenguaje natural.
+          </div>
+          <button onClick={generateAndSend} disabled={generating}
+            style={{
+              background: generating ? "#e0e0e0" : "linear-gradient(135deg,#ec6c04,#f07d1e)",
+              color: "#fff", border: "none", borderRadius: 8,
+              padding: "11px 22px", cursor: generating ? "not-allowed" : "pointer",
+              fontWeight: 700, fontSize: 14, width: "100%",
+              boxShadow: generating ? "none" : "0 3px 14px rgba(236,108,4,0.35)",
+              transition: "all 0.2s",
+            }}>
+            {generating ? "⏳ Generando reporte..." : "🤖 Generar y enviar reporte IA"}
+          </button>
+        </div>
+
+        {reportMsg && (
+          <div style={{
+            fontSize: 12, marginTop: 8, padding: "10px 14px", borderRadius: 8,
+            background: reportMsg.startsWith("Error") ? "#fde8e8" : "#e8f8ee",
+            color: reportMsg.startsWith("Error") ? "#c0392b" : "#27ae60",
+            fontWeight: 500, lineHeight: 1.5,
+          }}>
+            {reportMsg}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1778,7 +1861,7 @@ export default function App() {
       "Responsable": t.responsible,
       "Comentarios": t.comments,
       "Porcentaje de avance": `${Number(t.progressPercent || 0).toFixed(1)}%`,
-      "Subtareas": t.subtasks.map(s => `[${s.done ? 'x' : ' '}] ${s.text}`).join(" | "),
+      "Subtareas": t.subtasks.map(s => (s.done ? "✓ " : "○ ") + (s.text || s)).join(" | "),
       "Tarea dependiente (ID)": t.dependentTask || "",
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -1888,7 +1971,7 @@ export default function App() {
         {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} />}
         {activeTab === "config" && (
           configUnlocked ? (
-            <ConfigTab participants={participants} setParticipants={saveParticipants} indicators={indicators} setIndicators={saveIndicators} weights={weights} setWeights={saveWeights} />
+            <ConfigTab participants={participants} setParticipants={saveParticipants} indicators={indicators} setIndicators={saveIndicators} weights={weights} setWeights={saveWeights} tasks={tasks} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 340, gap: 16 }}>
               <div style={{ background: "#ffffff", borderRadius: 16, padding: "32px 36px", boxShadow: "0 4px 32px rgba(84,44,156,0.12)", border: "1px solid rgba(84,44,156,0.12)", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, minWidth: 300 }}>

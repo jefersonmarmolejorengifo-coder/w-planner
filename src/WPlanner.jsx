@@ -562,25 +562,33 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
 
   const openNew = async () => {
     try {
-      const { data, error } = await supabase.rpc('claim_task_id');
+      // Intentar reservar ID atómicamente en el servidor
+      const { data: claimedId, error } = await supabase.rpc('claim_task_id');
+      
       if (error) {
-        console.error('Error reservando ID:', error);
-        alert('No se pudo iniciar la tarea. Intenta de nuevo.');
+        console.error('[openNew] Error RPC claim_task_id:', error);
+        // Fallback: usar nextId local si el RPC falla
+        console.warn('[openNew] Usando fallback con nextId local:', nextId);
+        setForm(emptyTask(nextId));
+        setModal("new");
         return;
       }
-      const claimedId = Array.isArray(data)
-        ? (data[0]?.claim_task_id ?? data[0])
-        : data;
-      if (claimedId == null) {
-        console.error('ID reservado inválido:', data);
-        alert('No se pudo iniciar la tarea. Intenta de nuevo.');
+      
+      if (claimedId === null || claimedId === undefined) {
+        console.error('[openNew] RPC retornó null, usando fallback:', nextId);
+        setForm(emptyTask(nextId));
+        setModal("new");
         return;
       }
+      
+      console.info('[openNew] ID reservado exitosamente:', claimedId);
       setForm(emptyTask(claimedId));
-      setModal('new');
+      setModal("new");
     } catch (err) {
-      console.error('Error inesperado al reservar ID:', err);
-      alert('Error inesperado. Intenta de nuevo.');
+      console.error('[openNew] Error inesperado:', err);
+      // Fallback seguro
+      setForm(emptyTask(nextId));
+      setModal("new");
     }
   };
   const openEdit = (t) => { setForm({ ...t }); setModal(t.id); };

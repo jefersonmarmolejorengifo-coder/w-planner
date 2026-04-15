@@ -24,7 +24,7 @@ const STATUS_COLOR = {
   "Cancelada":     "#969696",
 };
 
-export function generateReport(tasks, generatedAt) {
+function generateReport(tasks, generatedAt) {
   const date = generatedAt || new Date().toLocaleString("es-CO", {
     timeZone: "America/Bogota",
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -158,9 +158,9 @@ export function generateReport(tasks, generatedAt) {
 }
 
 // ── Vercel serverless handler ────────────────────────────────
-import { createClient } from "@supabase/supabase-js";
+const { createClient } = require("@supabase/supabase-js");
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const supabase = createClient(
     process.env.VITE_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -172,4 +172,6 @@ export default async function handler(req, res) {
   const report = generateReport(tasks || []);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   return res.status(200).send(report.html);
-}
+};
+
+module.exports.generateReport = generateReport;

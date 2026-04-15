@@ -21,8 +21,8 @@
  * (Envía los lunes a las 8 AM UTC; ajusta según send_day en email_config)
  */
 
-import { createClient } from "@supabase/supabase-js";
-import { generateReport } from "./generate-report.js";
+const { createClient } = require("@supabase/supabase-js");
+const { generateReport } = require("./generate-report.js");
 
 const DAYS_ES = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
 
@@ -61,7 +61,7 @@ async function sendViaResend({ to, subject, html, from }) {
   return data;
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== "POST" && req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }

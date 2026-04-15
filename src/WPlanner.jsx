@@ -562,9 +562,17 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
 
   const openNew = async () => {
     try {
-      const { data: claimedId, error } = await supabase.rpc('claim_task_id');
+      const { data, error } = await supabase.rpc('claim_task_id');
       if (error) {
         console.error('Error reservando ID:', error);
+        alert('No se pudo iniciar la tarea. Intenta de nuevo.');
+        return;
+      }
+      const claimedId = Array.isArray(data)
+        ? (data[0]?.claim_task_id ?? data[0])
+        : data;
+      if (claimedId == null) {
+        console.error('ID reservado inválido:', data);
         alert('No se pudo iniciar la tarea. Intenta de nuevo.');
         return;
       }

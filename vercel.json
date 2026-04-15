@@ -1,13 +1,7 @@
-{
-  "crons": [
-    {
-      "path": "/api/send-report",
-      "schedule": "0 13 * * 1"
-    }
-  ],
-  "functions": {
-    "api/*.cjs": {
-      "maxDuration": 60
-    }
-  }
+﻿{
+  " functions\: {
+ \api/*.js\: {
+ \maxDuration\: 60
+ }
+ }
 }

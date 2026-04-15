@@ -4,6 +4,8 @@
  * Se puede usar como endpoint GET o importar generateReport() en send-report.js.
  */
 
+import { createClient } from "@supabase/supabase-js";
+
 const STATUS_ORDER = [
   "En proceso",
   "Bloqueada",
@@ -158,9 +160,8 @@ function generateReport(tasks, generatedAt) {
 }
 
 // ── Vercel serverless handler ────────────────────────────────
-const { createClient } = require("@supabase/supabase-js");
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   const supabase = createClient(
     process.env.VITE_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -174,4 +175,4 @@ module.exports = async function handler(req, res) {
   return res.status(200).send(report.html);
 };
 
-module.exports.generateReport = generateReport;
+export { generateReport };

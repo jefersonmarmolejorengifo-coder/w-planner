@@ -1160,7 +1160,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, w
     const weekEnd = fmt(sunday);
 
     try {
-      const genRes = await fetch('/api/generate-report', {
+      const genRes = await fetch('/api/generate-report.cjs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tasks, participants, indicators, weekStart, weekEnd }),
@@ -1170,7 +1170,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, w
 
       setReportMsg("Reporte generado. Enviando correos...");
 
-      const sendRes = await fetch('/api/send-report', {
+      const sendRes = await fetch('/api/send-report.cjs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emails, html, weekStart, weekEnd }),

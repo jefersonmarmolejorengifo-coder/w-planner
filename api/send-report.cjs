@@ -22,7 +22,7 @@
  */
 
 const { createClient } = require("@supabase/supabase-js");
-const { generateReport } = require("./generate-report.js");
+const { generateReport } = require("./generate-report.cjs");
 
 const DAYS_ES = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
 

@@ -996,12 +996,12 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
     });
     const avgTimeByType = {};
     Object.entries(timeByType).forEach(([tp, arr]) => {
-      avgTimeByType[tp] = arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) : null;
+      avgTimeByType[tp] = arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2) : null;
     });
 
     const eligible = filtered.filter((t) => t.status !== "Cancelada" && t.status !== "No programada");
     const finalizadas = filtered.filter((t) => t.status === "Finalizada");
-    const completionPct = eligible.length > 0 ? +((finalizadas.length / eligible.length) * 100).toFixed(1) : 0;
+    const completionPct = eligible.length > 0 ? +((finalizadas.length / eligible.length) * 100).toFixed(2) : 0;
 
     return { byStatus, byType, byIndicator, ptsByIndicator, totalPts, avgTimeByType, completionPct, finalizadas: finalizadas.length, eligible: eligible.length };
   }, [filtered]);
@@ -1056,7 +1056,7 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
             <MetCard label="Total tareas" value={filtered.length} />
             <MetCard label="Finalizadas" value={metrics.finalizadas} color="#3B6D11" />
-            <MetCard label="Valor de Aporte total" value={metrics.totalPts} color="#BA7517" />
+            <MetCard label="Valor de Aporte total" value={Number(metrics.totalPts).toFixed(2)} color="#BA7517" />
           </div>
 
           <Sec title="Tareas por estado">
@@ -1082,7 +1082,7 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
                   <span style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{ind}</span>
                   <div style={{ display: "flex", gap: 20 }}>
                     <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{cnt} tareas</span>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "#BA7517" }}>{metrics.ptsByIndicator[ind] || 0} aporte</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#BA7517" }}>{Number(metrics.ptsByIndicator[ind] || 0).toFixed(2)} aporte</span>
                   </div>
                 </div>
               ))}
@@ -1094,7 +1094,7 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
               {(taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES).map((tp) => metrics.avgTimeByType[tp] !== null && (
                 <div key={tp} style={{ padding: "8px 10px", background: "var(--color-background-secondary)", borderRadius: 6, borderLeft: `3px solid ${TYPE_COLORS[tp]}` }}>
                   <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>{tp}</div>
-                  <div style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)" }}>{metrics.avgTimeByType[tp]} días</div>
+                  <div style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)" }}>{Number(metrics.avgTimeByType[tp]).toFixed(2)} días</div>
                 </div>
               ))}
             </div>

@@ -229,68 +229,86 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
       {!isOtra && (
         <>
           <F label="Indicador que impacta">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto', padding: '4px 0' }}>
-              {indicators.length === 0 && (
-                <span style={{ color: '#9ca3af', fontSize: 13 }}>
-                  No hay indicadores configurados
-                </span>
-              )}
-              {indicators.map((ind) => {
-                const selected = task.indicators || [];
-                const isSelected = selected.some((s) => s.name === ind.name);
-                const isPrimary = selected.length > 0 && selected[0]?.name === ind.name;
-                return (
-                  <label
-                    key={ind.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      cursor: 'pointer',
-                      padding: '4px 8px',
-                      borderRadius: 6,
-                      background: isPrimary && isSelected ? '#fef3c7' : isSelected ? '#f0fdf4' : 'transparent',
-                      border: isPrimary && isSelected ? '1px solid #f59e0b' : isSelected ? '1px solid #86efac' : '1px solid transparent',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={(e) => {
-                        let newIndicators = [...(task.indicators || [])];
-                        if (e.target.checked) {
-                          newIndicators.push({
-                            name: ind.name,
-                            isPrimary: newIndicators.length === 0,
-                          });
-                        } else {
-                          newIndicators = newIndicators.filter((s) => s.name !== ind.name);
-                          if (newIndicators.length > 0 && !newIndicators.some((s) => s.isPrimary)) {
-                            newIndicators[0] = { ...newIndicators[0], isPrimary: true };
+            <div>
+              {/* Chips de selección */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: (task.indicators && task.indicators.length > 0) ? 12 : 0 }}>
+                {indicators.length === 0 ? (
+                  <span style={{ fontSize: 13, color: '#9ca3af' }}>
+                    No hay indicadores configurados
+                  </span>
+                ) : (
+                  indicators.map((ind) => {
+                    const selected = task.indicators || [];
+                    const idx = selected.findIndex((s) => s.name === ind.name);
+                    const isSelected = idx !== -1;
+                    const isPrimary = idx === 0;
+                    const chipClass = isPrimary
+                      ? 'indicator-chip chip-primary'
+                      : isSelected
+                      ? 'indicator-chip chip-sub'
+                      : 'indicator-chip';
+
+                    return (
+                      <button
+                        key={ind.id}
+                        type="button"
+                        className={chipClass}
+                        onClick={() => {
+                          let newIndicators = [...(task.indicators || [])];
+                          if (isSelected) {
+                            newIndicators = newIndicators.filter((s) => s.name !== ind.name);
+                            if (newIndicators.length > 0) {
+                              newIndicators[0] = { ...newIndicators[0], isPrimary: true };
+                            }
+                          } else {
+                            newIndicators.push({
+                              name: ind.name,
+                              isPrimary: newIndicators.length === 0,
+                            });
                           }
-                        }
-                        upd('indicators', newIndicators);
-                        upd('indicator', newIndicators[0]?.name || '');
-                      }}
-                      style={{ accentColor: isPrimary ? '#f59e0b' : '#22c55e', width: 16, height: 16 }}
-                    />
-                    <span style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400 }}>
+                          upd('indicators', newIndicators);
+                          upd('indicator', newIndicators[0]?.name || '');
+                        }}
+                      >
+                        {isSelected && <span className="chip-dot" />}
+                        <span>{ind.name}</span>
+                        {isPrimary && <span className="chip-badge-primary">Principal</span>}
+                        {isSelected && !isPrimary && <span className="chip-badge-sub">Sub-aporte</span>}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Resumen de seleccionados */}
+              {task.indicators && task.indicators.length > 0 && (
+                <div style={{
+                  borderTop: '1px solid #f3f4f6',
+                  paddingTop: 10,
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 6,
+                  alignItems: 'center',
+                }}>
+                  <span style={{ fontSize: 11, color: '#9ca3af', marginRight: 2 }}>Seleccionados:</span>
+                  {task.indicators.map((ind, i) => (
+                    <span
+                      key={ind.name}
+                      className={`chip-summary-pill ${i === 0 ? 'pill-primary' : 'pill-sub'}`}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', display: 'inline-block', opacity: 0.7 }} />
                       {ind.name}
                     </span>
-                    {isPrimary && isSelected && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#d97706', fontWeight: 600, background: '#fde68a', padding: '1px 6px', borderRadius: 10 }}>
-                        ⭐ Principal
-                      </span>
-                    )}
-                    {isSelected && !isPrimary && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#16a34a', background: '#dcfce7', padding: '1px 6px', borderRadius: 10 }}>
-                        Sub-aporte
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
+                  ))}
+                </div>
+              )}
+
+              {/* Hint cuando no hay nada seleccionado */}
+              {(!task.indicators || task.indicators.length === 0) && (
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: '6px 0 0 0' }}>
+                  El primero que selecciones será el indicador principal
+                </p>
+              )}
             </div>
           </F>
 

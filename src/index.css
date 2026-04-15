@@ -69,3 +69,85 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* Indicator Chips Component */
+.indicator-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1.5px solid #d1d5db;
+  background: white;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 400;
+  color: #6b7280;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+  font-family: inherit;
+  line-height: 1;
+}
+.indicator-chip:hover {
+  border-color: #9ca3af;
+  color: #374151;
+  background: #f9fafb;
+}
+.indicator-chip.chip-primary {
+  background: #fef3c7;
+  border-color: #d97706;
+  color: #78350f;
+  font-weight: 500;
+}
+.indicator-chip.chip-sub {
+  background: #f0fdf4;
+  border-color: #16a34a;
+  color: #14532d;
+  font-weight: 500;
+}
+.chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.chip-badge-primary {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #f59e0b;
+  color: #451a03;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.chip-badge-sub {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #86efac;
+  color: #14532d;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.chip-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.chip-summary-pill.pill-primary {
+  background: #fef3c7;
+  color: #78350f;
+  border: 1px solid #d97706;
+}
+.chip-summary-pill.pill-sub {
+  background: #f0fdf4;
+  color: #14532d;
+  border: 1px solid #16a34a;
+}

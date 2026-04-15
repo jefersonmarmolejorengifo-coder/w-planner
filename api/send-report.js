@@ -7,8 +7,8 @@
  *   VITE_SUPABASE_URL          — URL del proyecto Supabase
  *   SUPABASE_SERVICE_ROLE_KEY  — Service role key (Settings > API en Supabase)
  *   RESEND_API_KEY             — API key de Resend
- *   REPORT_FROM_EMAIL          — Dirección remitente verificada en Resend
- *                                 Ejemplo: "W Planner <reportes@tu-dominio.com>"
+ *   REPORT_FROM_EMAIL          — Email remitente verificado en Resend (solo el email)
+ *                                 Ejemplo: reportes@tu-dominio.com
  *
  * Llamada manual:  POST /api/send-report
  * Llamada forzada: POST /api/send-report  con body { "force": true }
@@ -111,7 +111,7 @@ export default async function handler(req, res) {
   const { html, subject, summary } = generateReport(tasks || []);
 
   // ── 5. Enviar a cada destinatario ─────────────────────────
-  const from    = process.env.REPORT_FROM_EMAIL || "W Planner <noreply@resend.dev>";
+  const from    = `W Planner Banco W <${process.env.REPORT_FROM_EMAIL || "noreply@resend.dev"}>`;
   const results = [];
   const errors  = [];
 

@@ -29,6 +29,7 @@ const TYPE_COLORS = {
   Otra: "#5F5E5A",
 };
 const TIPOS = ["Administrativa","Operativa","Apadrinamiento","Seguimiento","Creativa","Otra"];
+const DEFAULT_TASK_TYPES = [...TIPOS];
 const ESTADOS = ["No programada","Sin iniciar","En proceso","Bloqueada","En pausa","Cancelada","Finalizada"];
 const CLOSE_STATES = ["Finalizada","Cancelada"];
 const CONFIG_PIN = "020419*";
@@ -52,6 +53,7 @@ const emptyTask = (id) => ({
   id,
   createdAt: getColombiaNow(),
   indicator: "",
+  indicators: [],
   title: "",
   startDate: "",
   endDate: "",
@@ -78,6 +80,16 @@ const calcAporte = (task, weights) =>
   ((task.estimatedTime || 1) * weights.tiempo +
    (task.difficulty || 1) * weights.dificultad +
    (task.strategicValue || 1) * weights.estrategico) / 100;
+
+/**
+ * Calcula el porcentaje de avance basado en subtareas.
+ * Retorna null si no hay subtareas (modo manual).
+ */
+const calcProgressFromSubtasks = (subtasks) => {
+  if (!subtasks || subtasks.length === 0) return null;
+  const done = subtasks.filter((s) => s.done).length;
+  return parseFloat(((done / subtasks.length) * 100).toFixed(1));
+};
 
 // ─── StarRating ────────────────────────────────────────────
 function StarRating({ value, onChange, readonly }) {
@@ -132,10 +144,11 @@ const inp = {
 const readonlyInp = { ...inp, background: "#f4f4f4", color: "#969696", cursor: "default", border: "1.5px solid #e8e8e8" };
 
 // ─── TaskForm ──────────────────────────────────────────────
-function TaskForm({ task, setTask, participants, indicators, currentUser, weights }) {
+function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
   const isSuperUser = currentUser?.isSuperUser;
+  const typeOptions = taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES;
 
   const upd = (key, val) =>
     setTask((prev) => {
@@ -145,19 +158,33 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
     });
 
   const addSubtask = () => {
-    if (task.subtasks.length < 20) upd("subtasks", [...task.subtasks, { text: "", done: false }]);
+    if (task.subtasks.length < 20) {
+      const nextSubtasks = [...task.subtasks, { text: "", done: false }];
+      const autoProgress = calcProgressFromSubtasks(nextSubtasks);
+      upd("subtasks", nextSubtasks);
+      if (autoProgress !== null) upd("progressPercent", autoProgress);
+    }
   };
   const updSubtask = (i, v) => {
     const arr = [...task.subtasks];
     arr[i] = { ...arr[i], text: v };
+    const autoProgress = calcProgressFromSubtasks(arr);
     upd("subtasks", arr);
+    if (autoProgress !== null) upd("progressPercent", autoProgress);
   };
   const toggleSubtask = (i) => {
     const arr = [...task.subtasks];
     arr[i] = { ...arr[i], done: !arr[i].done };
+    const autoProgress = calcProgressFromSubtasks(arr);
     upd("subtasks", arr);
+    if (autoProgress !== null) upd("progressPercent", autoProgress);
   };
-  const delSubtask = (i) => upd("subtasks", task.subtasks.filter((_, idx) => idx !== i));
+  const delSubtask = (i) => {
+    const arr = task.subtasks.filter((_, idx) => idx !== i);
+    const autoProgress = calcProgressFromSubtasks(arr);
+    upd("subtasks", arr);
+    if (autoProgress !== null) upd("progressPercent", autoProgress);
+  };
 
   const isNew = task.aporteSnapshot === null || task.aporteSnapshot === undefined;
   const aporteDisplay = isNew
@@ -187,7 +214,10 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
 
       <F label="Tipo" half>
         <select style={inp} value={task.type} onChange={(e) => upd("type", e.target.value)}>
-          {TIPOS.map((t) => <option key={t}>{t}</option>)}
+          {typeOptions.map((t) => <option key={t}>{t}</option>)}
+          {task.type && !typeOptions.includes(task.type) && (
+            <option value={task.type}>{task.type}</option>
+          )}
         </select>
       </F>
       <F label="Fecha de inicio" half>
@@ -199,10 +229,69 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
       {!isOtra && (
         <>
           <F label="Indicador que impacta">
-            <select style={inp} value={task.indicator} onChange={(e) => upd("indicator", e.target.value)}>
-              <option value="">— Seleccionar indicador —</option>
-              {indicators.map((ind) => <option key={ind.id} value={ind.name}>{ind.name}</option>)}
-            </select>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto', padding: '4px 0' }}>
+              {indicators.length === 0 && (
+                <span style={{ color: '#9ca3af', fontSize: 13 }}>
+                  No hay indicadores configurados
+                </span>
+              )}
+              {indicators.map((ind) => {
+                const selected = task.indicators || [];
+                const isSelected = selected.some((s) => s.name === ind.name);
+                const isPrimary = selected.length > 0 && selected[0]?.name === ind.name;
+                return (
+                  <label
+                    key={ind.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      background: isPrimary && isSelected ? '#fef3c7' : isSelected ? '#f0fdf4' : 'transparent',
+                      border: isPrimary && isSelected ? '1px solid #f59e0b' : isSelected ? '1px solid #86efac' : '1px solid transparent',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        let newIndicators = [...(task.indicators || [])];
+                        if (e.target.checked) {
+                          newIndicators.push({
+                            name: ind.name,
+                            isPrimary: newIndicators.length === 0,
+                          });
+                        } else {
+                          newIndicators = newIndicators.filter((s) => s.name !== ind.name);
+                          if (newIndicators.length > 0 && !newIndicators.some((s) => s.isPrimary)) {
+                            newIndicators[0] = { ...newIndicators[0], isPrimary: true };
+                          }
+                        }
+                        upd('indicators', newIndicators);
+                        upd('indicator', newIndicators[0]?.name || '');
+                      }}
+                      style={{ accentColor: isPrimary ? '#f59e0b' : '#22c55e', width: 16, height: 16 }}
+                    />
+                    <span style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400 }}>
+                      {ind.name}
+                    </span>
+                    {isPrimary && isSelected && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#d97706', fontWeight: 600, background: '#fde68a', padding: '1px 6px', borderRadius: 10 }}>
+                        ⭐ Principal
+                      </span>
+                    )}
+                    {isSelected && !isPrimary && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#16a34a', background: '#dcfce7', padding: '1px 6px', borderRadius: 10 }}>
+                        Sub-aporte
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
           </F>
 
           <F label="Estado" half>
@@ -267,14 +356,38 @@ function TaskForm({ task, setTask, participants, indicators, currentUser, weight
           </F>
 
           <F label="Porcentaje de avance" half>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="number" min={0} max={100} step={0.1} style={{ ...inp, flex: 1 }}
-                value={task.progressPercent}
-                onChange={(e) => upd("progressPercent", Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))} />
-              <span style={{ fontSize: 13, color: "var(--color-text-secondary)", minWidth: 34, fontWeight: 500 }}>
-                {Number(task.progressPercent).toFixed(1)}%
-              </span>
-            </div>
+            {task.subtasks && task.subtasks.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  background: '#f0fdf4', border: '1px solid #86efac',
+                  borderRadius: 8, padding: '6px 12px',
+                  fontSize: 15, fontWeight: 700, color: '#15803d', minWidth: 70, textAlign: 'center'
+                }}>
+                  {Number(task.progressPercent || 0).toFixed(1)}%
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4 }}>
+                  <div>🤖 Calculado automáticamente</div>
+                  <div>{(task.subtasks || []).filter(s => s.done).length} de {(task.subtasks || []).length} subtareas completadas</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={task.progressPercent}
+                  onChange={(e) =>
+                    upd("progressPercent", Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))
+                  }
+                  style={inp}
+                />
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>
+                  Añade subtareas para calcular automáticamente
+                </span>
+              </div>
+            )}
           </F>
 
           <F label="Tarea dependiente (ID)" half>
@@ -436,7 +549,7 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 }
 
 // ─── BoardTab ──────────────────────────────────────────────
-function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, nextId, weights }) {
+function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes }) {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
   const [fStatus, setFStatus] = useState("");
@@ -447,7 +560,21 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
   const [fDateTo, setFDateTo] = useState("");
   const [search, setSearch] = useState("");
 
-  const openNew = () => { setForm(emptyTask(nextId)); setModal("new"); };
+  const openNew = async () => {
+    try {
+      const { data: claimedId, error } = await supabase.rpc('claim_task_id');
+      if (error) {
+        console.error('Error reservando ID:', error);
+        alert('No se pudo iniciar la tarea. Intenta de nuevo.');
+        return;
+      }
+      setForm(emptyTask(claimedId));
+      setModal('new');
+    } catch (err) {
+      console.error('Error inesperado al reservar ID:', err);
+      alert('Error inesperado. Intenta de nuevo.');
+    }
+  };
   const openEdit = (t) => { setForm({ ...t }); setModal(t.id); };
 
   const save = async () => {
@@ -502,7 +629,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
         </select>
         <select style={ss} value={fType} onChange={(e) => setFType(e.target.value)}>
           <option value="">Todos los tipos</option>
-          {TIPOS.map((t) => <option key={t}>{t}</option>)}
+          {(taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES).map((t) => <option key={t}>{t}</option>)}
         </select>
         <select style={ss} value={fIndicator} onChange={(e) => setFIndicator(e.target.value)}>
           <option value="">Todos los indicadores</option>
@@ -545,7 +672,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}
         >
-          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} currentUser={currentUser} weights={weights} />
+          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} />
         </Modal>
       )}
     </div>
@@ -553,7 +680,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
 }
 
 // ─── GanttTab ──────────────────────────────────────────────
-function GanttTab({ tasks, indicators }) {
+function GanttTab({ tasks, indicators, taskTypes }) {
   const today = new Date().toISOString().split("T")[0];
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().split("T")[0]; });
   const [dateTo, setDateTo] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() + 2, 0); return d.toISOString().split("T")[0]; });
@@ -642,7 +769,7 @@ function GanttTab({ tasks, indicators }) {
         </select>
         <select style={ss} value={fType} onChange={(e) => setFType(e.target.value)}>
           <option value="">Todos los tipos</option>
-          {TIPOS.map((t) => <option key={t}>{t}</option>)}
+          {(taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES).map((t) => <option key={t}>{t}</option>)}
         </select>
         <select style={ss} value={fIndicator} onChange={(e) => setFIndicator(e.target.value)}>
           <option value="">Todos los indicadores</option>
@@ -793,7 +920,7 @@ function GanttTab({ tasks, indicators }) {
 }
 
 // ─── MetricsTab ────────────────────────────────────────────
-function MetricsTab({ tasks, participants, indicators }) {
+function MetricsTab({ tasks, participants, indicators, taskTypes }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selParticipant, setSelParticipant] = useState("");
@@ -810,8 +937,9 @@ function MetricsTab({ tasks, participants, indicators }) {
     ESTADOS.forEach((s) => (byStatus[s] = 0));
     filtered.forEach((t) => { byStatus[t.status] = (byStatus[t.status] || 0) + 1; });
 
+    const activeTypes = taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES;
     const byType = {};
-    TIPOS.forEach((tp) => (byType[tp] = 0));
+    activeTypes.forEach((tp) => (byType[tp] = 0));
     filtered.forEach((t) => { byType[t.type] = (byType[t.type] || 0) + 1; });
 
     const byIndicator = {};
@@ -827,8 +955,9 @@ function MetricsTab({ tasks, participants, indicators }) {
     });
 
     const timeByType = {};
-    TIPOS.forEach((tp) => (timeByType[tp] = []));
+    activeTypes.forEach((tp) => (timeByType[tp] = []));
     filtered.filter((t) => t.status === "Finalizada" && t.startDate && t.endDate).forEach((t) => {
+      if (!timeByType[t.type]) timeByType[t.type] = [];
       timeByType[t.type].push(daysBetween(t.startDate, t.endDate));
     });
     const avgTimeByType = {};
@@ -906,7 +1035,7 @@ function MetricsTab({ tasks, participants, indicators }) {
 
           <Sec title="Tareas por tipo">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6 }}>
-              {TIPOS.map((tp) => metrics.byType[tp] > 0 && (
+              {(taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES).map((tp) => metrics.byType[tp] > 0 && (
                 <Row key={tp} label={tp} value={metrics.byType[tp]} color={TYPE_COLORS[tp]} light="var(--color-background-secondary)" />
               ))}
             </div>
@@ -928,7 +1057,7 @@ function MetricsTab({ tasks, participants, indicators }) {
 
           <Sec title="Tiempo promedio de resolución (días · solo tareas Finalizadas)">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 6 }}>
-              {TIPOS.map((tp) => metrics.avgTimeByType[tp] !== null && (
+              {(taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES).map((tp) => metrics.avgTimeByType[tp] !== null && (
                 <div key={tp} style={{ padding: "8px 10px", background: "var(--color-background-secondary)", borderRadius: 6, borderLeft: `3px solid ${TYPE_COLORS[tp]}` }}>
                   <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>{tp}</div>
                   <div style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)" }}>{metrics.avgTimeByType[tp]} días</div>
@@ -1106,9 +1235,11 @@ function WeightCalculator({ weights, setWeights }) {
 }
 
 // ─── ConfigTab ─────────────────────────────────────────────
-function ConfigTab({ participants, setParticipants, indicators, setIndicators, weights, setWeights, tasks }) {
+function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, weights, setWeights, tasks }) {
   const [newP, setNewP] = useState("");
   const [newI, setNewI] = useState("");
+  const [newType, setNewType] = useState("");
+  const [typeMsg, setTypeMsg] = useState("");
 
   // Email config state
   const [emails, setEmails] = useState([]);
@@ -1214,6 +1345,19 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, w
   };
   const removeI = (id) => { if (confirm("¿Eliminar indicador?")) setIndicators((prev) => prev.filter((i) => i.id !== id)); };
 
+  const addType = () => {
+    const name = newType.trim();
+    if (!name || taskTypes.some((t) => t.name.toLowerCase() === name.toLowerCase())) return;
+    setTaskTypes((prev) => [...prev, { id: Date.now(), name }]);
+    setNewType("");
+    setTypeMsg("Tipo agregado correctamente");
+    setTimeout(() => setTypeMsg(""), 3000);
+  };
+  const removeType = (id) => {
+    if (!confirm("¿Eliminar tipo de tarea?")) return;
+    setTaskTypes((prev) => prev.filter((t) => t.id !== id));
+  };
+
   const si = { background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-secondary)", color: "var(--color-text-primary)", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", fontFamily: "inherit", flex: 1 };
   const addBtn = { background: "linear-gradient(135deg, #542c9c, #6e3ebf)", border: "none", color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600, boxShadow: "0 3px 10px rgba(84,44,156,0.3)" };
 
@@ -1278,6 +1422,26 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, w
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: "linear-gradient(135deg, #542c9c, #149cac)", flexShrink: 0 }} />
                 <span style={{ flex: 1, fontSize: 13, color: "var(--color-text-primary)" }}>{ind.name}</span>
                 <button onClick={() => removeI(ind.id)} style={{ background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 13 }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Sec>
+
+      <Sec title="🧩 Tipos de tarea">
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <input style={si} value={newType} onChange={(e) => setNewType(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addType()} placeholder="Nombre del tipo..." />
+          <button onClick={addType} style={addBtn}>Agregar</button>
+        </div>
+        {typeMsg && <div style={{ marginBottom: 10, color: "#16a34a", fontSize: 12 }}>{typeMsg}</div>}
+        {taskTypes.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", textAlign: "center" }}>No hay tipos definidos. Usa los valores por defecto al crear tareas.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {taskTypes.map((type) => (
+              <div key={type.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#fafafa", borderRadius: 8, border: "1px solid rgba(84,44,156,0.08)" }}>
+                <span style={{ flex: 1, fontSize: 13, color: "var(--color-text-primary)" }}>{type.name}</span>
+                <button onClick={() => removeType(type.id)} style={{ background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 13 }}>✕</button>
               </div>
             ))}
           </div>
@@ -1600,10 +1764,16 @@ const DEFAULT_WEIGHTS = { tiempo: 33, dificultad: 34, estrategico: 33 };
 const dbToTask = (r) => ({
   id: r.id,
   createdAt: r.created_at_colombia,
-  indicator: r.indicator || '',
+  indicator: r.indicator || (Array.isArray(r.indicators) && r.indicators[0]?.name) || '',
+  indicators: Array.isArray(r.indicators)
+    ? r.indicators.map((i) =>
+        typeof i === 'string' ? { name: i, isPrimary: false } : i
+      )
+    : r.indicator
+    ? [{ name: r.indicator, isPrimary: true }]
+    : [],
   title: r.title || '',
   startDate: r.start_date || '',
-  endDate: r.end_date || '',
   estimatedTime: r.estimated_time ?? 5,
   type: r.type || 'Operativa',
   status: r.status || 'Sin iniciar',
@@ -1627,7 +1797,8 @@ const dbToTask = (r) => ({
 const taskToDb = (t) => ({
   id: t.id,
   created_at_colombia: t.createdAt,
-  indicator: t.indicator,
+  indicator: t.indicator || (Array.isArray(t.indicators) && t.indicators[0]?.name) || '',
+  indicators: t.indicators || [],
   title: t.title,
   start_date: t.startDate,
   end_date: t.endDate,
@@ -1653,6 +1824,7 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [indicators, setIndicators] = useState([]);
+  const [taskTypes, setTaskTypes] = useState([]);
   const [nextId, setNextId] = useState(1);
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -1663,6 +1835,36 @@ export default function App() {
   const [showIntro, setShowIntro] = useState(true);
   const [loading, setLoading] = useState(true);
 
+  const loadParticipants = async () => {
+    const { data, error } = await supabase.from('participants').select('*').order('id');
+    if (!error && data) {
+      setParticipants(data.map((p) => ({ id: p.id, name: p.name, isSuperUser: p.is_super_user })));
+      return data;
+    }
+    return [];
+  };
+
+  const loadIndicators = async () => {
+    const { data, error } = await supabase.from('indicators').select('*').order('id');
+    if (!error && data) {
+      setIndicators(data);
+      return data;
+    }
+    return [];
+  };
+
+  const loadTaskTypes = async () => {
+    const { data, error } = await supabase
+      .from('task_types')
+      .select('*')
+      .order('name', { ascending: true });
+    if (!error && data) {
+      setTaskTypes(data.map((t) => ({ id: t.id, name: t.name })));
+      return data;
+    }
+    return [];
+  };
+
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true);
@@ -1671,11 +1873,13 @@ export default function App() {
           { data: tasksData },
           { data: partsData },
           { data: indsData },
+          { data: typesData },
           { data: configData },
         ] = await Promise.all([
           supabase.from('tasks').select('*').order('id'),
           supabase.from('participants').select('*').order('id'),
           supabase.from('indicators').select('*').order('id'),
+          supabase.from('task_types').select('*').order('name', { ascending: true }),
           supabase.from('app_config').select('*'),
         ]);
 
@@ -1684,6 +1888,7 @@ export default function App() {
           id: p.id, name: p.name, isSuperUser: p.is_super_user,
         })));
         if (indsData) setIndicators(indsData);
+        if (typesData) setTaskTypes(typesData.map((t) => ({ id: t.id, name: t.name })));
         if (configData) {
           configData.forEach((row) => {
             if (row.key === 'nextId') setNextId(Number(row.value));
@@ -1770,8 +1975,6 @@ export default function App() {
     const { error } = await supabase.from('tasks').insert(taskToDb(task));
     if (!error) {
       setTasks(prev => [...prev, task]);
-      await supabase.from('app_config').update({ value: String(task.id + 1) }).eq('key', 'nextId');
-      setNextId(task.id + 1);
     } else {
       console.error('Error creando tarea:', error);
       alert('Error al guardar la tarea: ' + error.message);
@@ -1825,6 +2028,23 @@ export default function App() {
     for (const i of toDelete)
       await supabase.from('indicators').delete().eq('id', i.id);
     setIndicators(next);
+  };
+
+  const saveTaskTypes = async (updaterFn) => {
+    const prev = taskTypes;
+    const next = typeof updaterFn === 'function' ? updaterFn(prev) : updaterFn;
+    const toInsert = next.filter(n => !prev.find(p => p.id === n.id));
+    const toUpdate = next.filter(n => prev.find(p => p.id === n.id));
+    const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
+    for (const t of toInsert)
+      await supabase.from('task_types').insert({ name: t.name });
+    for (const t of toUpdate)
+      await supabase.from('task_types').update({ name: t.name }).eq('id', t.id);
+    for (const t of toDelete)
+      await supabase.from('task_types').delete().eq('id', t.id);
+    const { data, error } = await supabase.from('task_types').select('*').order('name', { ascending: true });
+    if (!error && data) setTaskTypes(data.map((t) => ({ id: t.id, name: t.name })));
+    return next;
   };
 
   const saveWeights = async (w) => {
@@ -1965,13 +2185,13 @@ export default function App() {
 
       <div style={{ padding: "20px 20px 40px" }}>
         {activeTab === "board" && (
-          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} nextId={nextId} weights={weights} />
+          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={weights} />
         )}
-        {activeTab === "gantt" && <GanttTab tasks={tasks} indicators={indicators} />}
-        {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} />}
+        {activeTab === "gantt" && <GanttTab tasks={tasks} indicators={indicators} taskTypes={taskTypes} />}
+        {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
         {activeTab === "config" && (
           configUnlocked ? (
-            <ConfigTab participants={participants} setParticipants={saveParticipants} indicators={indicators} setIndicators={saveIndicators} weights={weights} setWeights={saveWeights} tasks={tasks} />
+            <ConfigTab participants={participants} setParticipants={saveParticipants} indicators={indicators} setIndicators={saveIndicators} taskTypes={taskTypes} setTaskTypes={saveTaskTypes} weights={weights} setWeights={saveWeights} tasks={tasks} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 340, gap: 16 }}>
               <div style={{ background: "#ffffff", borderRadius: 16, padding: "32px 36px", boxShadow: "0 4px 32px rgba(84,44,156,0.12)", border: "1px solid rgba(84,44,156,0.12)", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, minWidth: 300 }}>

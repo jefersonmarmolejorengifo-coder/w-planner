@@ -1336,11 +1336,12 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tasks, participants, indicators, weekStart, weekEnd }),
       });
-      const genText = await genRes.text();
-      let genData;
-      try { genData = JSON.parse(genText); } catch { throw new Error(`Error del servidor (${genRes.status}): la función de generación no respondió correctamente`); }
-      if (genData.error) throw new Error(genData.error);
-      const { html } = genData;
+      if (!genRes.ok) {
+        let errMsg = `Error del servidor (${genRes.status})`;
+        try { const e = await genRes.json(); errMsg = e.error || errMsg; } catch {}
+        throw new Error(errMsg);
+      }
+      const html = await genRes.text();
 
       setReportMsg("Reporte generado. Enviando correos...");
 

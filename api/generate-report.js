@@ -1,15 +1,27 @@
-const { Anthropic } = require("@anthropic-ai/sdk");
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+export const config = { runtime: 'edge' };
 
-function buildPrompt({ weekStart, weekEnd, tasks, participants, indicators }) {
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+function jsonError(msg, status) {
+  return new Response(JSON.stringify({ error: msg }), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+}
+
+function buildPrompt({ weekStart, weekEnd, tasks }) {
 
   const total = tasks.length;
   const porEstado = tasks.reduce((acc, t) => {
     acc[t.status] = (acc[t.status] || 0) + 1; return acc;
   }, {});
   const progresoPromedio = total > 0
-    ? (tasks.reduce((s, t) => s + parseFloat(t.progress_percent || 0), 0) / total).toFixed(1) : 0;
-  const aporteTotal = tasks.reduce((s, t) => s + parseFloat(t.aporte_snapshot || 0), 0).toFixed(1);
+    ? (tasks.reduce((s, t) => s + parseFloat(t.progressPercent || t.progress_percent || 0), 0) / total).toFixed(1) : 0;
+  const aporteTotal = tasks.reduce((s, t) => s + parseFloat(t.aporteSnapshot || t.aporte_snapshot || 0), 0).toFixed(1);
 
   const porResponsable = tasks.reduce((acc, t) => {
     const r = t.responsible || "Sin asignar";
@@ -23,9 +35,10 @@ function buildPrompt({ weekStart, weekEnd, tasks, participants, indicators }) {
     if (t.status === "En proceso") acc[r].enProceso++;
     if (t.status === "Sin iniciar") acc[r].sinIniciar++;
     if (t.status === "Bloqueada") acc[r].bloqueadas++;
-    acc[r].aporteTotal += parseFloat(t.aporte_snapshot || 0);
+    acc[r].aporteTotal += parseFloat(t.aporteSnapshot || t.aporte_snapshot || 0);
     if (t.comments && t.comments.trim()) acc[r].comentarios.push(`Tarea #${t.id} "${t.title}": ${t.comments.trim()}`);
-    if (t.expectedDelivery && t.expectedDelivery.trim()) acc[r].entregables.push(`Tarea #${t.id} "${t.title}": ${t.expectedDelivery.trim()}`);
+    const ed = t.expectedDelivery || t.expected_delivery || "";
+    if (ed.trim()) acc[r].entregables.push(`Tarea #${t.id} "${t.title}": ${ed.trim()}`);
     if (Array.isArray(t.subtasks)) {
       acc[r].subtareasTotal += t.subtasks.length;
       acc[r].subtareasDone += t.subtasks.filter(s => s.done).length;
@@ -41,7 +54,7 @@ function buildPrompt({ weekStart, weekEnd, tasks, participants, indicators }) {
       if (!acc[nombre]) acc[nombre] = { tareas: [], finalizadas: 0, aporte: 0, responsables: new Set() };
       acc[nombre].tareas.push(t);
       if (t.status === "Finalizada") acc[nombre].finalizadas++;
-      acc[nombre].aporte += parseFloat(t.aporte_snapshot || 0);
+      acc[nombre].aporte += parseFloat(t.aporteSnapshot || t.aporte_snapshot || 0);
       if (t.responsible) acc[nombre].responsables.add(t.responsible);
     });
     return acc;
@@ -59,8 +72,11 @@ function buildPrompt({ weekStart, weekEnd, tasks, participants, indicators }) {
     return diff >= 0 && diff <= 5 && t.status !== "Finalizada" && t.status !== "Cancelada";
   });
 
+  const prog = (t) => t.progressPercent || t.progress_percent || 0;
+  const aporte = (t) => t.aporteSnapshot || t.aporte_snapshot || 0;
+
   const todosLosTextos = tasks.map(t =>
-    `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${t.progress_percent || 0}% | Indicador: ${t.indicator || "N/A"} | Entregable: ${t.expectedDelivery || "no definido"} | Comentarios: ${t.comments || "sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + s.text).join(", ") : "ninguna"}`
+    `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${prog(t)}% | Indicador: ${t.indicator || "N/A"} | Entregable: ${t.expectedDelivery || t.expected_delivery || "no definido"} | Comentarios: ${t.comments || "sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + s.text).join(", ") : "ninguna"}`
   ).join("\n");
 
   const detalleResponsables = Object.entries(porResponsable).map(([nombre, d]) => `
@@ -78,12 +94,12 @@ ${d.comentarios.length > 0 ? d.comentarios.map(c => "    - " + c).join("\n") : "
   ).join("\n");
 
   const detalleVencidas = vencidas.map(t =>
-    `- #${t.id} "${t.title}" | Resp: ${t.responsible || "N/A"} | Venció: ${t.endDate || t.end_date} | Progreso: ${t.progress_percent || 0}%`
+    `- #${t.id} "${t.title}" | Resp: ${t.responsible || "N/A"} | Venció: ${t.endDate || t.end_date} | Progreso: ${prog(t)}%`
   ).join("\n") || "Ninguna";
 
   const detalleRiesgo = enRiesgo.map(t => {
     const dias = Math.ceil((new Date(t.endDate || t.end_date) - hoy) / (1000 * 60 * 60 * 24));
-    return `- #${t.id} "${t.title}" | Resp: ${t.responsible || "N/A"} | Vence en ${dias} día(s) | Progreso: ${t.progress_percent || 0}%`;
+    return `- #${t.id} "${t.title}" | Resp: ${t.responsible || "N/A"} | Vence en ${dias} día(s) | Progreso: ${prog(t)}%`;
   }).join("\n") || "Ninguna";
 
   return `Eres un consultor ejecutivo senior con experiencia en estrategia de marketing y gestión de equipos de alto rendimiento.
@@ -141,8 +157,7 @@ font-family Arial sans-serif, color de texto #333333.
 3. DIAGNÓSTICO NARRATIVO DEL ÁREA
    Título "Diagnóstico de la semana" con línea izquierda 3px #ef7218.
    Redacta 3-4 párrafos en lenguaje natural analizando:
-   - Qué grandes temas o iniciativas conectan al equipo (¿hay una campaña, un lanzamiento,
-     un proyecto transversal que emerge de leer todas las tareas?)
+   - Qué grandes temas o iniciativas conectan al equipo
    - Si el equipo está concentrado o disperso
    - Hacia dónde va el área realmente
    - El mayor riesgo estratégico de la semana
@@ -166,81 +181,105 @@ font-family Arial sans-serif, color de texto #333333.
    Para cada persona genera un bloque con:
    - Nombre en bold 16px, color #ef7218, borde izquierdo 3px #ef7218, padding-left 12px
    - Línea de métricas en gris pequeño: X tareas | X finalizadas | Aporte X | Subtareas X/X
-   - Párrafo "En qué trabaja": describe en lenguaje natural qué está haciendo
-     realmente esta persona, basándote en sus comentarios y títulos de tareas.
-     No listes tareas, narra lo que hace.
-   - Párrafo "Se comprometió a entregar": resume sus entregables comprometidos.
-     Si no tiene, escribe: "No registra entregables definidos — se recomienda precisar compromisos."
-   - Párrafo "Análisis estratégico": como experto en marketing, qué de su trabajo
-     tendrá mayor impacto a corto plazo, si está priorizando bien,
-     y una recomendación concreta y específica para esta persona.
-   - Badge de estado inline:
-     "Alto rendimiento" fondo #0aa0ab texto blanco si va bien
-     "En seguimiento" fondo #ef7218 texto blanco si necesita impulso
-     "Requiere atención" fondo #e74c3c texto blanco si hay problemas
+   - Párrafo "En qué trabaja": narra en lenguaje natural basándote en comentarios y títulos.
+   - Párrafo "Se comprometió a entregar": resume entregables.
+   - Párrafo "Análisis estratégico": recomendación concreta.
+   - Badge: "Alto rendimiento" #0aa0ab / "En seguimiento" #ef7218 / "Requiere atención" #e74c3c
 
 7. ALERTAS DE LA SEMANA
    Solo si hay tareas vencidas o en riesgo.
    Bloque con fondo #fff8f0 borde izquierdo #ef7218.
-   Texto narrativo: "Las siguientes situaciones requieren atención esta semana:"
-   seguido de lista clara con cada caso.
 
 8. RECOMENDACIONES EJECUTIVAS
    Título con fondo #ef7218 texto blanco padding 12px.
-   5 recomendaciones en lenguaje natural, numeradas.
-   Cada una: acción concreta + responsable + urgencia.
-   Escritas como las daría un consultor, no como checklist genérico.
+   5 recomendaciones concretas con responsable y urgencia.
 
 9. CIERRE
-   Párrafo de cierre ejecutivo: una frase que resuma el estado del equipo
-   y el llamado a acción principal de la semana.
+   Una frase ejecutiva que resuma el estado del equipo.
 
 10. FOOTER
     Fondo #0aa0ab, texto blanco centrado, padding 20px, font-size 12px.
     "W Planner · Banco W · ${new Date().getFullYear()}"
-    "Reporte generado con inteligencia artificial a partir de los datos del equipo"
 
 REGLAS DE DISEÑO PARA CORREO:
 - Todo el CSS debe ser inline (style="...") para compatibilidad con Gmail/Outlook
 - No uses flexbox ni grid — usa table o inline-block para columnas
 - No uses fuentes externas
 - Imágenes: ninguna
-- El correo debe verse bien en móvil (usa width 100% en contenedores internos con max-width)`;
+- El correo debe verse bien en móvil (usa width 100% con max-width)`;
 }
 
-module.exports = async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+export default async function handler(req) {
+  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
+  if (req.method !== "POST") return jsonError("Method not allowed", 405);
 
-  const { weekStart, weekEnd, tasks, participants, indicators } = req.body || {};
+  let body;
+  try { body = await req.json(); } catch { return jsonError("Body inválido", 400); }
+
+  const { weekStart, weekEnd, tasks, participants, indicators } = body;
   if (!weekStart || !weekEnd || !Array.isArray(tasks)) {
-    return res.status(400).json({ error: "weekStart, weekEnd y tasks son requeridos" });
+    return jsonError("weekStart, weekEnd y tasks son requeridos", 400);
   }
 
-  try {
-    const prompt = buildPrompt({ weekStart, weekEnd, tasks, participants, indicators });
+  const prompt = buildPrompt({ weekStart, weekEnd, tasks, participants, indicators });
 
-    const response = await anthropic.messages.create({
+  // Call Anthropic with streaming enabled
+  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 8000,
+      stream: true,
       messages: [{ role: "user", content: prompt }],
-    });
+    }),
+  });
 
-    const raw = response.content?.[0]?.text || "";
-    const htmlMatch = raw.match(/```html\s*([\s\S]*?)```/i);
-    const html = htmlMatch ? htmlMatch[1].trim() : raw.trim();
-
-    if (!html.startsWith("<!DOCTYPE") && !html.startsWith("<html") && !html.startsWith("<HTML")) {
-      console.error("[generate-report] No es HTML válido:", html.substring(0, 300));
-      return res.status(500).json({ error: "El modelo no generó HTML válido. Intenta de nuevo." });
-    }
-
-    return res.status(200).json({ html, weekStart, weekEnd, taskCount: tasks.length });
-  } catch (error) {
-    console.error("[generate-report] Error:", error);
-    return res.status(500).json({ error: error.message || "Error generando reporte" });
+  if (!anthropicRes.ok) {
+    let errMsg = `Anthropic API error ${anthropicRes.status}`;
+    try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch {}
+    return jsonError(errMsg, 502);
   }
-};
+
+  // Transform Anthropic SSE stream → plain HTML text stream
+  const reader = anthropicRes.body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+
+  const htmlStream = new ReadableStream({
+    async start(controller) {
+      let buffer = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") continue;
+            try {
+              const evt = JSON.parse(data);
+              if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+                controller.enqueue(encoder.encode(evt.delta.text));
+              }
+            } catch {}
+          }
+        }
+      } catch (err) {
+        controller.enqueue(encoder.encode(`<!-- stream error: ${err.message} -->`));
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(htmlStream, {
+    headers: { ...CORS, "Content-Type": "text/html; charset=utf-8" },
+  });
+}

@@ -1,8 +1,5 @@
 {
   "functions": {
-    "api/generate-report.js": {
-      "maxDuration": 60
-    },
     "api/send-report.js": {
       "maxDuration": 60
     }

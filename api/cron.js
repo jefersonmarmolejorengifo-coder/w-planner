@@ -7,14 +7,25 @@ const supabase = createClient(
 
 const DAY_MAP = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
 
-function shouldSendToday(config) {
+// Get current date/time in Colombia (UTC-5) correctly
+function getColombiaNow() {
   const now = new Date();
-  const currentHour = now.getUTCHours() - 5; // Colombia is UTC-5
+  // Build a Date object that represents "now" in Colombia
+  const colombiaOffset = -5 * 60; // minutes
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const colombiaMs = utcMs + colombiaOffset * 60000;
+  return new Date(colombiaMs);
+}
+
+function shouldSendToday(config) {
+  const colombia = getColombiaNow();
+  const currentHour = colombia.getHours();
   const configHour = config.send_hour ?? 8;
 
   // Only run at the configured hour (cron runs every hour)
   if (currentHour !== configHour) return false;
 
+  const now = new Date(); // real UTC for date math
   const freq = config.frequency || "weekly";
   const lastSent = config.last_sent ? new Date(config.last_sent) : null;
   const daysSinceLast = lastSent ? (now - lastSent) / (1000 * 60 * 60 * 24) : Infinity;
@@ -22,7 +33,7 @@ function shouldSendToday(config) {
   if (freq === "daily") return daysSinceLast >= 0.8;
 
   if (freq === "weekly" || freq === "biweekly") {
-    const todayDay = now.getDay();
+    const todayDay = colombia.getDay(); // day of week in Colombia
     const targetDay = DAY_MAP[config.send_day || "monday"] ?? 1;
     if (todayDay !== targetDay) return false;
     return freq === "weekly" ? daysSinceLast >= 5 : daysSinceLast >= 12;
@@ -72,8 +83,19 @@ export default async function handler(req, res) {
     if (!config.emails || config.emails.length === 0) return res.status(200).json({ skipped: true, reason: "No emails configured" });
 
     // 2. Check if we should send today
+    const colombia = getColombiaNow();
+    const debugInfo = {
+      colombiaHour: colombia.getHours(),
+      colombiaDay: colombia.getDay(),
+      configHour: config.send_hour ?? 8,
+      configDay: config.send_day || "monday",
+      frequency: config.frequency || "weekly",
+      lastSent: config.last_sent || "never",
+    };
+    console.log("[cron] Check:", JSON.stringify(debugInfo));
+
     if (!shouldSendToday(config)) {
-      return res.status(200).json({ skipped: true, reason: "Not scheduled for now" });
+      return res.status(200).json({ skipped: true, reason: "Not scheduled for now", debug: debugInfo });
     }
 
     // 3. Read tasks from Supabase

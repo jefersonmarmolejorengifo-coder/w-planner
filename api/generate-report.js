@@ -1,7 +1,7 @@
-import { Anthropic } from "anthropic";
+const { Anthropic } = require("anthropic");
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const REPO_URL = "https://github.com/devcodo/w-planner";
+
 const DEFAULT_SYSTEM = `Eres un asistente experto en gerencia de proyectos y reportes semanales de tareas.
 Tu misión es generar un resumen y un HTML profesional para el equipo de Banco W.
 Utiliza otro texto si el contenido tiene poca información, pero nunca inventes fechas ni porcentajes.
@@ -11,7 +11,6 @@ function buildPrompt({ weekStart, weekEnd, tasks }) {
   return `
 ${DEFAULT_SYSTEM}
 
-Repositorio: ${REPO_URL}
 Periodo: ${weekStart} - ${weekEnd}
 
 Tareas:
@@ -30,7 +29,7 @@ Genera:
 `;
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -42,25 +41,19 @@ export default async function handler(req, res) {
 
   try {
     const prompt = buildPrompt({ weekStart, weekEnd, tasks });
-    const response = await anthropic.responses.create({
-      model: "claude-3.5",
-      input: prompt,
-      max_tokens: 800,
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 2048,
+      messages: [{ role: "user", content: prompt }],
     });
 
-    const text = response.output?.[0]?.content?.[0]?.text;
+    const text = response.content?.[0]?.text;
     if (!text) {
       throw new Error("No se recibió respuesta de Anthropic");
     }
 
-    return res.status(200).json({
-      html: text,
-      text,
-      weekStart,
-      weekEnd,
-      taskCount: tasks.length,
-    });
+    return res.status(200).json({ html: text, weekStart, weekEnd, taskCount: tasks.length });
   } catch (error) {
     return res.status(500).json({ error: error.message || "Error generando reporte" });
   }
-}
+};

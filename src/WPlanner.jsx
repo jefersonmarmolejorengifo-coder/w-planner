@@ -1331,23 +1331,28 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
     const weekEnd = fmt(sunday);
 
     try {
-      const genRes = await fetch('/api/generate-report.cjs', {
+      const genRes = await fetch('/api/generate-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tasks, participants, indicators, weekStart, weekEnd }),
       });
-      const { html, error: genErr } = await genRes.json();
-      if (genErr) throw new Error(genErr);
+      const genText = await genRes.text();
+      let genData;
+      try { genData = JSON.parse(genText); } catch { throw new Error(`Error del servidor (${genRes.status}): la función de generación no respondió correctamente`); }
+      if (genData.error) throw new Error(genData.error);
+      const { html } = genData;
 
       setReportMsg("Reporte generado. Enviando correos...");
 
-      const sendRes = await fetch('/api/send-report.cjs', {
+      const sendRes = await fetch('/api/send-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emails, html, weekStart, weekEnd }),
       });
-      const { error: sendErr } = await sendRes.json();
-      if (sendErr) throw new Error(sendErr);
+      const sendText = await sendRes.text();
+      let sendData;
+      try { sendData = JSON.parse(sendText); } catch { throw new Error(`Error del servidor (${sendRes.status}): la función de envío no respondió correctamente`); }
+      if (sendData.error) throw new Error(sendData.error);
 
       await supabase.from('email_config')
         .update({ last_sent: new Date().toISOString() })

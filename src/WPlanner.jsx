@@ -1681,6 +1681,135 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
   );
 }
 
+// ─── UserSelectScreen ─────────────────────────────────────
+const USER_COLORS = ["#ec6c04","#0aa0ab","#542c9c","#e74c3c","#27ae60","#2980b9","#e67e22","#8e44ad","#1abc9c","#c0392b"];
+const getUserColor = (name) => USER_COLORS[Math.abs([...(name||"")].reduce((h, c) => h * 31 + c.charCodeAt(0), 0)) % USER_COLORS.length];
+const getInitials = (name) => (name || "?").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+
+function UserSelectScreen({ participants, activeUsers, onSelect }) {
+  const [hovered, setHovered] = useState(null);
+  const [selected, setSelected] = useState(null);
+
+  const handleSelect = (p) => {
+    setSelected(p.id);
+    setTimeout(() => onSelect(p), 600);
+  };
+
+  const isOnline = (id) => activeUsers.some(u => u.userId === id);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "#0d0d1a",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      zIndex: 9998, overflow: "hidden",
+    }}>
+      <style>{`
+        @keyframes cardEntrance { from { opacity: 0; transform: translateY(40px) scale(0.8); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes selectedPulse { 0% { box-shadow: 0 0 0 0 rgba(236,108,4,0.6); } 70% { box-shadow: 0 0 0 30px rgba(236,108,4,0); } 100% { box-shadow: 0 0 0 0 rgba(236,108,4,0); } }
+        @keyframes selectedZoom { to { transform: scale(1.15); opacity: 0; } }
+        @keyframes onlinePing { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
+        @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+      `}</style>
+
+      {/* Background grid */}
+      <div style={{
+        position: "absolute", inset: 0,
+        backgroundImage: "linear-gradient(rgba(20,156,172,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(20,156,172,0.04) 1px, transparent 1px)",
+        backgroundSize: "50px 50px",
+      }} />
+      <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(circle, rgba(84,44,156,0.15) 0%, transparent 70%)" }} />
+
+      {/* Header */}
+      <div style={{ position: "relative", zIndex: 2, textAlign: "center", marginBottom: 40 }}>
+        <div style={{
+          fontSize: 52, fontWeight: 900, lineHeight: 1,
+          background: "linear-gradient(135deg, #ec6c04 0%, #f5a623 40%, #149cac 100%)",
+          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          marginBottom: 12,
+        }}>W</div>
+        <div style={{ fontSize: 13, fontWeight: 300, color: "rgba(255,255,255,0.5)", letterSpacing: 8, textTransform: "uppercase", marginBottom: 8 }}>
+          PLANNER
+        </div>
+        <div style={{ height: 1, background: "linear-gradient(90deg, transparent, #ec6c04, #149cac, transparent)", width: 200, margin: "0 auto 20px" }} />
+        <div style={{ fontSize: 18, fontWeight: 600, color: "#fff", letterSpacing: 1 }}>
+          Selecciona tu perfil
+        </div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>
+          Elige quién eres para ingresar al tablero
+        </div>
+      </div>
+
+      {/* User grid */}
+      <div style={{
+        position: "relative", zIndex: 2,
+        display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 16,
+        maxWidth: 700, padding: "0 20px",
+      }}>
+        {participants.map((p, i) => {
+          const color = getUserColor(p.name);
+          const online = isOnline(p.id);
+          const isHovered = hovered === p.id;
+          const isSelected = selected === p.id;
+          return (
+            <div
+              key={p.id}
+              onMouseEnter={() => setHovered(p.id)}
+              onMouseLeave={() => setHovered(null)}
+              onClick={() => !isSelected && handleSelect(p)}
+              style={{
+                width: 130, padding: "20px 10px", borderRadius: 16,
+                background: isSelected ? "rgba(236,108,4,0.15)" : isHovered ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${isSelected ? color : isHovered ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.06)"}`,
+                cursor: isSelected ? "default" : "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+                animation: isSelected ? "selectedZoom 0.6s ease forwards 0.1s" : `cardEntrance 0.5s ease ${i * 0.07}s both`,
+                transition: "background 0.3s, border 0.3s, transform 0.3s",
+                transform: isHovered && !isSelected ? "translateY(-4px)" : "none",
+              }}
+            >
+              {/* Avatar */}
+              <div style={{ position: "relative" }}>
+                <div style={{
+                  width: 56, height: 56, borderRadius: "50%",
+                  background: `linear-gradient(135deg, ${color}, ${color}cc)`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 20, fontWeight: 800, color: "#fff",
+                  boxShadow: isHovered ? `0 0 20px ${color}66` : `0 4px 12px ${color}33`,
+                  transition: "box-shadow 0.3s",
+                  animation: isSelected ? "selectedPulse 0.8s ease" : isHovered ? "float 2s ease infinite" : "none",
+                }}>
+                  {getInitials(p.name)}
+                </div>
+                {/* Online indicator */}
+                {online && (
+                  <div style={{ position: "absolute", bottom: 2, right: 2 }}>
+                    <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#27ae60", border: "2px solid #0d0d1a" }} />
+                    <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "#27ae60", animation: "onlinePing 1.5s ease infinite" }} />
+                  </div>
+                )}
+              </div>
+              {/* Name */}
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#fff", textAlign: "center", lineHeight: 1.3 }}>
+                {p.name}
+              </div>
+              {online && (
+                <div style={{ fontSize: 9, fontWeight: 600, color: "#27ae60", textTransform: "uppercase", letterSpacing: 1 }}>
+                  En línea
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer hint */}
+      <div style={{ position: "absolute", bottom: 24, fontSize: 10, color: "rgba(255,255,255,0.2)", letterSpacing: 2, zIndex: 2 }}>
+        Banco W · Gestión Estratégica
+      </div>
+    </div>
+  );
+}
+
 // ─── IntroScreen ───────────────────────────────────────────
 function IntroScreen({ onFinish }) {
   const [phase, setPhase] = useState(0);
@@ -1961,7 +2090,12 @@ export default function App() {
   const [configPin, setConfigPin] = useState("");
   const [pinError, setPinError] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
+  const [showUserSelect, setShowUserSelect] = useState(false);
+  const [activeUser, setActiveUser] = useState(null);
+  const [activeUsers, setActiveUsers] = useState([]);
+  const [kickedMsg, setKickedMsg] = useState(null);
   const [loading, setLoading] = useState(true);
+  const sessionIdRef = useRef(crypto.randomUUID());
 
   const loadParticipants = async () => {
     const { data, error } = await supabase.from('participants').select('*').order('id');
@@ -2095,6 +2229,96 @@ export default function App() {
 
     return () => { supabase.removeChannel(channel); };
   }, []);
+
+  // ── Presence: active users tracking ────────────────────────
+  const presenceChannelRef = useRef(null);
+
+  useEffect(() => {
+    if (!activeUser) {
+      // Clean up presence if user deselected
+      if (presenceChannelRef.current) {
+        supabase.removeChannel(presenceChannelRef.current);
+        presenceChannelRef.current = null;
+      }
+      return;
+    }
+
+    const channel = supabase.channel('w-planner-presence', {
+      config: { presence: { key: String(activeUser.id) } },
+    });
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const users = [];
+        Object.entries(state).forEach(([key, presences]) => {
+          if (presences.length > 0) {
+            const latest = presences[presences.length - 1];
+            users.push({ userId: Number(key), name: latest.name, sessionId: latest.sessionId });
+          }
+        });
+        setActiveUsers(users);
+
+        // Check if someone else took our user
+        const myUserPresences = state[String(activeUser.id)] || [];
+        const otherSession = myUserPresences.find(p => p.sessionId !== sessionIdRef.current);
+        if (otherSession && myUserPresences.length > 1) {
+          // The newest session wins — if we're not the newest, we get kicked
+          const newest = myUserPresences[myUserPresences.length - 1];
+          if (newest.sessionId !== sessionIdRef.current) {
+            setKickedMsg(`Alguien acaba de ingresar como "${activeUser.name}". Tu sesión ha sido cerrada.`);
+            setActiveUser(null);
+            setShowUserSelect(true);
+            channel.untrack();
+          }
+        }
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        // Another session joined with our same user ID
+        if (Number(key) === activeUser.id) {
+          const otherNew = newPresences.find(p => p.sessionId !== sessionIdRef.current);
+          if (otherNew) {
+            setKickedMsg(`Alguien acaba de ingresar como "${activeUser.name}". Tu sesión ha sido cerrada.`);
+            setActiveUser(null);
+            setShowUserSelect(true);
+            channel.untrack();
+          }
+        }
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({
+            name: activeUser.name,
+            sessionId: sessionIdRef.current,
+            userId: activeUser.id,
+            onlineAt: new Date().toISOString(),
+          });
+        }
+      });
+
+    presenceChannelRef.current = channel;
+
+    return () => {
+      channel.untrack();
+      supabase.removeChannel(channel);
+      presenceChannelRef.current = null;
+    };
+  }, [activeUser]);
+
+  const handleUserSelect = (participant) => {
+    setKickedMsg(null);
+    setActiveUser(participant);
+    setCurrentUserId(participant.id);
+    setShowUserSelect(false);
+  };
+
+  const handleChangeUser = () => {
+    if (presenceChannelRef.current) {
+      presenceChannelRef.current.untrack();
+    }
+    setActiveUser(null);
+    setShowUserSelect(true);
+  };
 
   const createTask = async (task) => {
     if (task.status === 'Finalizada' && !task.finalizedAt) {
@@ -2250,8 +2474,37 @@ export default function App() {
           </span>
         </div>
       )}
-      {!loading && showIntro && <IntroScreen onFinish={() => setShowIntro(false)} />}
-      <div style={{ opacity: showIntro ? 0 : 1, transition: "opacity 0.6s ease 0.2s" }}>
+      {!loading && showIntro && <IntroScreen onFinish={() => { setShowIntro(false); setShowUserSelect(true); }} />}
+      {!loading && !showIntro && showUserSelect && (
+        <UserSelectScreen participants={participants} activeUsers={activeUsers} onSelect={handleUserSelect} />
+      )}
+      {/* Kicked-out modal */}
+      {kickedMsg && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 99997,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#1a1a2e", borderRadius: 20, padding: "40px 36px", maxWidth: 400,
+            border: "1px solid rgba(236,108,4,0.3)", textAlign: "center",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+            animation: "cardEntrance 0.4s ease",
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#ec6c04", marginBottom: 12 }}>Sesión cerrada</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.6, marginBottom: 24 }}>{kickedMsg}</div>
+            <button
+              onClick={() => setKickedMsg(null)}
+              style={{
+                background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#fff",
+                border: "none", borderRadius: 10, padding: "10px 32px", fontSize: 13,
+                fontWeight: 700, cursor: "pointer",
+              }}
+            >Elegir otro perfil</button>
+          </div>
+        </div>
+      )}
+      <div style={{ opacity: showIntro || showUserSelect ? 0 : 1, pointerEvents: showIntro || showUserSelect ? "none" : "auto", transition: "opacity 0.6s ease 0.2s" }}>
     <style>{`
       @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes shimmer { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
@@ -2265,24 +2518,48 @@ export default function App() {
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ec6c04", marginLeft: 6, animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
         </div>
         <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)" }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>Usuario activo:</span>
-          <select
-            style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#ffffff", borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer", outline: "none", fontFamily: "inherit" }}
-            value={currentUserId || ""}
-            onChange={(e) => saveCurrentUser(e.target.value ? parseInt(e.target.value) : null)}
-          >
-            <option value="" style={{ background: "#1a1a2e" }}>— Seleccionar usuario —</option>
-            {participants.map((p) => (
-              <option key={p.id} value={p.id} style={{ background: "#1a1a2e" }}>{p.name}{p.isSuperUser ? " ★" : ""}</option>
-            ))}
-          </select>
-          {currentUser?.isSuperUser && (
-            <span style={{ fontSize: 10, background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#ffffff", padding: "2px 8px", borderRadius: 8, fontWeight: 700 }}>
-              SUPER USUARIO
-            </span>
+        {/* Active users indicator */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {activeUsers.map((u) => {
+            const color = getUserColor(u.name);
+            return (
+              <div key={u.userId} title={u.name} style={{ position: "relative" }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: "50%",
+                  background: `linear-gradient(135deg, ${color}, ${color}cc)`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 10, fontWeight: 800, color: "#fff",
+                  border: u.userId === activeUser?.id ? "2px solid #ec6c04" : "2px solid rgba(255,255,255,0.2)",
+                  transition: "border 0.3s",
+                }}>{getInitials(u.name)}</div>
+                <div style={{
+                  position: "absolute", bottom: -1, right: -1,
+                  width: 9, height: 9, borderRadius: "50%",
+                  background: "#27ae60", border: "2px solid #1a1a2e",
+                }} />
+              </div>
+            );
+          })}
+          {activeUsers.length === 0 && (
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontStyle: "italic" }}>Sin usuarios activos</span>
           )}
         </div>
+        <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)" }} />
+        {/* Current user + change */}
+        {activeUser && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>Sesión:</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{activeUser.name}</span>
+            {currentUser?.isSuperUser && (
+              <span style={{ fontSize: 9, background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#fff", padding: "2px 7px", borderRadius: 8, fontWeight: 700 }}>SUPER</span>
+            )}
+            <button onClick={handleChangeUser} style={{
+              background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)",
+              color: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "3px 10px",
+              cursor: "pointer", fontSize: 10, fontWeight: 500, transition: "all 0.2s",
+            }}>Cambiar</button>
+          </div>
+        )}
         <button onClick={exportXLSX} style={{
           marginLeft: "auto",
           background: "rgba(20,156,172,0.2)",

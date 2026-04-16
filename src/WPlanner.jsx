@@ -1814,6 +1814,7 @@ const dbToTask = (r) => ({
     : [],
   title: r.title || '',
   startDate: r.start_date || '',
+  endDate: r.end_date || '',
   estimatedTime: r.estimated_time ?? 5,
   type: r.type || 'Operativa',
   status: r.status || 'Sin iniciar',

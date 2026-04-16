@@ -714,13 +714,14 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
 }
 
 // ─── GanttTab ──────────────────────────────────────────────
-function GanttTab({ tasks, indicators, taskTypes }) {
+function GanttTab({ tasks, participants, indicators, taskTypes }) {
   const today = new Date().toISOString().split("T")[0];
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().split("T")[0]; });
   const [dateTo, setDateTo] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() + 2, 0); return d.toISOString().split("T")[0]; });
   const [fStatus, setFStatus] = useState("");
   const [fType, setFType] = useState("");
   const [fIndicator, setFIndicator] = useState("");
+  const [fParticipant, setFParticipant] = useState("");
 
   const filtered = useMemo(() => tasks.filter((t) => {
     if (!t.startDate || !t.endDate) return false;
@@ -728,8 +729,9 @@ function GanttTab({ tasks, indicators, taskTypes }) {
     if (fStatus && t.status !== fStatus) return false;
     if (fType && t.type !== fType) return false;
     if (fIndicator && t.indicator !== fIndicator) return false;
+    if (fParticipant && t.responsible !== fParticipant) return false;
     return true;
-  }), [tasks, dateFrom, dateTo, fStatus, fType, fIndicator]);
+  }), [tasks, dateFrom, dateTo, fStatus, fType, fIndicator, fParticipant]);
 
   const startMs = new Date(dateFrom).getTime();
   const endMs = new Date(dateTo).getTime();
@@ -808,6 +810,10 @@ function GanttTab({ tasks, indicators, taskTypes }) {
         <select style={ss} value={fIndicator} onChange={(e) => setFIndicator(e.target.value)}>
           <option value="">Todos los indicadores</option>
           {indicators.map((i) => <option key={i.id}>{i.name}</option>)}
+        </select>
+        <select style={ss} value={fParticipant} onChange={(e) => setFParticipant(e.target.value)}>
+          <option value="">Todos los participantes</option>
+          {participants.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
         </select>
       </div>
 
@@ -2221,7 +2227,7 @@ export default function App() {
         {activeTab === "board" && (
           <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={weights} />
         )}
-        {activeTab === "gantt" && <GanttTab tasks={tasks} indicators={indicators} taskTypes={taskTypes} />}
+        {activeTab === "gantt" && <GanttTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
         {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
         {activeTab === "config" && (
           configUnlocked ? (

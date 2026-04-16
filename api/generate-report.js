@@ -63,9 +63,9 @@ function buildPrompt({ weekStart, weekEnd, tasks, participants, indicators }) {
     return diff >= 0 && diff <= 5 && t.status !== "Finalizada" && t.status !== "Cancelada";
   });
 
-  // ── Correlaciones temáticas (títulos + comentarios + entregables) ──
+  // ── Resumen compacto por tarea (solo campos clave para reducir tokens) ──
   const todosLosTextos = tasks.map(t =>
-    `#${t.id} | Título: ${t.title} | Indicador: ${t.indicator || "N/A"} | Responsable: ${t.responsible || "N/A"} | Estado: ${t.status} | Progreso: ${t.progress_percent || 0}% | Aporte: ${t.aporte_snapshot || 0} | Dificultad: ${t.difficulty || "N/A"}/10 | Valor estratégico: ${t.strategic_value || "N/A"}/10 | Tipo: ${t.type || "N/A"} | Fecha inicio: ${t.startDate || t.start_date || "N/A"} | Fecha fin: ${t.endDate || t.end_date || "N/A"} | Entregable comprometido: ${t.expectedDelivery || "No definido"} | Comentarios: ${t.comments || "Sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + " " + s.text).join(", ") : "ninguna"}`
+    `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${t.progress_percent || 0}% | Aporte:${t.aporte_snapshot || 0} | Fin:${t.endDate || t.end_date || "N/A"} | Entregable:${t.expectedDelivery || "-"} | Comentario:${t.comments || "-"}`
   ).join("\n");
 
   const detalleResponsables = Object.entries(porResponsable).map(([nombre, d]) => `
@@ -229,7 +229,7 @@ module.exports = async function handler(req, res) {
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 8000,
+      max_tokens: 5000,
       messages: [{ role: "user", content: prompt }],
     });
 

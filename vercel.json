@@ -2,6 +2,15 @@
   "functions": {
     "api/send-report.js": {
       "maxDuration": 60
+    },
+    "api/cron.js": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "0 * * * *"
+    }
+  ]
 }

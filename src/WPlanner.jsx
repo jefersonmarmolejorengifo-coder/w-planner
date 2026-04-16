@@ -1284,7 +1284,11 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
   // Email config state
   const [emails, setEmails] = useState([]);
   const [newEmail, setNewEmail] = useState("");
+  const [frequency, setFrequency] = useState("weekly");
   const [sendDay, setSendDay] = useState("monday");
+  const [sendHour, setSendHour] = useState(8);
+  const [daysBack, setDaysBack] = useState(7);
+  const [daysForward, setDaysForward] = useState(7);
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailMsg, setEmailMsg] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -1295,7 +1299,11 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
       .then(({ data }) => {
         if (data) {
           setEmails(data.emails || []);
+          setFrequency(data.frequency || 'weekly');
           setSendDay(data.send_day || 'monday');
+          setSendHour(data.send_hour ?? 8);
+          setDaysBack(data.days_back ?? 7);
+          setDaysForward(data.days_forward ?? 7);
         }
       });
   }, []);
@@ -1303,7 +1311,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
   const saveEmailConfig = async () => {
     setEmailSaving(true);
     await supabase.from('email_config')
-      .update({ emails, send_day: sendDay })
+      .update({ emails, frequency, send_day: sendDay, send_hour: sendHour, days_back: daysBack, days_forward: daysForward })
       .eq('id', 1);
     setEmailSaving(false);
     setEmailMsg("Configuración guardada ✓");
@@ -1320,15 +1328,18 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
     setReportMsg("Generando reporte con IA... esto puede tomar 30 segundos.");
 
     const today = new Date();
-    const dayOfWeek = today.getDay();
-    const diffToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
-    const monday = new Date(today);
-    monday.setDate(today.getDate() + diffToMonday);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
     const fmt = (d) => d.toISOString().split("T")[0];
-    const weekStart = fmt(monday);
-    const weekEnd = fmt(sunday);
+    let weekStart;
+    if (daysBack === 0) {
+      weekStart = "2020-01-01";
+    } else {
+      const start = new Date(today);
+      start.setDate(today.getDate() - daysBack);
+      weekStart = fmt(start);
+    }
+    const end = new Date(today);
+    end.setDate(today.getDate() + daysForward);
+    const weekEnd = fmt(end);
 
     try {
       const genRes = await fetch('/api/generate-report', {
@@ -1500,22 +1511,93 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
       <div style={{ background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)", border: "1px solid rgba(84,44,156,0.1)" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#542c9c", borderBottom: "2px solid #ede8f8", paddingBottom: 10, marginBottom: 16 }}>
-          📧 Reporte semanal por correo
+          📧 Reporte IA por correo
         </div>
 
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
-            Día de envío automático
-          </label>
-          <select value={sendDay} onChange={(e) => setSendDay(e.target.value)} style={{ ...si, maxWidth: 200 }}>
-            <option value="monday">Lunes</option>
-            <option value="tuesday">Martes</option>
-            <option value="wednesday">Miércoles</option>
-            <option value="thursday">Jueves</option>
-            <option value="friday">Viernes</option>
-          </select>
+        {/* ── Periodicidad ─────────────────────────── */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: "1 1 180px" }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+              Periodicidad
+            </label>
+            <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={{ ...si, width: "100%" }}>
+              <option value="daily">Diario</option>
+              <option value="weekly">Semanal</option>
+              <option value="biweekly">Quincenal</option>
+              <option value="monthly">Mensual</option>
+              <option value="bimonthly">Bimensual</option>
+              <option value="quarterly">Trimestral</option>
+              <option value="semiannual">Semestral</option>
+            </select>
+          </div>
+          {(frequency === "weekly" || frequency === "biweekly") && (
+            <div style={{ flex: "1 1 150px" }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+                Día de envío
+              </label>
+              <select value={sendDay} onChange={(e) => setSendDay(e.target.value)} style={{ ...si, width: "100%" }}>
+                <option value="monday">Lunes</option>
+                <option value="tuesday">Martes</option>
+                <option value="wednesday">Miércoles</option>
+                <option value="thursday">Jueves</option>
+                <option value="friday">Viernes</option>
+                <option value="saturday">Sábado</option>
+                <option value="sunday">Domingo</option>
+              </select>
+            </div>
+          )}
+          <div style={{ flex: "1 1 120px" }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+              Hora de envío
+            </label>
+            <select value={sendHour} onChange={(e) => setSendHour(Number(e.target.value))} style={{ ...si, width: "100%" }}>
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+              ))}
+            </select>
+          </div>
         </div>
 
+        {/* ── Rango de análisis ────────────────────── */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: "1 1 180px" }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+              Días hacia atrás
+            </label>
+            <select value={daysBack} onChange={(e) => setDaysBack(Number(e.target.value))} style={{ ...si, width: "100%" }}>
+              <option value={0}>Desde el inicio</option>
+              <option value={7}>7 días</option>
+              <option value={10}>10 días</option>
+              <option value={15}>15 días</option>
+              <option value={25}>25 días</option>
+              <option value={30}>30 días</option>
+              <option value={60}>60 días</option>
+              <option value={90}>90 días</option>
+            </select>
+          </div>
+          <div style={{ flex: "1 1 180px" }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+              Días hacia adelante
+            </label>
+            <select value={daysForward} onChange={(e) => setDaysForward(Number(e.target.value))} style={{ ...si, width: "100%" }}>
+              <option value={0}>Solo hasta hoy</option>
+              <option value={5}>5 días</option>
+              <option value={7}>7 días</option>
+              <option value={10}>10 días</option>
+              <option value={15}>15 días</option>
+              <option value={30}>30 días</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 11, color: "#888", marginBottom: 14, padding: "8px 10px", background: "#f9f8fd", borderRadius: 8, lineHeight: 1.5 }}>
+          El reporte analizará tareas desde <strong>{daysBack === 0 ? "el inicio" : `hace ${daysBack} días`}</strong> hasta <strong>{daysForward === 0 ? "hoy" : `${daysForward} días en adelante`}</strong>.
+          Se enviará automáticamente con periodicidad <strong>{{daily:"diaria",weekly:"semanal",biweekly:"quincenal",monthly:"mensual",bimonthly:"bimensual",quarterly:"trimestral",semiannual:"semestral"}[frequency]}</strong>{(frequency === "weekly" || frequency === "biweekly") ? ` el día ${{"monday":"lunes","tuesday":"martes","wednesday":"miércoles","thursday":"jueves","friday":"viernes","saturday":"sábado","sunday":"domingo"}[sendDay]}` : ""} a las <strong>{String(sendHour).padStart(2,"0")}:00</strong>.
+        </div>
+
+        <div style={{ height: 1, background: "#f0f0f0", margin: "0 0 14px" }} />
+
+        {/* ── Destinatarios ────────────────────────── */}
         <div style={{ marginBottom: 14 }}>
           <label style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
             Destinatarios ({emails.length}/10)
@@ -1569,8 +1651,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, color: "#969696", marginBottom: 10, lineHeight: 1.5 }}>
-            El reporte incluye las tareas con fecha de inicio o fin dentro de la semana actual.
-            Claude IA analiza cada tarea, usuario y resultado en lenguaje natural.
+            Claude IA analiza cada tarea, usuario y resultado en lenguaje natural dentro del rango configurado.
           </div>
           <button onClick={generateAndSend} disabled={generating}
             style={{

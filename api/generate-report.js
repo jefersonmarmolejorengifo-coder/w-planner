@@ -174,8 +174,8 @@ module.exports = async function handler(req, res) {
   try {
     const prompt = buildPrompt({ weekStart, weekEnd, tasks });
     const response = await anthropic.messages.create({
-      model: "claude-opus-4-5",
-      max_tokens: 8000,
+      model: "claude-sonnet-4-6",
+      max_tokens: 6000,
       messages: [{ role: "user", content: prompt }],
     });
 

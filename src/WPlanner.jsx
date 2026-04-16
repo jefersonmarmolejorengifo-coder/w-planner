@@ -2236,79 +2236,77 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // ── Presence: active users tracking ────────────────────────
+  // ── Presence: track active users in real time ──────────────
   const presenceChannelRef = useRef(null);
+  const activeUserRef = useRef(null);
 
+  useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
+
+  // Single channel per session — key is our unique sessionId
   useEffect(() => {
-    if (!activeUser) {
-      // Clean up presence if user deselected
-      if (presenceChannelRef.current) {
-        supabase.removeChannel(presenceChannelRef.current);
-        presenceChannelRef.current = null;
-      }
-      return;
-    }
-
     const channel = supabase.channel('w-planner-presence', {
-      config: { presence: { key: String(activeUser.id) } },
+      config: { presence: { key: sessionIdRef.current } },
     });
 
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
-        const users = [];
-        Object.entries(state).forEach(([key, presences]) => {
-          if (presences.length > 0) {
-            const latest = presences[presences.length - 1];
-            users.push({ userId: Number(key), name: latest.name, sessionId: latest.sessionId });
-          }
+        // Flatten all presences into a list, dedupe by userId (newest wins)
+        const byUser = {};
+        Object.values(state).forEach(presences => {
+          presences.forEach(p => {
+            if (!p.userId) return; // observer with no track data
+            const existing = byUser[p.userId];
+            if (!existing || (p.onlineAt || '') > (existing.onlineAt || '')) {
+              byUser[p.userId] = p;
+            }
+          });
         });
+        const users = Object.values(byUser).map(p => ({
+          userId: p.userId, name: p.name, sessionId: p.sessionId,
+        }));
         setActiveUsers(users);
 
-        // Check if someone else took our user
-        const myUserPresences = state[String(activeUser.id)] || [];
-        const otherSession = myUserPresences.find(p => p.sessionId !== sessionIdRef.current);
-        if (otherSession && myUserPresences.length > 1) {
-          // The newest session wins — if we're not the newest, we get kicked
-          const newest = myUserPresences[myUserPresences.length - 1];
-          if (newest.sessionId !== sessionIdRef.current) {
-            setKickedMsg(`Alguien acaba de ingresar como "${activeUser.name}". Tu sesión ha sido cerrada.`);
-            setActiveUser(null);
-            setShowUserSelect(true);
-            channel.untrack();
-          }
+        // Check if someone newer took our userId
+        const currentActive = activeUserRef.current;
+        if (!currentActive) return;
+        const newestForMyUser = byUser[currentActive.id];
+        if (newestForMyUser && newestForMyUser.sessionId !== sessionIdRef.current) {
+          // Someone newer has our userId — we get kicked
+          setKickedMsg(`Alguien acaba de ingresar como "${currentActive.name}". Tu sesión ha sido cerrada.`);
+          setActiveUser(null);
+          setShowUserSelect(true);
+          channel.untrack();
         }
       })
-      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        // Another session joined with our same user ID
-        if (Number(key) === activeUser.id) {
-          const otherNew = newPresences.find(p => p.sessionId !== sessionIdRef.current);
-          if (otherNew) {
-            setKickedMsg(`Alguien acaba de ingresar como "${activeUser.name}". Tu sesión ha sido cerrada.`);
-            setActiveUser(null);
-            setShowUserSelect(true);
-            channel.untrack();
-          }
-        }
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({
-            name: activeUser.name,
-            sessionId: sessionIdRef.current,
-            userId: activeUser.id,
-            onlineAt: new Date().toISOString(),
-          });
-        }
-      });
+      .subscribe();
 
     presenceChannelRef.current = channel;
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
-    return () => {
+  // Track/untrack our presence when activeUser changes
+  useEffect(() => {
+    const channel = presenceChannelRef.current;
+    if (!channel) return;
+
+    if (!activeUser) {
       channel.untrack();
-      supabase.removeChannel(channel);
-      presenceChannelRef.current = null;
+      return;
+    }
+
+    const doTrack = () => {
+      channel.track({
+        name: activeUser.name,
+        sessionId: sessionIdRef.current,
+        userId: activeUser.id,
+        onlineAt: new Date().toISOString(),
+      });
     };
+
+    // Small delay to ensure channel is SUBSCRIBED
+    const timer = setTimeout(doTrack, 150);
+    return () => clearTimeout(timer);
   }, [activeUser]);
 
   const handleUserSelect = (participant) => {
@@ -2325,10 +2323,10 @@ export default function App() {
 
   const handleForceEntry = () => {
     if (!conflictUser) return;
-    // Force enter — the presence join event will kick the other session
     setKickedMsg(null);
     const p = conflictUser;
     setConflictUser(null);
+    // Force enter — our newer onlineAt will kick the old session via sync
     setActiveUser(p);
     setCurrentUserId(p.id);
     setShowUserSelect(false);

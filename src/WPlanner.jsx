@@ -1686,11 +1686,16 @@ const USER_COLORS = ["#ec6c04","#0aa0ab","#542c9c","#e74c3c","#27ae60","#2980b9"
 const getUserColor = (name) => USER_COLORS[Math.abs([...(name||"")].reduce((h, c) => h * 31 + c.charCodeAt(0), 0)) % USER_COLORS.length];
 const getInitials = (name) => (name || "?").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 
-function UserSelectScreen({ participants, activeUsers, onSelect }) {
+function UserSelectScreen({ participants, activeUsers, onSelect, onConflict }) {
   const [hovered, setHovered] = useState(null);
   const [selected, setSelected] = useState(null);
 
   const handleSelect = (p) => {
+    const online = activeUsers.some(u => u.userId === p.id);
+    if (online) {
+      onConflict(p);
+      return;
+    }
     setSelected(p.id);
     setTimeout(() => onSelect(p), 600);
   };
@@ -2094,6 +2099,7 @@ export default function App() {
   const [activeUser, setActiveUser] = useState(null);
   const [activeUsers, setActiveUsers] = useState([]);
   const [kickedMsg, setKickedMsg] = useState(null);
+  const [conflictUser, setConflictUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const sessionIdRef = useRef(crypto.randomUUID());
 
@@ -2307,8 +2313,24 @@ export default function App() {
 
   const handleUserSelect = (participant) => {
     setKickedMsg(null);
+    setConflictUser(null);
     setActiveUser(participant);
     setCurrentUserId(participant.id);
+    setShowUserSelect(false);
+  };
+
+  const handleConflict = (participant) => {
+    setConflictUser(participant);
+  };
+
+  const handleForceEntry = () => {
+    if (!conflictUser) return;
+    // Force enter — the presence join event will kick the other session
+    setKickedMsg(null);
+    const p = conflictUser;
+    setConflictUser(null);
+    setActiveUser(p);
+    setCurrentUserId(p.id);
     setShowUserSelect(false);
   };
 
@@ -2476,9 +2498,47 @@ export default function App() {
       )}
       {!loading && showIntro && <IntroScreen onFinish={() => { setShowIntro(false); setShowUserSelect(true); }} />}
       {!loading && !showIntro && showUserSelect && (
-        <UserSelectScreen participants={participants} activeUsers={activeUsers} onSelect={handleUserSelect} />
+        <UserSelectScreen participants={participants} activeUsers={activeUsers} onSelect={handleUserSelect} onConflict={handleConflict} />
       )}
-      {/* Kicked-out modal */}
+      {/* Conflict modal — user is already active, offer to take over or pick another */}
+      {conflictUser && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 99997,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#1a1a2e", borderRadius: 20, padding: "40px 36px", maxWidth: 420,
+            border: "1px solid rgba(236,108,4,0.3)", textAlign: "center",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+            animation: "cardEntrance 0.4s ease",
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>👤</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#ec6c04", marginBottom: 12 }}>Usuario ya activo</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.6, marginBottom: 24 }}>
+              <strong style={{ color: "#fff" }}>{conflictUser.name}</strong> ya tiene una sesión abierta en otro navegador. ¿Qué deseas hacer?
+            </div>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={() => setConflictUser(null)}
+                style={{
+                  background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)",
+                  border: "1px solid rgba(255,255,255,0.15)", borderRadius: 10, padding: "10px 24px", fontSize: 13,
+                  fontWeight: 600, cursor: "pointer", transition: "all 0.2s",
+                }}
+              >Elegir otro perfil</button>
+              <button
+                onClick={handleForceEntry}
+                style={{
+                  background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#fff",
+                  border: "none", borderRadius: 10, padding: "10px 24px", fontSize: 13,
+                  fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(236,108,4,0.4)",
+                }}
+              >Tomar sesión</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Kicked-out modal — shown to the session that was displaced */}
       {kickedMsg && (
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 99997,

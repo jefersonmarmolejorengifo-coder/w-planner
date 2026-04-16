@@ -813,7 +813,7 @@ function GanttTab({ tasks, participants, indicators, taskTypes }) {
         </select>
         <select style={ss} value={fParticipant} onChange={(e) => setFParticipant(e.target.value)}>
           <option value="">Todos los participantes</option>
-          {participants.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+          {(participants || []).map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
         </select>
       </div>
 

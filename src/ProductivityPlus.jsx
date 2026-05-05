@@ -1935,7 +1935,7 @@ function IntroScreen({ onFinish }) {
           </div>
         )}
 
-        {/* Logo W */}
+        {/* Logo P+ */}
         <div style={{
           fontSize: 100, fontWeight: 900, lineHeight: 1,
           background: "linear-gradient(135deg, #ec6c04 0%, #f5a623 40%, #149cac 100%)",
@@ -1945,7 +1945,7 @@ function IntroScreen({ onFinish }) {
           transition: "all 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)",
           animation: phase >= 2 ? "glowPulse 2.5s ease infinite" : "none",
           letterSpacing: -4, marginBottom: 8,
-        }}>W</div>
+        }}>P+</div>
 
         {/* Línea separadora */}
         <div style={{
@@ -1964,7 +1964,7 @@ function IntroScreen({ onFinish }) {
           opacity: phase >= 2 ? 1 : 0,
           animation: phase >= 2 ? "fadeUp 0.7s ease forwards" : "none",
           marginBottom: 6,
-        }}>PLANNER</div>
+        }}>PRODUCTIVITY-PLUS</div>
 
         {/* Subtítulo */}
         <div style={{
@@ -2180,7 +2180,7 @@ export default function App() {
   // ── Suscripciones Realtime ─────────────────────────────────
   useEffect(() => {
     const channel = supabase
-      .channel('w-planner-realtime')
+      .channel('productivity-plus-realtime')
 
       // TASKS
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' }, (payload) => {
@@ -2244,7 +2244,7 @@ export default function App() {
 
   // Single channel per session — key is our unique sessionId
   useEffect(() => {
-    const channel = supabase.channel('w-planner-presence', {
+    const channel = supabase.channel('productivity-plus-presence', {
       config: { presence: { key: sessionIdRef.current } },
     });
 

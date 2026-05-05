@@ -128,7 +128,7 @@ export default async function handler(req, res) {
     // 6. Call generate-report (our own edge function)
     const baseUrl = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
-      : "https://w-planner.vercel.app";
+      : "https://productivity-plus.vercel.app";
 
     const genRes = await fetch(`${baseUrl}/api/generate-report`, {
       method: "POST",

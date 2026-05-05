@@ -19,7 +19,7 @@ const supabase = createClient(
   env.VITE_SUPABASE_URL,
   env.VITE_SUPABASE_ANON_KEY
 );
-// Fórmula exacta del WPlanner (misma que calcAporte en WPlanner.jsx)
+// Fórmula exacta de Productivity-Plus (misma que calcAporte en ProductivityPlus.jsx)
 const calcAporte = (task, weights) =>
   ((task.estimated_time || 1) * (weights.tiempo || 40) +
     (task.difficulty || 1) * (weights.dificultad || 30) +

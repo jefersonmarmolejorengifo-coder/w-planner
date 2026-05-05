@@ -1731,9 +1731,9 @@ function UserSelectScreen({ participants, activeUsers, onSelect, onConflict }) {
           background: "linear-gradient(135deg, #ec6c04 0%, #f5a623 40%, #149cac 100%)",
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
           marginBottom: 12,
-        }}>W</div>
+        }}>P+</div>
         <div style={{ fontSize: 13, fontWeight: 300, color: "rgba(255,255,255,0.5)", letterSpacing: 8, textTransform: "uppercase", marginBottom: 8 }}>
-          PLANNER
+          PRODUCTIVITY-PLUS
         </div>
         <div style={{ height: 1, background: "linear-gradient(90deg, transparent, #ec6c04, #149cac, transparent)", width: 200, margin: "0 auto 20px" }} />
         <div style={{ fontSize: 18, fontWeight: 600, color: "#fff", letterSpacing: 1 }}>
@@ -2571,8 +2571,8 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #f8f4ff 0%, #e6f7f8 50%, #fff3ea 100%)", color: "var(--color-text-primary)", fontFamily: "var(--font-sans)" }}>
       <div style={{ background: "linear-gradient(90deg, #1a1a2e 0%, #2d1b4e 100%)", boxShadow: "0 2px 0 #ec6c04", padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 800, fontSize: 18, display: "flex", alignItems: "center", gap: 2 }}>
-          <span style={{ background: "linear-gradient(135deg, #ec6c04, #f07d1e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>W</span>
-          <span style={{ color: "#ffffff", fontWeight: 300, fontSize: 16 }}> Planner</span>
+          <span style={{ background: "linear-gradient(135deg, #ec6c04, #f07d1e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Productivity</span>
+          <span style={{ color: "#ffffff", fontWeight: 300, fontSize: 16 }}>-Plus</span>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ec6c04", marginLeft: 6, animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
         </div>
         <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)" }} />

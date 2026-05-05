@@ -79,6 +79,8 @@ const emptyTask = (id) => ({
   dependentTask: "",
   finalizedAt: null,
   dimensionValues: {},
+  krId: null,
+  sprintId: null,
 });
 
 // ─── calcAporte ────────────────────────────────────────────
@@ -161,7 +163,7 @@ const inp = {
 const readonlyInp = { ...inp, background: "#f4f4f4", color: "#969696", cursor: "default", border: "1.5px solid #e8e8e8" };
 
 // ─── TaskForm ──────────────────────────────────────────────
-function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions }) {
+function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [] }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
   const isSuperUser = currentUser?.isSuperUser;
@@ -441,6 +443,28 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
             <input type="number" style={inp} value={task.dependentTask} onChange={(e) => upd("dependentTask", e.target.value)} placeholder="Ej: 12" />
           </F>
 
+          {sprints.filter(s => s.status !== 'closed').length > 0 && (
+            <F label="Sprint" half>
+              <select style={inp} value={task.sprintId || ""} onChange={e => upd("sprintId", e.target.value ? Number(e.target.value) : null)}>
+                <option value="">— Sin sprint —</option>
+                {sprints.filter(s => s.status !== 'closed').map(s => (
+                  <option key={s.id} value={s.id}>[{s.status === 'active' ? '▶' : '◐'}] {s.name}</option>
+                ))}
+              </select>
+            </F>
+          )}
+
+          {keyResults.length > 0 && (
+            <F label="Resultado clave (OKR)" half>
+              <select style={inp} value={task.krId || ""} onChange={e => upd("krId", e.target.value ? Number(e.target.value) : null)}>
+                <option value="">— Sin KR —</option>
+                {keyResults.map(kr => (
+                  <option key={kr.id} value={kr.id}>{kr.title}</option>
+                ))}
+              </select>
+            </F>
+          )}
+
           <F label="Comentarios">
             <textarea style={{ ...inp, minHeight: 72, resize: "vertical" }} value={task.comments} onChange={(e) => upd("comments", e.target.value)} />
           </F>
@@ -475,6 +499,23 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
               )}
             </div>
           </F>
+          {taskHistory.length > 0 && (
+            <div style={{ gridColumn: "span 2" }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "#542c9c", marginBottom: 8 }}>Historial de cambios</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto" }}>
+                {taskHistory.map((h) => (
+                  <div key={h.id} style={{ display: "flex", gap: 8, fontSize: 11, padding: "5px 8px", background: "#fafafe", borderRadius: 6, border: "1px solid #e8e0f4" }}>
+                    <span style={{ color: "#969696", flexShrink: 0 }}>{new Date(h.changed_at).toLocaleString('es-CO', { timeZone: 'America/Bogota', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span style={{ color: "#542c9c", fontWeight: 600, flexShrink: 0 }}>{h.changed_by}</span>
+                    <span style={{ color: "#888" }}>{h.field_name}:</span>
+                    <span style={{ color: "#c0392b", textDecoration: "line-through" }}>{h.old_value || "—"}</span>
+                    <span style={{ color: "#888" }}>→</span>
+                    <span style={{ color: "#27ae60", fontWeight: 600 }}>{h.new_value || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -596,9 +637,10 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 }
 
 // ─── BoardTab ──────────────────────────────────────────────
-function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone }) {
+function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, keyResults = [], sprints = [] }) {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
+  const [taskHistory, setTaskHistory] = useState([]);
   const [fStatus, setFStatus] = useState("");
   const [fType, setFType] = useState("");
   const [fIndicator, setFIndicator] = useState("");
@@ -638,7 +680,15 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
       setModal("new");
     }
   };
-  const openEdit = (t) => { setForm({ ...t }); setModal(t.id); };
+  const openEdit = async (t) => {
+    setForm({ ...t });
+    setTaskHistory([]);
+    setModal(t.id);
+    if (projectId) {
+      const { data } = await supabase.from('task_history').select('*').eq('task_id', t.id).order('changed_at', { ascending: false }).limit(20);
+      if (data) setTaskHistory(data);
+    }
+  };
 
   // Open edit modal when triggered from DependenciesTab
   useEffect(() => {
@@ -741,7 +791,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}
         >
-          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} />
+          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} />
         </Modal>
       )}
     </div>
@@ -1166,6 +1216,38 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
               }} />
             </div>
           </div>
+
+          {participants.length > 0 && (
+            <Sec title="Carga de trabajo por persona">
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {participants.map(p => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const myTasks = tasks.filter(t => t.responsible === p.name && !['Finalizada', 'Cancelada'].includes(t.status));
+                  const overdue = myTasks.filter(t => t.endDate && t.endDate < today).length;
+                  const blocked = myTasks.filter(t => t.status === 'Bloqueada').length;
+                  const load = myTasks.length;
+                  const loadColor = load === 0 ? '#27ae60' : load <= 4 ? '#ec6c04' : '#c0392b';
+                  const color = getUserColor(p.name);
+                  return (
+                    <div key={p.id} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 12px', background: '#fafafa', borderRadius: 8, border: '1px solid #f0e8ff' }}>
+                      <div style={{ width: 34, height: 34, borderRadius: '50%', background: `linear-gradient(135deg, ${color}, ${color}cc)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', flexShrink: 0 }}>{getInitials(p.name)}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2d2d', marginBottom: 4 }}>{p.name}</div>
+                        <div style={{ height: 5, background: '#f0e8ff', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(100, load * 12)}%`, background: loadColor, borderRadius: 3, transition: 'width 0.4s' }} />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, fontSize: 11, flexShrink: 0 }}>
+                        <span style={{ background: '#ede8f8', color: '#542c9c', padding: '2px 8px', borderRadius: 12, fontWeight: 700 }}>{load} activas</span>
+                        {overdue > 0 && <span style={{ background: '#fde8e8', color: '#c0392b', padding: '2px 8px', borderRadius: 12, fontWeight: 700 }}>{overdue} vencidas</span>}
+                        {blocked > 0 && <span style={{ background: '#fff3ea', color: '#ec6c04', padding: '2px 8px', borderRadius: 12, fontWeight: 700 }}>{blocked} bloq.</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Sec>
+          )}
         </>
       )}
     </div>
@@ -1651,8 +1733,9 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
       </Sec>
 
       <div style={{ background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)", border: "1px solid rgba(84,44,156,0.1)" }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#542c9c", borderBottom: "2px solid #ede8f8", paddingBottom: 10, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#542c9c", borderBottom: "2px solid #ede8f8", paddingBottom: 10, marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
           📧 Reporte IA por correo
+          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 10px", borderRadius: 20, background: "linear-gradient(135deg,#ec6c04,#f5a623)", color: "#fff", letterSpacing: "0.05em" }}>PREMIUM</span>
         </div>
 
         {/* ── Periodicidad ─────────────────────────── */}
@@ -2162,7 +2245,7 @@ function IntroScreen({ onFinish }) {
 
 // ─── ProjectLandingScreen ──────────────────────────────────
 function ProjectLandingScreen({ onProjectLoaded }) {
-  const [tab, setTab] = useState('join'); // 'create' | 'join'
+  const [tab, setTab] = useState('join'); // 'create' | 'join' | 'template'
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [projName, setProjName] = useState("");
@@ -2170,6 +2253,14 @@ function ProjectLandingScreen({ onProjectLoaded }) {
   const [projPin, setProjPin] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [err, setErr] = useState("");
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [tplPin, setTplPin] = useState("");
+  const [tplCreating, setTplCreating] = useState(false);
+
+  useEffect(() => {
+    supabase.from('project_templates').select('*').then(({ data }) => { if (data) setTemplates(data); });
+  }, []);
 
   const createProject = async () => {
     if (!projName.trim()) { setErr("El nombre del proyecto es requerido."); return; }
@@ -2183,6 +2274,37 @@ function ProjectLandingScreen({ onProjectLoaded }) {
     if (error || !data) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setCreating(false); return; }
     localStorage.setItem('pp_project_id', String(data.id));
     onProjectLoaded(data);
+  };
+
+  const createFromTemplate = async () => {
+    if (!selectedTemplate) return;
+    if (!tplPin || tplPin.length < 4) { setErr("La clave debe tener al menos 4 caracteres."); return; }
+    setTplCreating(true); setErr("");
+    const tpl = selectedTemplate;
+    const config = {
+      pin: tplPin,
+      dimensions: tpl.config?.dimensions || DEFAULT_DIMENSIONS,
+    };
+    const { data: proj, error } = await supabase.from('projects').insert({ name: tpl.name, description: tpl.description, config }).select().single();
+    if (error || !proj) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setTplCreating(false); return; }
+    // Insert sample tasks
+    const taskSchema = Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : [];
+    if (taskSchema.length) {
+      const now = new Date().toISOString();
+      const sampleTasks = taskSchema.map((t, i) => ({
+        id: i + 1, title: t.title, type: t.type || 'Operativa', status: t.status || 'Sin iniciar',
+        project_id: proj.id, estimated_time: 5, difficulty: 5, strategic_value: 5,
+        progress_percent: 0, subtasks: [], indicators: [],
+      }));
+      await supabase.from('tasks').insert(sampleTasks);
+    }
+    // Insert sample indicators
+    const inds = Array.isArray(tpl.indicators) ? tpl.indicators : [];
+    if (inds.length) {
+      await supabase.from('indicators').insert(inds.map((name, i) => ({ id: i + 1, name, project_id: proj.id })));
+    }
+    localStorage.setItem('pp_project_id', String(proj.id));
+    onProjectLoaded(proj);
   };
 
   const joinProject = async () => {
@@ -2211,9 +2333,9 @@ function ProjectLandingScreen({ onProjectLoaded }) {
         <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
           {/* Tabs */}
           <div style={{ display: "flex", gap: 0, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: 4, marginBottom: 28 }}>
-            {[['join','Unirse a proyecto'],['create','Crear proyecto']].map(([t, l]) => (
-              <button key={t} onClick={() => { setTab(t); setErr(""); }}
-                style={{ flex: 1, background: tab === t ? "rgba(236,108,4,0.9)" : "transparent", color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: tab === t ? 700 : 400, fontSize: 13, transition: "all 0.2s" }}>
+            {[['join','Unirse'],['create','Crear'],['template','Plantillas']].map(([t, l]) => (
+              <button key={t} onClick={() => { setTab(t); setErr(""); setSelectedTemplate(null); }}
+                style={{ flex: 1, background: tab === t ? "rgba(236,108,4,0.9)" : "transparent", color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: tab === t ? 700 : 400, fontSize: 12, transition: "all 0.2s" }}>
                 {l}
               </button>
             ))}
@@ -2256,6 +2378,44 @@ function ProjectLandingScreen({ onProjectLoaded }) {
                 style={{ ...btnBase, background: creating ? "#555" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", boxShadow: creating ? "none" : "0 4px 20px rgba(84,44,156,0.4)", marginTop: 4 }}>
                 {creating ? "Creando proyecto..." : "Crear proyecto →"}
               </button>
+            </div>
+          )}
+
+          {tab === 'template' && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {templates.length === 0 && (
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", textAlign: "center", padding: "20px 0" }}>Cargando plantillas...</div>
+              )}
+              {!selectedTemplate ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {templates.map(tpl => (
+                    <div key={tpl.id} onClick={() => setSelectedTemplate(tpl)} style={{ background: "rgba(255,255,255,0.07)", border: "1.5px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "14px 16px", cursor: "pointer", transition: "all 0.2s" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 4 }}>{tpl.name}</div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>{tpl.description}</div>
+                      <div style={{ marginTop: 8, fontSize: 11, color: "rgba(236,108,4,0.8)" }}>
+                        {(Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : []).length} tareas de ejemplo
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button onClick={() => setSelectedTemplate(null)} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 12 }}>← Volver</button>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{selectedTemplate.name}</span>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>Clave de configuración *</label>
+                    <input type="password" style={{ ...inp, background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", color: "#fff" }}
+                      value={tplPin} onChange={e => setTplPin(e.target.value)} placeholder="Mínimo 4 caracteres..." autoFocus />
+                  </div>
+                  {err && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{err}</div>}
+                  <button onClick={createFromTemplate} disabled={tplCreating}
+                    style={{ ...btnBase, background: tplCreating ? "#555" : "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", boxShadow: tplCreating ? "none" : "0 4px 20px rgba(236,108,4,0.4)" }}>
+                    {tplCreating ? "Creando..." : `Crear proyecto desde "${selectedTemplate.name}" →`}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2466,6 +2626,444 @@ function DependenciesTab({ tasks, onEditTask }) {
   );
 }
 
+// ─── OKRsTab ───────────────────────────────────────────────
+function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks }) {
+  const [creating, setCreating] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({ title: '', description: '', quarter: Math.ceil((new Date().getMonth() + 1) / 3), year: new Date().getFullYear() });
+  const [addingKrFor, setAddingKrFor] = useState(null);
+  const [krForm, setKrForm] = useState({ title: '', target_value: 100, unit: '%' });
+
+  const btn = (v) => ({ border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12, padding: '6px 14px', transition: 'all 0.2s', background: v === 'primary' ? 'linear-gradient(135deg,#542c9c,#6e3ebf)' : v === 'danger' ? 'linear-gradient(135deg,#c0392b,#e74c3c)' : '#f4f4f4', color: (v === 'primary' || v === 'danger') ? '#fff' : '#666' });
+  const si = { background: '#fafafa', border: '1.5px solid #e0e0e0', borderRadius: 8, color: '#2d2d2d', padding: '8px 12px', fontSize: 13, width: '100%', boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' };
+
+  const resetForm = () => { setForm({ title: '', description: '', quarter: Math.ceil((new Date().getMonth() + 1) / 3), year: new Date().getFullYear() }); setCreating(false); setEditId(null); };
+
+  const saveOkr = async () => {
+    if (!form.title.trim()) return;
+    if (editId) {
+      await supabase.from('okrs').update({ title: form.title, description: form.description, quarter: form.quarter, year: form.year }).eq('id', editId);
+      setOkrs(prev => prev.map(o => o.id === editId ? { ...o, ...form } : o));
+    } else {
+      const { data } = await supabase.from('okrs').insert({ ...form, project_id: projectId, status: 'active' }).select().single();
+      if (data) setOkrs(prev => [...prev, data]);
+    }
+    resetForm();
+  };
+
+  const deleteOkr = async (id) => {
+    if (!confirm('¿Eliminar este objetivo y todos sus resultados clave?')) return;
+    await supabase.from('okrs').delete().eq('id', id);
+    setOkrs(prev => prev.filter(o => o.id !== id));
+    setKeyResults(prev => prev.filter(kr => kr.okr_id !== id));
+  };
+
+  const toggleStatus = async (okr) => {
+    const ns = okr.status === 'active' ? 'closed' : 'active';
+    await supabase.from('okrs').update({ status: ns }).eq('id', okr.id);
+    setOkrs(prev => prev.map(o => o.id === okr.id ? { ...o, status: ns } : o));
+  };
+
+  const saveKr = async () => {
+    if (!krForm.title.trim() || !addingKrFor) return;
+    const { data } = await supabase.from('key_results').insert({ ...krForm, okr_id: addingKrFor, current_value: 0 }).select().single();
+    if (data) setKeyResults(prev => [...prev, data]);
+    setKrForm({ title: '', target_value: 100, unit: '%' });
+    setAddingKrFor(null);
+  };
+
+  const updateKrValue = async (kr, delta) => {
+    const nv = Math.max(0, Math.min(Number(kr.target_value), Number(kr.current_value) + delta));
+    await supabase.from('key_results').update({ current_value: nv }).eq('id', kr.id);
+    setKeyResults(prev => prev.map(k => k.id === kr.id ? { ...k, current_value: nv } : k));
+  };
+
+  const deleteKr = async (id) => {
+    await supabase.from('key_results').delete().eq('id', id);
+    setKeyResults(prev => prev.filter(k => k.id !== id));
+  };
+
+  const getKrPct = (kr) => {
+    const linked = tasks.filter(t => t.krId === kr.id);
+    if (linked.length) return (linked.filter(t => t.status === 'Finalizada').length / linked.length) * 100;
+    return Number(kr.target_value) > 0 ? (Number(kr.current_value) / Number(kr.target_value)) * 100 : 0;
+  };
+
+  const grouped = {};
+  okrs.forEach(o => { const k = `${o.year}-Q${o.quarter}`; if (!grouped[k]) grouped[k] = []; grouped[k].push(o); });
+  const periods = Object.keys(grouped).sort().reverse();
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#542c9c' }}>OKRs · Objetivos y Resultados Clave</div>
+        <button onClick={() => { setCreating(true); setEditId(null); setForm({ title: '', description: '', quarter: Math.ceil((new Date().getMonth() + 1) / 3), year: new Date().getFullYear() }); }} style={{ ...btn('primary'), marginLeft: 'auto' }}>+ Nuevo objetivo</button>
+      </div>
+
+      {(creating || editId) && (
+        <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 2px 14px rgba(84,44,156,0.07)', marginBottom: 16, border: '2px solid rgba(84,44,156,0.15)' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#542c9c', marginBottom: 12 }}>{editId ? 'Editar objetivo' : 'Nuevo objetivo'}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div style={{ gridColumn: 'span 2' }}><input style={si} placeholder="Título del objetivo *" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} autoFocus /></div>
+            <div style={{ gridColumn: 'span 2' }}><input style={si} placeholder="Descripción (opcional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
+            <select style={si} value={form.quarter} onChange={e => setForm(f => ({ ...f, quarter: Number(e.target.value) }))}>
+              {[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}
+            </select>
+            <input type="number" style={si} min={2020} max={2099} value={form.year} onChange={e => setForm(f => ({ ...f, year: Number(e.target.value) }))} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={saveOkr} style={btn('primary')}>Guardar</button>
+            <button onClick={resetForm} style={btn()}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {okrs.length === 0 && !creating && (
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#969696', fontSize: 14 }}>
+          No hay objetivos registrados.<br /><span style={{ fontSize: 12 }}>Crea objetivos para medir el progreso de tu equipo.</span>
+        </div>
+      )}
+
+      {periods.map(period => (
+        <div key={period} style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>{period.replace('-', ' · ')}</div>
+          {grouped[period].map(okr => {
+            const krs = keyResults.filter(kr => kr.okr_id === okr.id);
+            const avgPct = krs.length ? krs.reduce((s, kr) => s + getKrPct(kr), 0) / krs.length : 0;
+            const isActive = okr.status === 'active';
+            return (
+              <div key={okr.id} style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 2px 14px rgba(84,44,156,0.07)', marginBottom: 12, borderLeft: `4px solid ${isActive ? '#542c9c' : '#ccc'}` }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: '#2d2d2d' }}>{okr.title}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: isActive ? '#e8f8ee' : '#f4f4f4', color: isActive ? '#27ae60' : '#969696', textTransform: 'uppercase' }}>{isActive ? 'Activo' : 'Cerrado'}</span>
+                    </div>
+                    {okr.description && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{okr.description}</div>}
+                    {krs.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, height: 8, background: '#f0e8ff', borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${avgPct}%`, background: avgPct >= 80 ? '#27ae60' : avgPct >= 40 ? '#ec6c04' : '#c0392b', borderRadius: 4, transition: 'width 0.4s' }} />
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#542c9c', flexShrink: 0 }}>{avgPct.toFixed(0)}%</span>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button onClick={() => { setEditId(okr.id); setCreating(false); setForm({ title: okr.title, description: okr.description || '', quarter: okr.quarter, year: okr.year }); }} style={{ ...btn(), padding: '6px 10px' }}>✏️</button>
+                    <button onClick={() => toggleStatus(okr)} style={{ ...btn(), fontSize: 11 }}>{isActive ? '🔒 Cerrar' : '🔓 Reabrir'}</button>
+                    <button onClick={() => deleteOkr(okr.id)} style={{ ...btn('danger'), padding: '6px 10px' }}>🗑️</button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {krs.map(kr => {
+                    const pct = getKrPct(kr);
+                    const linked = tasks.filter(t => t.krId === kr.id);
+                    const fromTasks = linked.length > 0;
+                    return (
+                      <div key={kr.id} style={{ background: '#faf8ff', borderRadius: 10, padding: '10px 14px', border: '1px solid #e8e0f4' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#2d2d2d', flex: 1 }}>{kr.title}</span>
+                          {!fromTasks && (
+                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                              <button onClick={() => updateKrValue(kr, -10)} style={{ ...btn(), padding: '2px 8px' }}>−</button>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#542c9c', minWidth: 60, textAlign: 'center' }}>{Number(kr.current_value)}/{Number(kr.target_value)} {kr.unit}</span>
+                              <button onClick={() => updateKrValue(kr, 10)} style={{ ...btn(), padding: '2px 8px' }}>+</button>
+                            </div>
+                          )}
+                          {fromTasks && (
+                            <span style={{ fontSize: 11, color: '#542c9c', fontWeight: 600 }}>{linked.filter(t => t.status === 'Finalizada').length}/{linked.length} tareas</span>
+                          )}
+                          <button onClick={() => deleteKr(kr.id)} style={{ ...btn('danger'), padding: '2px 8px' }}>✕</button>
+                        </div>
+                        <div style={{ height: 5, background: '#e8e0f4', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: pct >= 80 ? '#27ae60' : pct >= 40 ? '#ec6c04' : '#c0392b', borderRadius: 3, transition: 'width 0.4s' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {addingKrFor === okr.id ? (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input style={{ ...si, flex: 2, minWidth: 160 }} placeholder="Resultado clave *" value={krForm.title} onChange={e => setKrForm(f => ({ ...f, title: e.target.value }))} autoFocus />
+                      <input type="number" style={{ ...si, width: 70 }} placeholder="Meta" value={krForm.target_value} onChange={e => setKrForm(f => ({ ...f, target_value: Number(e.target.value) }))} />
+                      <input style={{ ...si, width: 55 }} placeholder="%" value={krForm.unit} onChange={e => setKrForm(f => ({ ...f, unit: e.target.value }))} />
+                      <button onClick={saveKr} style={btn('primary')}>✓</button>
+                      <button onClick={() => { setAddingKrFor(null); setKrForm({ title: '', target_value: 100, unit: '%' }); }} style={btn()}>✕</button>
+                    </div>
+                  ) : isActive && (
+                    <button onClick={() => setAddingKrFor(okr.id)} style={{ ...btn(), textAlign: 'left', fontSize: 11, padding: '5px 12px' }}>+ Agregar resultado clave</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── SprintsTab ────────────────────────────────────────────
+function SprintsTab({ projectId, sprints, setSprints, tasks, updateTask }) {
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ name: '', goal: '', start_date: '', end_date: '' });
+  const today = new Date().toISOString().split('T')[0];
+
+  const btn = (v) => ({ border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12, padding: '6px 14px', transition: 'all 0.2s', background: v === 'green' ? 'linear-gradient(135deg,#27ae60,#2ecc71)' : v === 'danger' ? 'linear-gradient(135deg,#c0392b,#e74c3c)' : v === 'primary' ? 'linear-gradient(135deg,#542c9c,#6e3ebf)' : '#f4f4f4', color: (v === 'green' || v === 'danger' || v === 'primary') ? '#fff' : '#666' });
+  const si = { background: '#fafafa', border: '1.5px solid #e0e0e0', borderRadius: 8, color: '#2d2d2d', padding: '8px 12px', fontSize: 13, width: '100%', boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' };
+
+  const activeSprint = sprints.find(s => s.status === 'active');
+
+  const saveSprint = async () => {
+    if (!form.name.trim()) return;
+    const { data } = await supabase.from('sprints').insert({ ...form, project_id: projectId, status: 'planning' }).select().single();
+    if (data) setSprints(prev => [...prev, data]);
+    setForm({ name: '', goal: '', start_date: '', end_date: '' });
+    setCreating(false);
+  };
+
+  const startSprint = async (id) => {
+    if (activeSprint) { alert('Ya hay un sprint activo. Ciérralo antes de iniciar otro.'); return; }
+    await supabase.from('sprints').update({ status: 'active' }).eq('id', id);
+    setSprints(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
+  };
+
+  const closeSprint = async (id) => {
+    await supabase.from('sprints').update({ status: 'closed' }).eq('id', id);
+    setSprints(prev => prev.map(s => s.id === id ? { ...s, status: 'closed' } : s));
+  };
+
+  const deleteSprint = async (id) => {
+    if (!confirm('¿Eliminar este sprint?')) return;
+    await supabase.from('sprints').delete().eq('id', id);
+    setSprints(prev => prev.filter(s => s.id !== id));
+  };
+
+  const SprintCard = ({ sprint }) => {
+    const spTasks = tasks.filter(t => t.sprintId === sprint.id);
+    const done = spTasks.filter(t => t.status === 'Finalizada').length;
+    const blocked = spTasks.filter(t => t.status === 'Bloqueada').length;
+    const pct = spTasks.length ? Math.round((done / spTasks.length) * 100) : 0;
+    const isActive = sprint.status === 'active';
+    const isPlanning = sprint.status === 'planning';
+    const sc = isActive ? '#ec6c04' : isPlanning ? '#542c9c' : '#969696';
+
+    // Burndown data
+    const bdPoints = [];
+    if (sprint.start_date && sprint.end_date && spTasks.length) {
+      const start = new Date(sprint.start_date);
+      const end = new Date(sprint.end_date);
+      const days = Math.max(1, Math.ceil((end - start) / 86400000));
+      for (let i = 0; i <= Math.min(days, 14); i++) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        const ds = d.toISOString().split('T')[0];
+        if (ds > today) break;
+        const remaining = spTasks.filter(t => !t.finalizedAt || t.finalizedAt.split(' ')[0] > ds).length;
+        bdPoints.push({ x: i, y: remaining });
+      }
+    }
+    const bdMax = Math.max(1, spTasks.length);
+    const BDW = 260, BDH = 70;
+
+    return (
+      <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 2px 14px rgba(84,44,156,0.07)', marginBottom: 12, borderLeft: `4px solid ${sc}` }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#2d2d2d' }}>{sprint.name}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: isActive ? '#fff3ea' : '#f4f4f4', color: sc, textTransform: 'uppercase' }}>{sprint.status}</span>
+            </div>
+            {sprint.goal && <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>{sprint.goal}</div>}
+            <div style={{ display: 'flex', gap: 14, fontSize: 11, color: '#666', flexWrap: 'wrap' }}>
+              {sprint.start_date && <span>📅 {sprint.start_date}</span>}
+              {sprint.end_date && <span>🏁 {sprint.end_date}</span>}
+              <span style={{ color: '#542c9c', fontWeight: 700 }}>{spTasks.length} tareas</span>
+              {spTasks.length > 0 && <span style={{ color: '#27ae60', fontWeight: 600 }}>{done} ✓</span>}
+              {blocked > 0 && <span style={{ color: '#c0392b', fontWeight: 600 }}>{blocked} bloq.</span>}
+            </div>
+            {spTasks.length > 0 && (
+              <div style={{ marginTop: 8, height: 6, background: '#f0e8ff', borderRadius: 3, overflow: 'hidden', maxWidth: 240 }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: pct >= 80 ? '#27ae60' : '#ec6c04', borderRadius: 3, transition: 'width 0.4s' }} />
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {isPlanning && <button onClick={() => startSprint(sprint.id)} style={btn('green')}>▶ Iniciar</button>}
+            {isActive && <button onClick={() => closeSprint(sprint.id)} style={btn()}>⏹ Cerrar</button>}
+            <button onClick={() => deleteSprint(sprint.id)} style={{ ...btn('danger'), padding: '6px 10px' }}>🗑️</button>
+          </div>
+        </div>
+
+        {bdPoints.length > 1 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Burndown</div>
+            <svg width={BDW} height={BDH + 16} style={{ display: 'block', overflow: 'visible' }}>
+              <line x1={0} y1={0} x2={BDW} y2={BDH} stroke="#ddd" strokeWidth={1} strokeDasharray="4" />
+              <polyline points={bdPoints.map((p, i) => `${(i / Math.max(bdPoints.length - 1, 1)) * BDW},${(p.y / bdMax) * BDH}`).join(' ')} fill="none" stroke="#ec6c04" strokeWidth={2} strokeLinejoin="round" />
+              {bdPoints.map((p, i) => <circle key={i} cx={(i / Math.max(bdPoints.length - 1, 1)) * BDW} cy={(p.y / bdMax) * BDH} r={3} fill="#ec6c04" />)}
+              <text x={2} y={10} style={{ fontSize: 9, fill: '#aaa', fontFamily: 'inherit' }}>{bdMax}</text>
+              <text x={2} y={BDH - 2} style={{ fontSize: 9, fill: '#aaa', fontFamily: 'inherit' }}>0</text>
+            </svg>
+          </div>
+        )}
+
+        {isActive && spTasks.length > 0 && (
+          <div style={{ marginTop: 12, borderTop: '1px solid #f0e8ff', paddingTop: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Tareas en este sprint</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {spTasks.map(t => (
+                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', background: '#fafafe', borderRadius: 6, border: '1px solid #e8e0f4' }}>
+                  <div style={{ width: 7, height: 7, borderRadius: 2, background: STATUS_COLORS[t.status] || '#888', flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, flex: 1, color: '#2d2d2d' }}>#{t.id} {t.title}</span>
+                  <span style={{ fontSize: 10, color: STATUS_COLORS[t.status], fontWeight: 600 }}>{t.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const active = sprints.filter(s => s.status === 'active');
+  const planning = sprints.filter(s => s.status === 'planning');
+  const closed = sprints.filter(s => s.status === 'closed');
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#542c9c' }}>Sprints</div>
+        <button onClick={() => setCreating(true)} style={{ ...btn('primary'), marginLeft: 'auto' }}>+ Nuevo sprint</button>
+      </div>
+
+      {creating && (
+        <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 2px 14px rgba(84,44,156,0.07)', marginBottom: 16, border: '2px solid rgba(84,44,156,0.15)' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#542c9c', marginBottom: 12 }}>Nuevo sprint</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div style={{ gridColumn: 'span 2' }}><input style={si} placeholder="Nombre del sprint *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus /></div>
+            <div style={{ gridColumn: 'span 2' }}><input style={si} placeholder="Objetivo del sprint..." value={form.goal} onChange={e => setForm(f => ({ ...f, goal: e.target.value }))} /></div>
+            <input type="date" style={si} value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} />
+            <input type="date" style={si} value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={saveSprint} style={btn('primary')}>Guardar</button>
+            <button onClick={() => { setCreating(false); setForm({ name: '', goal: '', start_date: '', end_date: '' }); }} style={btn()}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {active.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: '#ec6c04', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Sprint activo</div>}
+      {active.map(s => <SprintCard key={s.id} sprint={s} />)}
+
+      {planning.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, marginTop: 16 }}>En planificación</div>}
+      {planning.map(s => <SprintCard key={s.id} sprint={s} />)}
+
+      {closed.length > 0 && <div style={{ fontSize: 11, fontWeight: 700, color: '#969696', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, marginTop: 16 }}>Cerrados</div>}
+      {closed.map(s => <SprintCard key={s.id} sprint={s} />)}
+
+      {sprints.length === 0 && !creating && (
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#969696', fontSize: 14 }}>
+          No hay sprints registrados.<br /><span style={{ fontSize: 12 }}>Crea un sprint para organizar el trabajo en ciclos cortos.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── FocusTab (Mi Día) ─────────────────────────────────────
+function FocusTab({ tasks, activeUser, updateTask, dimensions }) {
+  const today = new Date().toISOString().split('T')[0];
+
+  const myTasks = useMemo(() => {
+    if (!activeUser) return [];
+    return tasks
+      .filter(t => t.responsible === activeUser.name && !['Finalizada', 'Cancelada'].includes(t.status))
+      .sort((a, b) => {
+        const ao = a.endDate && a.endDate < today ? 1 : 0;
+        const bo = b.endDate && b.endDate < today ? 1 : 0;
+        if (bo !== ao) return bo - ao;
+        return calcAporte(b, dimensions) - calcAporte(a, dimensions);
+      });
+  }, [tasks, activeUser, dimensions, today]);
+
+  const setStatus = async (task, newStatus) => {
+    await updateTask({ ...task, status: newStatus, ...(newStatus === 'Finalizada' && !task.finalizedAt ? { finalizedAt: getColombiaNow() } : {}) });
+  };
+
+  const emoji = { 'Sin iniciar': '⏳', 'En proceso': '🔄', 'En pausa': '⏸', 'Bloqueada': '🔒', 'Finalizada': '✅' };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#542c9c' }}>
+          Mi Día {activeUser && <span style={{ fontWeight: 400, fontSize: 14, color: '#888' }}>· {activeUser.name}</span>}
+        </div>
+        {myTasks.length > 0 && <span style={{ fontSize: 12, color: '#969696', marginLeft: 'auto' }}>{myTasks.length} tarea{myTasks.length !== 1 ? 's' : ''} activa{myTasks.length !== 1 ? 's' : ''}</span>}
+      </div>
+
+      {!activeUser && (
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#969696' }}>Inicia sesión con tu perfil para ver tus tareas.</div>
+      )}
+
+      {activeUser && myTasks.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🎉</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#27ae60', marginBottom: 8 }}>¡Todo al día!</div>
+          <div style={{ fontSize: 13, color: '#969696' }}>No tienes tareas activas asignadas.</div>
+        </div>
+      )}
+
+      {myTasks.map(t => {
+        const isOverdue = t.endDate && t.endDate < today;
+        const aporte = calcAporte(t, dimensions);
+        return (
+          <div key={t.id} style={{
+            background: '#fff', borderRadius: 14, padding: '14px 18px', marginBottom: 10,
+            boxShadow: '0 2px 14px rgba(84,44,156,0.07)',
+            borderLeft: `4px solid ${isOverdue ? '#c0392b' : STATUS_COLORS[t.status] || '#888'}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                  <span style={{ fontSize: 10, color: '#969696' }}>#{t.id}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#2d2d2d' }}>{t.title}</span>
+                  {isOverdue && <span style={{ fontSize: 10, fontWeight: 700, background: '#fde8e8', color: '#c0392b', padding: '1px 7px', borderRadius: 8 }}>VENCIDA</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#888', flexWrap: 'wrap' }}>
+                  <span>{emoji[t.status] || '•'} {t.status}</span>
+                  {t.endDate && <span>🏁 {t.endDate}</span>}
+                  <span style={{ color: '#ec6c04', fontWeight: 600 }}>★ {aporte.toFixed(1)}</span>
+                  {t.progressPercent > 0 && <span>{Number(t.progressPercent).toFixed(0)}%</span>}
+                </div>
+                {t.subtasks?.length > 0 && (
+                  <div style={{ marginTop: 5, height: 4, background: '#f0e8ff', borderRadius: 2, overflow: 'hidden', maxWidth: 180 }}>
+                    <div style={{ height: '100%', width: `${t.progressPercent || 0}%`, background: '#ec6c04', borderRadius: 2 }} />
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                {['En proceso', 'En pausa', 'Finalizada'].filter(s => s !== t.status).map(s => (
+                  <button key={s} onClick={() => setStatus(t, s)} style={{
+                    border: 'none', borderRadius: 7, cursor: 'pointer', fontWeight: 700, fontSize: 11, padding: '5px 10px',
+                    background: s === 'Finalizada' ? 'linear-gradient(135deg,#27ae60,#2ecc71)' : s === 'En proceso' ? 'linear-gradient(135deg,#ec6c04,#f07d1e)' : '#f4f4f4',
+                    color: (s === 'Finalizada' || s === 'En proceso') ? '#fff' : '#666',
+                    title: s,
+                  }}>
+                    {s === 'Finalizada' ? '✓' : s === 'En proceso' ? '▶' : '⏸'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main App ──────────────────────────────────────────────
 
 const dbToTask = (r) => ({
@@ -2501,6 +3099,8 @@ const dbToTask = (r) => ({
   aporteSnapshot: r.aporte_snapshot ?? null,
   finalizedAt: r.finalized_at || null,
   dimensionValues: r.dimension_values || {},
+  krId: r.kr_id || null,
+  sprintId: r.sprint_id || null,
 });
 
 const taskToDb = (t) => ({
@@ -2528,6 +3128,8 @@ const taskToDb = (t) => ({
   aporte_snapshot: t.aporteSnapshot,
   finalized_at: t.finalizedAt,
   dimension_values: t.dimensionValues || {},
+  kr_id: t.krId || null,
+  sprint_id: t.sprintId || null,
 });
 
 export default function App() {
@@ -2554,6 +3156,13 @@ export default function App() {
   const [showProjectLanding, setShowProjectLanding] = useState(false);
   const [projectPin, setProjectPin] = useState(DEFAULT_PIN);
   const [depEditTask, setDepEditTask] = useState(null);
+  const [okrs, setOkrs] = useState([]);
+  const [keyResults, setKeyResults] = useState([]);
+  const [sprints, setSprints] = useState([]);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [dismissedNotifs, setDismissedNotifs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('pp_dismissed_notifs') || '[]'); } catch { return []; }
+  });
   const sessionIdRef = useRef(crypto.randomUUID());
 
   const loadParticipants = async () => {
@@ -2596,12 +3205,16 @@ export default function App() {
         { data: indsData },
         { data: typesData },
         { data: configData },
+        { data: okrsData },
+        { data: sprintsData },
       ] = await Promise.all([
         q('tasks').order('id'),
         q('participants').order('id'),
         q('indicators').order('id'),
         supabase.from('task_types').select('*').order('name', { ascending: true }),
         q('app_config'),
+        pid ? supabase.from('okrs').select('*').eq('project_id', pid).order('year').order('quarter') : Promise.resolve({ data: [] }),
+        pid ? supabase.from('sprints').select('*').eq('project_id', pid).order('created_at') : Promise.resolve({ data: [] }),
       ]);
 
       if (tasksData) setTasks(tasksData.map(dbToTask));
@@ -2614,6 +3227,16 @@ export default function App() {
           if (row.key === 'currentUserId') setCurrentUserId(row.value === null ? null : Number(row.value));
         });
       }
+
+      if (okrsData) {
+        setOkrs(okrsData);
+        if (okrsData.length) {
+          const okrIds = okrsData.map(o => o.id);
+          const { data: krsData } = await supabase.from('key_results').select('*').in('okr_id', okrIds).order('id');
+          if (krsData) setKeyResults(krsData);
+        }
+      }
+      if (sprintsData) setSprints(sprintsData);
 
       // Load dimensions and pin from project config
       const p = proj || project;
@@ -2868,6 +3491,22 @@ export default function App() {
     }
     const { error } = await supabase.from('tasks').update(dbTask).eq('id', task.id);
     if (!error) {
+      // Log significant field changes to task_history
+      if (projectId && activeUser) {
+        const oldTask = tasks.find(t => t.id === task.id);
+        if (oldTask) {
+          const tracked = [
+            { field: 'status', oldV: oldTask.status, newV: task.status },
+            { field: 'responsible', oldV: oldTask.responsible, newV: task.responsible },
+            { field: 'progressPercent', oldV: String(oldTask.progressPercent), newV: String(task.progressPercent) },
+          ];
+          for (const f of tracked) {
+            if (f.oldV !== f.newV) {
+              supabase.from('task_history').insert({ task_id: task.id, project_id: projectId, changed_by: activeUser.name, field_name: f.field, old_value: f.oldV, new_value: f.newV }).then(() => {});
+            }
+          }
+        }
+      }
       setTasks(prev => prev.map(t => t.id === task.id ? task : t));
     } else {
       console.error('Error actualizando tarea:', error);
@@ -2984,11 +3623,32 @@ export default function App() {
     XLSX.writeFile(wb, `productivity-plus_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
+  const today = new Date().toISOString().split('T')[0];
+  const alerts = useMemo(() => {
+    const result = [];
+    tasks.forEach(t => {
+      if (t.endDate && t.endDate < today && !['Finalizada', 'Cancelada'].includes(t.status))
+        result.push({ id: `overdue-${t.id}`, type: 'danger', msg: `Vencida: #${t.id} "${t.title}"` });
+      if (t.status === 'Bloqueada')
+        result.push({ id: `blocked-${t.id}`, type: 'warning', msg: `Bloqueada: #${t.id} "${t.title}"` });
+    });
+    return result;
+  }, [tasks, today]);
+  const visibleAlerts = alerts.filter(a => !dismissedNotifs.includes(a.id));
+  const dismissAlert = (id) => {
+    const next = [...dismissedNotifs, id];
+    setDismissedNotifs(next);
+    localStorage.setItem('pp_dismissed_notifs', JSON.stringify(next));
+  };
+
   const TABS = [
     { id: "board", label: "Tablero" },
     { id: "gantt", label: "Gantt" },
     { id: "metrics", label: "Métricas" },
     { id: "deps", label: "Red de Tareas" },
+    { id: "okrs", label: "OKRs" },
+    { id: "sprints", label: "Sprints" },
+    { id: "focus", label: "Mi Día" },
     { id: "config", label: "Configuración" },
   ];
 
@@ -3099,6 +3759,11 @@ export default function App() {
       @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes shimmer { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
       @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      @media print {
+        nav, [data-noprint], .no-print { display: none !important; }
+        body { background: #fff !important; }
+        .print-page { page-break-after: always; }
+      }
     `}</style>
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #f8f4ff 0%, #e6f7f8 50%, #fff3ea 100%)", color: "var(--color-text-primary)", fontFamily: "var(--font-sans)" }}>
       <div style={{ background: "linear-gradient(90deg, #1a1a2e 0%, #2d1b4e 100%)", boxShadow: "0 2px 0 #ec6c04", padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -3161,15 +3826,45 @@ export default function App() {
             }}>Cambiar</button>
           </div>
         )}
-        <button onClick={exportXLSX} style={{
-          marginLeft: "auto",
-          background: "rgba(20,156,172,0.2)",
-          border: "1px solid rgba(20,156,172,0.5)",
-          color: "#4dd8e8",
-          borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 500,
-        }}>
-          ↓ Exportar XLSX
-        </button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Notifications bell */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setShowNotifPanel(p => !p)}
+              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: visibleAlerts.length > 0 ? "#f87171" : "rgba(255,255,255,0.5)", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 14, lineHeight: 1, position: "relative" }}
+            >
+              🔔
+              {visibleAlerts.length > 0 && (
+                <span style={{ position: "absolute", top: 0, right: 0, transform: "translate(40%,-40%)", background: "#c0392b", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{visibleAlerts.length}</span>
+              )}
+            </button>
+            {showNotifPanel && (
+              <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#1a1a2e", borderRadius: 14, padding: 16, minWidth: 300, maxHeight: 380, overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", zIndex: 9999, border: "1px solid rgba(255,255,255,0.1)" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.45)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Alertas{visibleAlerts.length > 0 ? ` (${visibleAlerts.length})` : ""}</div>
+                {visibleAlerts.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "20px 0" }}>Sin alertas activas ✓</div>
+                ) : visibleAlerts.map(a => (
+                  <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 7, padding: "8px 10px", background: "rgba(255,255,255,0.05)", borderRadius: 8, borderLeft: `3px solid ${a.type === 'danger' ? '#e74c3c' : '#ec6c04'}` }}>
+                    <span style={{ fontSize: 11, flex: 1, color: "rgba(255,255,255,0.8)", lineHeight: 1.4 }}>{a.msg}</span>
+                    <button onClick={() => dismissAlert(a.id)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 13, padding: 0, flexShrink: 0, lineHeight: 1 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* PDF export */}
+          <button onClick={() => window.print()} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 500 }}>
+            🖨 PDF
+          </button>
+          <button onClick={exportXLSX} style={{
+            background: "rgba(20,156,172,0.2)",
+            border: "1px solid rgba(20,156,172,0.5)",
+            color: "#4dd8e8",
+            borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 500,
+          }}>
+            ↓ Exportar XLSX
+          </button>
+        </div>
       </div>
 
       <div style={{ background: "#ffffff", borderBottom: "1px solid #e8e0f4", padding: "0 20px", display: "flex", gap: 0, boxShadow: "0 2px 8px rgba(84,44,156,0.06)" }}>
@@ -3191,7 +3886,7 @@ export default function App() {
 
       <div style={{ padding: "20px 20px 40px" }}>
         {activeTab === "board" && (
-          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} />
+          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} projectId={projectId} keyResults={keyResults} sprints={sprints} />
         )}
         {activeTab === "gantt" && <GanttTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
         {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
@@ -3200,6 +3895,15 @@ export default function App() {
             tasks={tasks}
             onEditTask={(t) => { setDepEditTask(t); setActiveTab("board"); }}
           />
+        )}
+        {activeTab === "okrs" && (
+          <OKRsTab projectId={projectId} okrs={okrs} setOkrs={setOkrs} keyResults={keyResults} setKeyResults={setKeyResults} tasks={tasks} />
+        )}
+        {activeTab === "sprints" && (
+          <SprintsTab projectId={projectId} sprints={sprints} setSprints={setSprints} tasks={tasks} updateTask={updateTask} />
+        )}
+        {activeTab === "focus" && (
+          <FocusTab tasks={tasks} activeUser={activeUser} updateTask={updateTask} dimensions={dimensions} />
         )}
         {activeTab === "config" && (
           configUnlocked ? (

@@ -26,7 +26,7 @@ const calcAporte = (task, weights) =>
     (task.strategic_value || 1) * (weights.estrategico || 30)) / 100;
 
 async function main() {
-  console.log('🔄 W-Planner — Recálculo de aporteSnapshot\n');
+  console.log('🔄 Productivity-Plus — Recálculo de aporteSnapshot\n');
   // 1. Obtener pesos actuales
   const { data: configData, error: configError } = await supabase
     .from('app_config')

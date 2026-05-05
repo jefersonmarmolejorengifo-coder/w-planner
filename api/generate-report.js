@@ -102,13 +102,13 @@ ${d.comentarios.length > 0 ? d.comentarios.map(c => "    - " + c).join("\n") : "
     return `- #${t.id} "${t.title}" | Resp: ${t.responsible || "N/A"} | Vence en ${dias} día(s) | Progreso: ${prog(t)}%`;
   }).join("\n") || "Ninguna";
 
-  return `Eres un consultor ejecutivo senior con experiencia en estrategia de marketing y gestión de equipos de alto rendimiento.
+  return `Eres un consultor ejecutivo senior con experiencia en estrategia organizacional y gestión de equipos de alto rendimiento.
 
-Tu tarea es escribir un reporte ejecutivo semanal en LENGUAJE NATURAL, redactado como una carta ejecutiva de alto nivel dirigida a la dirección de Banco W.
+Tu tarea es escribir un reporte ejecutivo semanal en LENGUAJE NATURAL, redactado como una carta ejecutiva de alto nivel dirigida a la dirección del equipo.
 
 El reporte debe leerse como lo escribiría un consultor experto: fluido, directo, con criterio estratégico. No es una lista de datos. Es un análisis narrativo que interpreta lo que está pasando, identifica patrones, nombra riesgos y da recomendaciones accionables.
 
-Lee TODOS los comentarios y entregables de cada persona. Cruza esa información. Identifica qué grandes iniciativas conectan al equipo. Analiza como experto en marketing qué tiene mayor impacto a corto plazo.
+Lee TODOS los comentarios y entregables de cada persona. Cruza esa información. Identifica qué grandes iniciativas conectan al equipo. Analiza qué tiene mayor impacto estratégico a corto plazo.
 
 GENERA EL REPORTE COMO HTML DE CORREO ELECTRÓNICO.
 El HTML debe ser simple, compatible con Gmail y Outlook.
@@ -143,7 +143,7 @@ font-family Arial sans-serif, color de texto #333333.
 
 1. ENCABEZADO
    Bloque con fondo degradado inline de #ef7218 a #0aa0ab, padding 32px, texto centrado blanco.
-   Título: "Banco W · Reporte Ejecutivo Semanal" en 28px bold.
+   Título: "Productivity-Plus · Reporte Ejecutivo Semanal" en 28px bold.
    Subtítulo: periodo y fecha en 14px.
 
 2. PULSO DEL EQUIPO (4 cajas en fila, inline-block)
@@ -199,7 +199,7 @@ font-family Arial sans-serif, color de texto #333333.
 
 10. FOOTER
     Fondo #0aa0ab, texto blanco centrado, padding 20px, font-size 12px.
-    "W Planner · Banco W · ${new Date().getFullYear()}"
+    "Productivity-Plus · ${new Date().getFullYear()}"
 
 REGLAS DE DISEÑO PARA CORREO:
 - Todo el CSS debe ser inline (style="...") para compatibilidad con Gmail/Outlook

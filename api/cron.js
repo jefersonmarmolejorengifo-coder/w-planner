@@ -153,7 +153,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         from: process.env.REPORT_FROM_EMAIL || "onboarding@resend.dev",
         to: config.emails,
-        subject: `Reporte Banco W · ${weekStart} al ${weekEnd}`,
+        subject: `Reporte Productivity-Plus · ${weekStart} al ${weekEnd}`,
         html,
       }),
     });

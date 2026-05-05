@@ -1809,7 +1809,7 @@ function UserSelectScreen({ participants, activeUsers, onSelect, onConflict }) {
 
       {/* Footer hint */}
       <div style={{ position: "absolute", bottom: 24, fontSize: 10, color: "rgba(255,255,255,0.2)", letterSpacing: 2, zIndex: 2 }}>
-        Banco W · Gestión Estratégica
+        Productivity-Plus · Gestión Estratégica
       </div>
     </div>
   );
@@ -1973,7 +1973,7 @@ function IntroScreen({ onFinish }) {
           opacity: phase >= 3 ? 1 : 0,
           animation: phase >= 3 ? "fadeIn 0.8s ease forwards" : "none",
           marginBottom: 0,
-        }}>Banco W · Gestión Estratégica</div>
+        }}>Productivity-Plus · Gestión Estratégica</div>
 
         {/* Línea inferior */}
         <div style={{
@@ -2459,7 +2459,7 @@ export default function App() {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Tareas");
-    XLSX.writeFile(wb, `w_planner_${new Date().toISOString().split("T")[0]}.xlsx`);
+    XLSX.writeFile(wb, `productivity-plus_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
   const TABS = [
@@ -2696,7 +2696,7 @@ export default function App() {
       </div>
       <div style={{ position: "fixed", bottom: 12, left: 16, display: "flex", flexDirection: "column", gap: 1, zIndex: 50 }}>
         <span style={{ fontSize: 10, color: "#969696", fontWeight: 400, letterSpacing: "0.03em" }}>Desarrollado por Jeferson Marmolejo</span>
-        <span style={{ fontSize: 9, color: "#b0b0b0", letterSpacing: "0.05em" }}>W Planner v1.0.0</span>
+        <span style={{ fontSize: 9, color: "#b0b0b0", letterSpacing: "0.05em" }}>Productivity-Plus v1.0.0</span>
       </div>
     </div>
       </div>

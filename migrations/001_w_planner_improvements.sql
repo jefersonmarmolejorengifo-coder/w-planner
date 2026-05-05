@@ -1,4 +1,4 @@
--- Migration: W Planner improvements
+-- Migration: Productivity-Plus improvements
 -- Adds task type configuration, atomic task ID reservation, and app config defaults.
 
 BEGIN;

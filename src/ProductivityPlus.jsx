@@ -32,7 +32,12 @@ const TIPOS = ["Administrativa","Operativa","Apadrinamiento","Seguimiento","Crea
 const DEFAULT_TASK_TYPES = [...TIPOS];
 const ESTADOS = ["No programada","Sin iniciar","En proceso","Bloqueada","En pausa","Cancelada","Finalizada"];
 const CLOSE_STATES = ["Finalizada","Cancelada"];
-const CONFIG_PIN = "020419*";
+const DEFAULT_PIN = "020419*";
+const DEFAULT_DIMENSIONS = [
+  { key: "tiempo",      label: "Tiempo estimado",   weight: 33, builtin: true },
+  { key: "dificultad",  label: "Dificultad",         weight: 34, builtin: true },
+  { key: "estrategico", label: "Valor estratégico",  weight: 33, builtin: true },
+];
 
 const getColombiaNow = () => {
   const d = new Date();
@@ -73,13 +78,25 @@ const emptyTask = (id) => ({
   subtasks: [],
   dependentTask: "",
   finalizedAt: null,
+  dimensionValues: {},
 });
 
 // ─── calcAporte ────────────────────────────────────────────
-const calcAporte = (task, weights) =>
-  ((task.estimatedTime || 1) * weights.tiempo +
-   (task.difficulty || 1) * weights.dificultad +
-   (task.strategicValue || 1) * weights.estrategico) / 100;
+// Supports both array dimensions and legacy {tiempo,dificultad,estrategico} object
+const calcAporte = (task, weights) => {
+  if (Array.isArray(weights)) {
+    return weights.reduce((sum, dim) => {
+      const val = dim.key === 'tiempo'      ? (task.estimatedTime  || 1)
+                : dim.key === 'dificultad'  ? (task.difficulty     || 1)
+                : dim.key === 'estrategico' ? (task.strategicValue || 1)
+                : (task.dimensionValues?.[dim.key] ?? 5);
+      return sum + val * (dim.weight || 0);
+    }, 0) / 100;
+  }
+  return ((task.estimatedTime || 1) * (weights.tiempo      || 0) +
+          (task.difficulty    || 1) * (weights.dificultad  || 0) +
+          (task.strategicValue|| 1) * (weights.estrategico || 0)) / 100;
+};
 
 /**
  * Calcula el porcentaje de avance basado en subtareas.
@@ -144,7 +161,7 @@ const inp = {
 const readonlyInp = { ...inp, background: "#f4f4f4", color: "#969696", cursor: "default", border: "1.5px solid #e8e8e8" };
 
 // ─── TaskForm ──────────────────────────────────────────────
-function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights }) {
+function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
   const isSuperUser = currentUser?.isSuperUser;
@@ -186,9 +203,10 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
     if (autoProgress !== null) upd("progressPercent", autoProgress);
   };
 
+  const activeDims = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;
   const isNew = task.aporteSnapshot === null || task.aporteSnapshot === undefined;
   const aporteDisplay = isNew
-    ? (weights && task.type !== "Otra" ? calcAporte(task, weights).toFixed(1) : null)
+    ? (activeDims && task.type !== "Otra" ? calcAporte(task, activeDims).toFixed(1) : null)
     : (task.type !== "Otra" ? String(task.aporteSnapshot) : null);
 
   return (
@@ -347,19 +365,30 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
             <input style={inp} value={task.extProgress2} onChange={(e) => upd("extProgress2", e.target.value)} />
           </F>
 
-          <div style={{ gridColumn: "span 2", display: "flex", gap: 24 }}>
-            {[
-              { label: "Tiempo estimado (1-10 ★)", key: "estimatedTime", def: 5 },
-              { label: "Dificultad estimada (1-10 ★)", key: "difficulty", def: 5 },
-              { label: "Valor estratégico (1-10 ★)", key: "strategicValue", def: 5 },
-            ].map(({ label, key, def }) => (
-              <div key={key} style={{ flex: 1 }}>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "#542c9c", marginBottom: 4 }}>
-                  {label}
-                </label>
-                <StarRating value={Number(task[key]) || def} onChange={(v) => upd(key, v)} />
-              </div>
-            ))}
+          <div style={{ gridColumn: "span 2" }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "#542c9c", marginBottom: 10 }}>
+              Dimensiones de Aporte (1-10 ★)
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
+              {(Array.isArray(dimensions) && dimensions.length ? dimensions : DEFAULT_DIMENSIONS).map((dim) => {
+                const taskKey = dim.key === 'tiempo' ? 'estimatedTime' : dim.key === 'dificultad' ? 'difficulty' : dim.key === 'estrategico' ? 'strategicValue' : null;
+                const val = taskKey ? (task[taskKey] ?? 5) : (task.dimensionValues?.[dim.key] ?? 5);
+                return (
+                  <div key={dim.key} style={{ flex: "1 1 155px", minWidth: 140 }}>
+                    <label style={{ display: "block", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "#542c9c", marginBottom: 4 }}>
+                      {dim.label}
+                    </label>
+                    <StarRating
+                      value={Number(val)}
+                      onChange={(v) => {
+                        if (taskKey) { upd(taskKey, v); }
+                        else { upd('dimensionValues', { ...(task.dimensionValues || {}), [dim.key]: v }); }
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <F label="Entrega esperada">
@@ -567,7 +596,7 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 }
 
 // ─── BoardTab ──────────────────────────────────────────────
-function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes }) {
+function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone }) {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
   const [fStatus, setFStatus] = useState("");
@@ -611,11 +640,17 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
   };
   const openEdit = (t) => { setForm({ ...t }); setModal(t.id); };
 
+  // Open edit modal when triggered from DependenciesTab
+  useEffect(() => {
+    if (editTaskFromDep) { openEdit(editTaskFromDep); if (onDepEditDone) onDepEditDone(); }
+  }, [editTaskFromDep]);
+
   const save = async () => {
     if (!form.title.trim()) { alert("El título es obligatorio"); return; }
     setModal(null);
     if (modal === "new") {
-      const newTask = { ...form, aporteSnapshot: parseFloat(calcAporte(form, weights).toFixed(1)) };
+      const activeDimensions = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;
+      const newTask = { ...form, aporteSnapshot: parseFloat(calcAporte(form, activeDimensions).toFixed(1)) };
       await createTask(newTask);
     } else {
       await updateTask(form);
@@ -706,7 +741,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}
         >
-          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} />
+          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} />
         </Modal>
       )}
     </div>
@@ -1137,145 +1172,138 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
   );
 }
 
-// ─── WeightCalculator ──────────────────────────────────────
-function WeightCalculator({ weights, setWeights }) {
-  const [local, setLocal] = useState({ ...weights });
-  const [inputVals, setInputVals] = useState({
-    tiempo: String(weights.tiempo),
-    dificultad: String(weights.dificultad),
-    estrategico: String(weights.estrategico),
-  });
+// ─── DimensionEditor ───────────────────────────────────────
+function DimensionEditor({ dimensions, setDimensions }) {
+  const init = Array.isArray(dimensions) && dimensions.length ? dimensions : DEFAULT_DIMENSIONS;
+  const [local, setLocal] = useState(init);
+  const [newLabel, setNewLabel] = useState("");
 
   useEffect(() => {
-    setInputVals({
-      tiempo: String(local.tiempo),
-      dificultad: String(local.dificultad),
-      estrategico: String(local.estrategico),
-    });
-  }, [local.tiempo, local.dificultad, local.estrategico]);
-
-  const handleChange = (key, rawVal) => {
-    const val = Math.min(100, Math.max(0, Number(rawVal) || 0));
-    const other = Object.keys(local).filter((k) => k !== key);
-    const remaining = 100 - val;
-    const sumOther = local[other[0]] + local[other[1]];
-    let a, b;
-    if (sumOther === 0) {
-      a = Math.floor(remaining / 2);
-      b = remaining - a;
-    } else {
-      a = Math.round((local[other[0]] / sumOther) * remaining);
-      b = remaining - a;
-    }
-    const next = { ...local, [key]: val, [other[0]]: a, [other[1]]: b };
+    const next = Array.isArray(dimensions) && dimensions.length ? dimensions : DEFAULT_DIMENSIONS;
     setLocal(next);
-    return next;
+  }, [dimensions]);
+
+  const total = local.reduce((s, d) => s + (d.weight || 0), 0);
+
+  const redistributeWeights = (dims) => {
+    const t = dims.reduce((s, d) => s + (d.weight || 0), 0);
+    if (t === 0 || dims.length === 0) return dims;
+    let adjusted = dims.map(d => ({ ...d, weight: Math.round((d.weight / t) * 100) }));
+    const diff = 100 - adjusted.reduce((s, d) => s + d.weight, 0);
+    if (diff !== 0) adjusted[0] = { ...adjusted[0], weight: adjusted[0].weight + diff };
+    return adjusted;
   };
 
-  const commit = (next) => {
-    const scrollY = window.scrollY;
-    setWeights(next || { ...local });
-    requestAnimationFrame(() => window.scrollTo(0, scrollY));
+  const updateWeight = (key, rawVal) => {
+    const val = Math.min(100, Math.max(0, Number(rawVal) || 0));
+    const others = local.filter(d => d.key !== key);
+    const remaining = 100 - val;
+    const sumOthers = others.reduce((s, d) => s + (d.weight || 0), 0);
+    const next = local.map(d => {
+      if (d.key === key) return { ...d, weight: val };
+      if (sumOthers === 0) return { ...d, weight: Math.floor(remaining / others.length) };
+      return { ...d, weight: Math.round((d.weight / sumOthers) * remaining) };
+    });
+    const diff = 100 - next.reduce((s, d) => s + d.weight, 0);
+    if (diff !== 0 && next.length > 1) {
+      const idx = next.findIndex(d => d.key !== key);
+      next[idx] = { ...next[idx], weight: next[idx].weight + diff };
+    }
+    setLocal(next);
+    setDimensions(next);
   };
 
-  const labels = {
-    tiempo: "Tiempo estimado",
-    dificultad: "Dificultad estimada",
-    estrategico: "Valor estratégico",
+  const updateLabel = (key, label) => {
+    const next = local.map(d => d.key === key ? { ...d, label } : d);
+    setLocal(next);
+    setDimensions(next);
   };
+
+  const addDimension = () => {
+    const label = newLabel.trim();
+    if (!label) return;
+    const key = `dim_${Date.now()}`;
+    const base = Math.floor(100 / (local.length + 1));
+    const newDim = { key, label, weight: base, builtin: false };
+    const next = redistributeWeights([...local.map(d => ({ ...d, weight: Math.max(1, Math.floor(d.weight * local.length / (local.length + 1))) })), newDim]);
+    setLocal(next);
+    setDimensions(next);
+    setNewLabel("");
+  };
+
+  const removeDimension = (key) => {
+    const next = redistributeWeights(local.filter(d => d.key !== key));
+    if (next.length === 0) return;
+    setLocal(next);
+    setDimensions(next);
+  };
+
+  const si = { background: "#fafafa", border: "1px solid #e0e0e0", borderRadius: 6, padding: "5px 8px", fontSize: 12, outline: "none", fontFamily: "inherit", color: "#2d2d2d" };
 
   return (
-    <div
-      style={{ display: "flex", flexDirection: "column", gap: 16 }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {Object.keys(local).map((key) => (
-        <div key={key}>
-          <div style={{
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-            marginBottom: 6, fontSize: 12,
-            color: "#542c9c", fontWeight: 600,
-          }}>
-            <span>{labels[key]}</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }} onMouseDown={e => e.stopPropagation()}>
+      {local.map((dim) => (
+        <div key={dim.key} style={{ background: "#fafafa", borderRadius: 10, padding: "12px 14px", border: "1px solid rgba(84,44,156,0.1)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <input
+              style={{ ...si, flex: 1, fontWeight: 600 }}
+              value={dim.label}
+              onChange={e => updateLabel(dim.key, e.target.value)}
+              onBlur={() => setDimensions(local)}
+              placeholder="Nombre de la dimensión"
+            />
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={inputVals[key]}
-                onChange={(e) => {
-                  setInputVals((prev) => ({ ...prev, [key]: e.target.value }));
-                }}
-                onBlur={(e) => {
-                  const next = handleChange(key, e.target.value);
-                  commit(next);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const next = handleChange(key, e.target.value);
-                    commit(next);
-                    e.target.blur();
-                  }
-                }}
-                style={{
-                  width: 54,
-                  textAlign: "center",
-                  border: "0.5px solid var(--color-border-secondary)",
-                  borderRadius: 6,
-                  padding: "3px 5px",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: "var(--color-text-primary)",
-                  background: "var(--color-background-secondary)",
-                  outline: "none",
-                  fontFamily: "inherit",
-                }}
+                type="number" min={0} max={100} step={1}
+                value={dim.weight}
+                onChange={e => updateWeight(dim.key, e.target.value)}
+                style={{ ...si, width: 52, textAlign: "center", fontWeight: 700 }}
               />
-              <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>%</span>
+              <span style={{ fontSize: 12, color: "#888" }}>%</span>
             </div>
+            {!dim.builtin && (
+              <button
+                onClick={() => removeDimension(dim.key)}
+                style={{ background: "#fde8e8", border: "1px solid #f5c6c6", color: "#c0392b", borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontSize: 13, flexShrink: 0 }}
+              >✕</button>
+            )}
           </div>
           <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={local[key]}
-            onChange={(e) => handleChange(key, e.target.value)}
-            onMouseUp={(e) => {
-              const next = handleChange(key, e.target.value);
-              commit(next);
-            }}
-            onTouchEnd={(e) => {
-              const next = handleChange(key, e.target.value);
-              commit(next);
-            }}
-            style={{
-              width: "100%",
-              cursor: "pointer",
-              accentColor: "#ec6c04",
-              touchAction: "none",
-            }}
+            type="range" min={0} max={100} step={1} value={dim.weight}
+            onChange={e => updateWeight(dim.key, e.target.value)}
+            style={{ width: "100%", cursor: "pointer", accentColor: "#ec6c04" }}
           />
         </div>
       ))}
+
+      {/* Add new dimension */}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <input
+          style={{ ...si, flex: 1, padding: "8px 12px" }}
+          value={newLabel}
+          onChange={e => setNewLabel(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addDimension()}
+          placeholder="Nueva dimensión (ej: Impacto en cliente)..."
+        />
+        <button
+          onClick={addDimension}
+          style={{ background: "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}
+        >+ Agregar</button>
+      </div>
+
       <div style={{
-        fontSize: 12,
-        color: "#ffffff",
-        textAlign: "center",
-        background: "#1a1a2e",
-        borderRadius: 8,
-        padding: "8px 12px",
-        fontWeight: 600,
+        fontSize: 12, color: total === 100 ? "#27ae60" : "#c0392b",
+        textAlign: "center", background: total === 100 ? "#e8f8ee" : "#fde8e8",
+        borderRadius: 8, padding: "8px 12px", fontWeight: 700, transition: "all 0.2s",
       }}>
-        Total: {local.tiempo + local.dificultad + local.estrategico}%
+        Total: {total}% {total !== 100 && "— debe sumar 100%"}
       </div>
     </div>
   );
 }
 
 // ─── ConfigTab ─────────────────────────────────────────────
-function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, weights, setWeights, tasks }) {
+function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, dimensions, setDimensions, tasks, project, projectPin, onChangePin, onInvite }) {
   const [newP, setNewP] = useState("");
   const [newI, setNewI] = useState("");
   const [newType, setNewType] = useState("");
@@ -1293,6 +1321,45 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
   const [emailMsg, setEmailMsg] = useState("");
   const [generating, setGenerating] = useState(false);
   const [reportMsg, setReportMsg] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteMsg, setInviteMsg] = useState("");
+  const [inviting, setInviting] = useState(false);
+  const [newPin, setNewPin] = useState("");
+  const [newPinConfirm, setNewPinConfirm] = useState("");
+  const [pinChangeMsg, setPinChangeMsg] = useState("");
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  const sendInvite = async () => {
+    if (!inviteEmail.includes("@")) { setInviteMsg("Correo inválido."); return; }
+    setInviting(true);
+    setInviteMsg("Enviando invitación...");
+    try {
+      const res = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail,
+          projectName: project?.name || 'Productivity-Plus',
+          inviteCode: project?.invite_code || '',
+          baseUrl: window.location.origin,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) { setInviteMsg("✓ Invitación enviada a " + inviteEmail); setInviteEmail(""); }
+      else setInviteMsg("Error: " + data.error);
+    } catch (err) { setInviteMsg("Error: " + err.message); }
+    setInviting(false);
+    setTimeout(() => setInviteMsg(""), 4000);
+  };
+
+  const handleChangePin = () => {
+    if (!newPin || newPin.length < 4) { setPinChangeMsg("La clave debe tener al menos 4 caracteres."); return; }
+    if (newPin !== newPinConfirm) { setPinChangeMsg("Las claves no coinciden."); return; }
+    onChangePin(newPin);
+    setNewPin(""); setNewPinConfirm("");
+    setPinChangeMsg("✓ Clave actualizada correctamente");
+    setTimeout(() => setPinChangeMsg(""), 3000);
+  };
 
   useEffect(() => {
     supabase.from('email_config').select('*').eq('id', 1).single()
@@ -1427,6 +1494,77 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
   return (
     <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* ── Proyecto ───────────────────────── */}
+      {project && (
+        <Sec title="🏗️ Proyecto">
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#f9f8fd", borderRadius: 8, border: "1px solid rgba(84,44,156,0.12)" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#542c9c", flex: 1 }}>{project.name}</span>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                Código de invitación
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ flex: 1, background: "#1a1a2e", color: "#4dd8e8", fontFamily: "monospace", fontSize: 13, padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>
+                  {project.invite_code}
+                </div>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}?join=${project.invite_code}`); setCopiedCode(true); setTimeout(() => setCopiedCode(false), 2000); }}
+                  style={{ background: copiedCode ? "#e8f8ee" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: copiedCode ? "#27ae60" : "#fff", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}
+                >
+                  {copiedCode ? "✓ Copiado" : "Copiar link"}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#542c9c", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                Invitar por correo electrónico
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={e => setInviteEmail(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && sendInvite()}
+                  placeholder="correo@empresa.com"
+                  style={{ flex: 1, background: "#fafafa", border: "1px solid #e0e0e0", borderRadius: 8, padding: "8px 12px", fontSize: 13, outline: "none", fontFamily: "inherit", color: "#2d2d2d" }}
+                />
+                <button
+                  onClick={sendInvite} disabled={inviting}
+                  style={{ background: inviting ? "#e0e0e0" : "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap" }}
+                >
+                  {inviting ? "..." : "Enviar"}
+                </button>
+              </div>
+              {inviteMsg && <div style={{ fontSize: 12, marginTop: 6, color: inviteMsg.startsWith("Error") ? "#c0392b" : "#27ae60", fontWeight: 500 }}>{inviteMsg}</div>}
+            </div>
+          </div>
+        </Sec>
+      )}
+
+      {/* ── Cambio de clave ─────────────────── */}
+      <Sec title="🔐 Clave de configuración">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <input
+            type="password" value={newPin} onChange={e => setNewPin(e.target.value)}
+            placeholder="Nueva clave..." style={{ background: "#fafafa", border: "1px solid #e0e0e0", borderRadius: 8, padding: "8px 12px", fontSize: 13, outline: "none", fontFamily: "inherit", color: "#2d2d2d" }}
+          />
+          <input
+            type="password" value={newPinConfirm} onChange={e => setNewPinConfirm(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleChangePin()}
+            placeholder="Confirmar nueva clave..." style={{ background: "#fafafa", border: "1px solid #e0e0e0", borderRadius: 8, padding: "8px 12px", fontSize: 13, outline: "none", fontFamily: "inherit", color: "#2d2d2d" }}
+          />
+          <button onClick={handleChangePin} style={{ background: "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+            Actualizar clave
+          </button>
+          {pinChangeMsg && <div style={{ fontSize: 12, color: pinChangeMsg.startsWith("✓") ? "#27ae60" : "#c0392b", fontWeight: 500 }}>{pinChangeMsg}</div>}
+        </div>
+      </Sec>
+
       <Sec title="👥 Participantes">
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input style={si} value={newP} onChange={(e) => setNewP(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addP()} placeholder="Nombre del participante..." />
@@ -1505,8 +1643,11 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         )}
       </Sec>
 
-      <Sec title="⚖️ Calculadora de Valor de Aporte">
-        <WeightCalculator weights={weights} setWeights={setWeights} />
+      <Sec title="⚖️ Dimensiones de Valor de Aporte">
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>
+          Define las dimensiones que se evalúan en cada tarea y su peso relativo en el cálculo de aporte. Puedes renombrar, ajustar pesos y agregar o quitar dimensiones personalizadas.
+        </div>
+        <DimensionEditor dimensions={dimensions} setDimensions={setDimensions} />
       </Sec>
 
       <div style={{ background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)", border: "1px solid rgba(84,44,156,0.1)" }}>
@@ -2019,8 +2160,313 @@ function IntroScreen({ onFinish }) {
   );
 }
 
+// ─── ProjectLandingScreen ──────────────────────────────────
+function ProjectLandingScreen({ onProjectLoaded }) {
+  const [tab, setTab] = useState('join'); // 'create' | 'join'
+  const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [projName, setProjName] = useState("");
+  const [projDesc, setProjDesc] = useState("");
+  const [projPin, setProjPin] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [err, setErr] = useState("");
+
+  const createProject = async () => {
+    if (!projName.trim()) { setErr("El nombre del proyecto es requerido."); return; }
+    if (!projPin || projPin.length < 4) { setErr("La clave debe tener al menos 4 caracteres."); return; }
+    setCreating(true); setErr("");
+    const config = {
+      pin: projPin,
+      dimensions: DEFAULT_DIMENSIONS,
+    };
+    const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config }).select().single();
+    if (error || !data) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setCreating(false); return; }
+    localStorage.setItem('pp_project_id', String(data.id));
+    onProjectLoaded(data);
+  };
+
+  const joinProject = async () => {
+    const code = joinCode.trim();
+    if (!code) { setErr("Ingresa el código de invitación."); return; }
+    setJoining(true); setErr("");
+    const { data, error } = await supabase.from('projects').select('*').eq('invite_code', code).single();
+    if (error || !data) { setErr("Código inválido o proyecto no encontrado."); setJoining(false); return; }
+    localStorage.setItem('pp_project_id', String(data.id));
+    onProjectLoaded(data);
+  };
+
+  const btnBase = { border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontSize: 14, width: "100%", transition: "all 0.2s" };
+  const inp = { background: "#fafafa", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "10px 14px", fontSize: 14, outline: "none", fontFamily: "inherit", color: "#2d2d2d", width: "100%", boxSizing: "border-box", transition: "border-color 0.2s" };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg,#0d0d1a 0%,#1a1a2e 50%,#2d1b4e 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 460 }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <div style={{ fontSize: 72, fontWeight: 900, background: "linear-gradient(135deg,#ec6c04,#f5a623,#149cac)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", lineHeight: 1, letterSpacing: -3 }}>P+</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: 5, textTransform: "uppercase", marginTop: 6 }}>Productivity-Plus</div>
+        </div>
+
+        {/* Card */}
+        <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 0, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: 4, marginBottom: 28 }}>
+            {[['join','Unirse a proyecto'],['create','Crear proyecto']].map(([t, l]) => (
+              <button key={t} onClick={() => { setTab(t); setErr(""); }}
+                style={{ flex: 1, background: tab === t ? "rgba(236,108,4,0.9)" : "transparent", color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: tab === t ? 700 : 400, fontSize: 13, transition: "all 0.2s" }}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'join' ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>Código de invitación</label>
+                <input style={{ ...inp, background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", color: "#fff" }}
+                  value={joinCode} onChange={e => setJoinCode(e.target.value)} onKeyDown={e => e.key === "Enter" && joinProject()}
+                  placeholder="Pega el código aquí..." autoFocus />
+              </div>
+              {err && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{err}</div>}
+              <button onClick={joinProject} disabled={joining}
+                style={{ ...btnBase, background: joining ? "#555" : "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", boxShadow: joining ? "none" : "0 4px 20px rgba(236,108,4,0.4)", marginTop: 4 }}>
+                {joining ? "Verificando..." : "Unirse al proyecto →"}
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>Nombre del proyecto *</label>
+                <input style={{ ...inp, background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", color: "#fff" }}
+                  value={projName} onChange={e => setProjName(e.target.value)} placeholder="Ej: Equipo Comercial Q2" autoFocus />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>Descripción (opcional)</label>
+                <input style={{ ...inp, background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", color: "#fff" }}
+                  value={projDesc} onChange={e => setProjDesc(e.target.value)} placeholder="Breve descripción del proyecto..." />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>Clave de configuración *</label>
+                <input type="password" style={{ ...inp, background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", color: "#fff" }}
+                  value={projPin} onChange={e => setProjPin(e.target.value)} onKeyDown={e => e.key === "Enter" && createProject()} placeholder="Mínimo 4 caracteres..." />
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 4 }}>Solo el dueño del proyecto conoce esta clave</div>
+              </div>
+              {err && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{err}</div>}
+              <button onClick={createProject} disabled={creating}
+                style={{ ...btnBase, background: creating ? "#555" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", boxShadow: creating ? "none" : "0 4px 20px rgba(84,44,156,0.4)", marginTop: 4 }}>
+                {creating ? "Creando proyecto..." : "Crear proyecto →"}
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: "rgba(255,255,255,0.2)", letterSpacing: 2 }}>
+          PRODUCTIVITY-PLUS · GESTIÓN ESTRATÉGICA
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DependenciesTab ───────────────────────────────────────
+const NODE_W = 170;
+const NODE_H = 76;
+const NODE_GAP_X = 60;
+const NODE_GAP_Y = 16;
+
+function computeDepLayout(tasks) {
+  const byId = {};
+  tasks.forEach(t => { byId[String(t.id)] = t; });
+  const levels = {};
+  const computing = new Set();
+  const getLevel = (id) => {
+    if (levels[id] !== undefined) return levels[id];
+    if (computing.has(id)) return 0;
+    computing.add(id);
+    const t = byId[id];
+    if (!t || !t.dependentTask) { levels[id] = 0; }
+    else { levels[id] = getLevel(String(t.dependentTask)) + 1; }
+    computing.delete(id);
+    return levels[id];
+  };
+  tasks.forEach(t => getLevel(String(t.id)));
+
+  const byLevel = {};
+  tasks.forEach(t => {
+    const lvl = levels[String(t.id)] ?? 0;
+    if (!byLevel[lvl]) byLevel[lvl] = [];
+    byLevel[lvl].push(t);
+  });
+
+  const positions = {};
+  Object.entries(byLevel).forEach(([lvl, ts]) => {
+    ts.forEach((t, i) => {
+      positions[String(t.id)] = {
+        x: Number(lvl) * (NODE_W + NODE_GAP_X) + 24,
+        y: i * (NODE_H + NODE_GAP_Y) + 24,
+      };
+    });
+  });
+
+  const maxLvl = Math.max(...Object.keys(byLevel).map(Number), 0);
+  const maxRows = Math.max(...Object.values(byLevel).map(a => a.length), 1);
+  return {
+    positions,
+    levels,
+    svgW: (maxLvl + 1) * (NODE_W + NODE_GAP_X) + 48,
+    svgH: maxRows * (NODE_H + NODE_GAP_Y) + 48,
+    byLevel,
+  };
+}
+
+function DependenciesTab({ tasks, onEditTask }) {
+  const [selected, setSelected] = useState(null);
+  const [filter, setFilter] = useState("all");
+
+  const visible = filter === "all" ? tasks : tasks.filter(t => t.dependentTask || tasks.some(x => String(x.dependentTask) === String(t.id)));
+  const { positions, svgW, svgH, byLevel } = useMemo(() => computeDepLayout(visible), [visible]);
+
+  const edges = visible.filter(t => t.dependentTask && positions[String(t.dependentTask)]);
+
+  const sel = selected ? tasks.find(t => String(t.id) === String(selected)) : null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#542c9c" }}>Red de Dependencias</div>
+        <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+          {[["all","Todas las tareas"],["linked","Solo enlazadas"]].map(([v,l]) => (
+            <button key={v} onClick={() => setFilter(v)}
+              style={{ background: filter === v ? "linear-gradient(135deg,#542c9c,#6e3ebf)" : "#f4f4f4", color: filter === v ? "#fff" : "#666", border: "none", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: filter === v ? 700 : 400 }}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+        {Object.entries(STATUS_COLORS).map(([st, c]) => (
+          <div key={st} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#666" }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, background: c }} />{st}
+          </div>
+        ))}
+      </div>
+
+      {/* Hint */}
+      {edges.length === 0 && filter === "linked" && (
+        <div style={{ textAlign: "center", padding: "60px 20px", color: "#969696", fontSize: 14 }}>
+          No hay tareas con dependencias registradas.<br />
+          <span style={{ fontSize: 12 }}>Usa el campo "Tarea dependiente" al crear o editar una tarea.</span>
+        </div>
+      )}
+
+      {/* SVG Graph */}
+      <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "60vh", border: "1px solid #e8e0f4", borderRadius: 14, background: "#fafafe" }}>
+        <svg width={svgW} height={svgH} style={{ display: "block" }}>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#542c9c" opacity="0.6" />
+            </marker>
+          </defs>
+
+          {/* Level column headers */}
+          {Object.keys(byLevel).map(lvl => (
+            <text key={lvl}
+              x={Number(lvl) * (NODE_W + NODE_GAP_X) + 24 + NODE_W / 2}
+              y={12}
+              textAnchor="middle"
+              style={{ fontSize: 10, fill: "#aaa", fontFamily: "inherit", textTransform: "uppercase", letterSpacing: 2 }}>
+              {Number(lvl) === 0 ? "Nivel 0 · Origen" : `Nivel ${lvl}`}
+            </text>
+          ))}
+
+          {/* Edges */}
+          {edges.map(t => {
+            const src = positions[String(t.dependentTask)];
+            const dst = positions[String(t.id)];
+            if (!src || !dst) return null;
+            const x1 = src.x + NODE_W, y1 = src.y + NODE_H / 2;
+            const x2 = dst.x, y2 = dst.y + NODE_H / 2;
+            const cx = (x1 + x2) / 2;
+            return (
+              <path key={`e-${t.id}`}
+                d={`M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`}
+                fill="none" stroke="#542c9c" strokeWidth={1.5} strokeOpacity={0.4}
+                markerEnd="url(#arrow)" />
+            );
+          })}
+
+          {/* Nodes */}
+          {visible.map(t => {
+            const pos = positions[String(t.id)];
+            if (!pos) return null;
+            const sc = STATUS_COLORS[t.status] || "#888";
+            const sl = STATUS_LIGHT[t.status] || "#f4f4f4";
+            const isSel = String(selected) === String(t.id);
+            return (
+              <g key={t.id} style={{ cursor: "pointer" }} onClick={() => setSelected(isSel ? null : String(t.id))}>
+                <rect x={pos.x} y={pos.y} width={NODE_W} height={NODE_H} rx={8}
+                  fill={sl} stroke={isSel ? sc : "rgba(84,44,156,0.15)"}
+                  strokeWidth={isSel ? 2.5 : 1}
+                  style={{ filter: isSel ? `drop-shadow(0 4px 12px ${sc}66)` : "none", transition: "all 0.2s" }} />
+                <rect x={pos.x} y={pos.y} width={4} height={NODE_H} rx="2 0 0 2" fill={sc} />
+                <text x={pos.x + 14} y={pos.y + 18} style={{ fontSize: 9, fill: "#aaa", fontFamily: "inherit" }}>
+                  #{t.id} · {t.type}
+                </text>
+                <foreignObject x={pos.x + 14} y={pos.y + 22} width={NODE_W - 20} height={34}>
+                  <div xmlns="http://www.w3.org/1999/xhtml"
+                    style={{ fontSize: 12, fontWeight: 700, color: "#2d2d2d", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    {t.title || "(Sin título)"}
+                  </div>
+                </foreignObject>
+                <text x={pos.x + 14} y={pos.y + 64} style={{ fontSize: 10, fill: sc, fontWeight: 700, fontFamily: "inherit" }}>
+                  {t.status}
+                </text>
+                {t.responsible && (
+                  <text x={pos.x + NODE_W - 10} y={pos.y + 64} textAnchor="end" style={{ fontSize: 9, fill: "#888", fontFamily: "inherit" }}>
+                    {t.responsible.split(" ")[0]}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Selected task detail */}
+      {sel && (
+        <div style={{ marginTop: 16, background: "#ffffff", borderRadius: 14, padding: "18px 20px", border: `2px solid ${STATUS_COLORS[sel.status] || "#e0e0e0"}`, boxShadow: "0 4px 20px rgba(84,44,156,0.1)", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 12, color: "#969696" }}>#{sel.id} · {sel.type}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#2d2d2d", marginTop: 2, marginBottom: 8 }}>{sel.title}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: STATUS_LIGHT[sel.status], color: STATUS_COLORS[sel.status], fontWeight: 700 }}>{sel.status}</span>
+              {sel.responsible && <span style={{ fontSize: 11, color: "#149cac", fontWeight: 500 }}>👤 {sel.responsible}</span>}
+              {sel.progressPercent > 0 && <span style={{ fontSize: 11, color: "#ec6c04", fontWeight: 600 }}>{Number(sel.progressPercent).toFixed(0)}% avance</span>}
+            </div>
+            {sel.dependentTask && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "#542c9c" }}>
+                ↳ Depende de la tarea <strong>#{sel.dependentTask}</strong>
+              </div>
+            )}
+            {tasks.filter(x => String(x.dependentTask) === String(sel.id)).length > 0 && (
+              <div style={{ marginTop: 4, fontSize: 12, color: "#ec6c04" }}>
+                → Desbloquea: {tasks.filter(x => String(x.dependentTask) === String(sel.id)).map(x => `#${x.id}`).join(", ")}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => { onEditTask(sel); setSelected(null); }}
+            style={{ background: "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", cursor: "pointer", fontWeight: 700, fontSize: 13, alignSelf: "center" }}>
+            Editar tarea →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main App ──────────────────────────────────────────────
-const DEFAULT_WEIGHTS = { tiempo: 33, dificultad: 34, estrategico: 33 };
 
 const dbToTask = (r) => ({
   id: r.id,
@@ -2054,6 +2500,7 @@ const dbToTask = (r) => ({
   dependentTask: r.dependent_task || '',
   aporteSnapshot: r.aporte_snapshot ?? null,
   finalizedAt: r.finalized_at || null,
+  dimensionValues: r.dimension_values || {},
 });
 
 const taskToDb = (t) => ({
@@ -2080,6 +2527,7 @@ const taskToDb = (t) => ({
   dependent_task: t.dependentTask,
   aporte_snapshot: t.aporteSnapshot,
   finalized_at: t.finalizedAt,
+  dimension_values: t.dimensionValues || {},
 });
 
 export default function App() {
@@ -2090,7 +2538,7 @@ export default function App() {
   const [nextId, setNextId] = useState(1);
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
+  const [dimensions, setDimensions] = useState(DEFAULT_DIMENSIONS);
   const [configUnlocked, setConfigUnlocked] = useState(false);
   const [configPin, setConfigPin] = useState("");
   const [pinError, setPinError] = useState(false);
@@ -2101,6 +2549,11 @@ export default function App() {
   const [kickedMsg, setKickedMsg] = useState(null);
   const [conflictUser, setConflictUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [projectId, setProjectId] = useState(null);
+  const [project, setProject] = useState(null);
+  const [showProjectLanding, setShowProjectLanding] = useState(false);
+  const [projectPin, setProjectPin] = useState(DEFAULT_PIN);
+  const [depEditTask, setDepEditTask] = useState(null);
   const sessionIdRef = useRef(crypto.randomUUID());
 
   const loadParticipants = async () => {
@@ -2133,48 +2586,97 @@ export default function App() {
     return [];
   };
 
-  useEffect(() => {
-    const loadAll = async () => {
-      setLoading(true);
-      try {
-        const [
-          { data: tasksData },
-          { data: partsData },
-          { data: indsData },
-          { data: typesData },
-          { data: configData },
-        ] = await Promise.all([
-          supabase.from('tasks').select('*').order('id'),
-          supabase.from('participants').select('*').order('id'),
-          supabase.from('indicators').select('*').order('id'),
-          supabase.from('task_types').select('*').order('name', { ascending: true }),
-          supabase.from('app_config').select('*'),
-        ]);
+  const loadAllForProject = async (pid, proj) => {
+    setLoading(true);
+    try {
+      const q = (table) => pid ? supabase.from(table).select('*').eq('project_id', pid) : supabase.from(table).select('*');
+      const [
+        { data: tasksData },
+        { data: partsData },
+        { data: indsData },
+        { data: typesData },
+        { data: configData },
+      ] = await Promise.all([
+        q('tasks').order('id'),
+        q('participants').order('id'),
+        q('indicators').order('id'),
+        supabase.from('task_types').select('*').order('name', { ascending: true }),
+        q('app_config'),
+      ]);
 
-        if (tasksData) setTasks(tasksData.map(dbToTask));
-        if (partsData) setParticipants(partsData.map(p => ({
-          id: p.id, name: p.name, isSuperUser: p.is_super_user,
-        })));
-        if (indsData) setIndicators(indsData);
-        if (typesData) setTaskTypes(typesData.map((t) => ({ id: t.id, name: t.name })));
-        if (configData) {
-          configData.forEach((row) => {
-            if (row.key === 'nextId') setNextId(Number(row.value));
-            if (row.key === 'weights') setWeights(row.value);
-            if (row.key === 'currentUserId') setCurrentUserId(row.value === null ? null : Number(row.value));
-          });
-        }
-        if (!partsData?.length) {
-          const defaultUser = { id: 1, name: 'Jeferson Marmolejo', is_super_user: true };
-          await supabase.from('participants').insert(defaultUser);
-          setParticipants([{ id: 1, name: 'Jeferson Marmolejo', isSuperUser: true }]);
-        }
-      } catch (err) {
-        console.error('Error cargando datos:', err);
+      if (tasksData) setTasks(tasksData.map(dbToTask));
+      if (partsData) setParticipants(partsData.map(p => ({ id: p.id, name: p.name, isSuperUser: p.is_super_user })));
+      if (indsData) setIndicators(indsData);
+      if (typesData) setTaskTypes(typesData.map(t => ({ id: t.id, name: t.name })));
+      if (configData) {
+        configData.forEach(row => {
+          if (row.key === 'nextId') setNextId(Number(row.value));
+          if (row.key === 'currentUserId') setCurrentUserId(row.value === null ? null : Number(row.value));
+        });
       }
-      setLoading(false);
+
+      // Load dimensions and pin from project config
+      const p = proj || project;
+      if (p?.config) {
+        if (Array.isArray(p.config.dimensions) && p.config.dimensions.length) setDimensions(p.config.dimensions);
+        if (p.config.pin) setProjectPin(p.config.pin);
+      }
+
+      if (!partsData?.length && pid) {
+        const defaultUser = { id: 1, name: 'Usuario', is_super_user: true, project_id: pid };
+        await supabase.from('participants').insert(defaultUser);
+        setParticipants([{ id: 1, name: 'Usuario', isSuperUser: true }]);
+      }
+    } catch (err) {
+      console.error('Error cargando datos:', err);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    const init = async () => {
+      // Check URL for ?join=CODE (invitation link)
+      const params = new URLSearchParams(window.location.search);
+      const joinCode = params.get('join');
+      if (joinCode) {
+        const { data } = await supabase.from('projects').select('*').eq('invite_code', joinCode).single();
+        if (data) {
+          localStorage.setItem('pp_project_id', String(data.id));
+          setProjectId(data.id);
+          setProject(data);
+          window.history.replaceState({}, '', window.location.pathname);
+          await loadAllForProject(data.id, data);
+          return;
+        }
+      }
+
+      const stored = localStorage.getItem('pp_project_id');
+      if (stored) {
+        const pid = Number(stored);
+        const { data: proj } = await supabase.from('projects').select('*').eq('id', pid).single();
+        if (proj) {
+          setProjectId(pid);
+          setProject(proj);
+          await loadAllForProject(pid, proj);
+          return;
+        } else {
+          // Project no longer exists, clear storage
+          localStorage.removeItem('pp_project_id');
+        }
+      }
+
+      // No project — show landing or load without project scope (legacy)
+      const { data: projects } = await supabase.from('projects').select('id').limit(1);
+      if (projects?.length) {
+        // Has projects but no selection — show landing
+        setShowProjectLanding(true);
+        setLoading(false);
+      } else {
+        // Legacy: no projects table yet, load all data without filter
+        await loadAllForProject(null, null);
+      }
     };
-    loadAll();
+    init();
   }, []);
 
   // ── Suscripciones Realtime ─────────────────────────────────
@@ -2227,7 +2729,6 @@ export default function App() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_config' }, (payload) => {
         const { key, value } = payload.new;
         if (key === 'nextId') setNextId(Number(value));
-        if (key === 'weights') setWeights(value);
         if (key === 'currentUserId') setCurrentUserId(value === null ? null : Number(value));
       })
 
@@ -2344,7 +2845,11 @@ export default function App() {
     if (task.status === 'Finalizada' && !task.finalizedAt) {
       task = { ...task, finalizedAt: getColombiaNow() };
     }
-    const { error } = await supabase.from('tasks').insert(taskToDb(task));
+    const dbTask = { ...taskToDb(task), project_id: projectId || undefined };
+    if (Array.isArray(dimensions) && dimensions.length) {
+      dbTask.aporte_snapshot = calcAporte(task, dimensions);
+    }
+    const { error } = await supabase.from('tasks').insert(dbTask);
     if (!error) {
       setTasks(prev => [...prev, task]);
     } else {
@@ -2357,7 +2862,11 @@ export default function App() {
     if (task.status === 'Finalizada' && !task.finalizedAt) {
       task = { ...task, finalizedAt: getColombiaNow() };
     }
-    const { error } = await supabase.from('tasks').update(taskToDb(task)).eq('id', task.id);
+    const dbTask = { ...taskToDb(task) };
+    if (Array.isArray(dimensions) && dimensions.length) {
+      dbTask.aporte_snapshot = calcAporte(task, dimensions);
+    }
+    const { error } = await supabase.from('tasks').update(dbTask).eq('id', task.id);
     if (!error) {
       setTasks(prev => prev.map(t => t.id === task.id ? task : t));
     } else {
@@ -2382,7 +2891,7 @@ export default function App() {
     const toUpdate = next.filter(n => prev.find(p => p.id === n.id));
     const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
     for (const p of toInsert)
-      await supabase.from('participants').insert({ id: p.id, name: p.name, is_super_user: p.isSuperUser });
+      await supabase.from('participants').insert({ id: p.id, name: p.name, is_super_user: p.isSuperUser, project_id: projectId || undefined });
     for (const p of toUpdate)
       await supabase.from('participants').update({ name: p.name, is_super_user: p.isSuperUser }).eq('id', p.id);
     for (const p of toDelete)
@@ -2396,7 +2905,7 @@ export default function App() {
     const toInsert = next.filter(n => !prev.find(p => p.id === n.id));
     const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
     for (const i of toInsert)
-      await supabase.from('indicators').insert({ id: i.id, name: i.name });
+      await supabase.from('indicators').insert({ id: i.id, name: i.name, project_id: projectId || undefined });
     for (const i of toDelete)
       await supabase.from('indicators').delete().eq('id', i.id);
     setIndicators(next);
@@ -2419,9 +2928,22 @@ export default function App() {
     return next;
   };
 
-  const saveWeights = async (w) => {
-    setWeights(w);
-    await supabase.from('app_config').update({ value: w }).eq('key', 'weights');
+  const saveDimensions = async (dims) => {
+    setDimensions(dims);
+    if (projectId && project) {
+      const newConfig = { ...(project.config || {}), dimensions: dims };
+      await supabase.from('projects').update({ config: newConfig }).eq('id', projectId);
+      setProject(prev => ({ ...prev, config: newConfig }));
+    }
+  };
+
+  const saveProjectPin = async (pin) => {
+    setProjectPin(pin);
+    if (projectId && project) {
+      const newConfig = { ...(project.config || {}), pin };
+      await supabase.from('projects').update({ config: newConfig }).eq('id', projectId);
+      setProject(prev => ({ ...prev, config: newConfig }));
+    }
   };
 
   const saveCurrentUser = async (id) => {
@@ -2466,11 +2988,21 @@ export default function App() {
     { id: "board", label: "Tablero" },
     { id: "gantt", label: "Gantt" },
     { id: "metrics", label: "Métricas" },
+    { id: "deps", label: "Red de Tareas" },
     { id: "config", label: "Configuración" },
   ];
 
   return (
     <>
+      {showProjectLanding && !loading && (
+        <ProjectLandingScreen onProjectLoaded={(proj) => {
+          setProject(proj);
+          setProjectId(proj.id);
+          setShowProjectLanding(false);
+          loadAllForProject(proj.id, proj);
+        }} />
+      )}
+
       {loading && (
         <div style={{
           position: 'fixed', inset: 0, background: '#0d0d1a',
@@ -2482,7 +3014,7 @@ export default function App() {
             fontSize: 72, fontWeight: 900,
             background: 'linear-gradient(135deg, #ec6c04, #149cac)',
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          }}>W</div>
+          }}>P+</div>
           <div style={{ width: 200, height: 2, background: 'rgba(255,255,255,0.1)', borderRadius: 1, overflow: 'hidden' }}>
             <div style={{
               height: '100%', background: 'linear-gradient(90deg, #ec6c04, #149cac)',
@@ -2570,11 +3102,22 @@ export default function App() {
     `}</style>
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #f8f4ff 0%, #e6f7f8 50%, #fff3ea 100%)", color: "var(--color-text-primary)", fontFamily: "var(--font-sans)" }}>
       <div style={{ background: "linear-gradient(90deg, #1a1a2e 0%, #2d1b4e 100%)", boxShadow: "0 2px 0 #ec6c04", padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 800, fontSize: 18, display: "flex", alignItems: "center", gap: 2 }}>
+        <div style={{ fontWeight: 800, fontSize: 18, display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ background: "linear-gradient(135deg, #ec6c04, #f07d1e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Productivity</span>
           <span style={{ color: "#ffffff", fontWeight: 300, fontSize: 16 }}>-Plus</span>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ec6c04", marginLeft: 6, animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ec6c04", marginLeft: 2, animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
         </div>
+        {project && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", letterSpacing: 1 }}>|</span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: 500 }}>{project.name}</span>
+            <button
+              onClick={() => { localStorage.removeItem('pp_project_id'); setProject(null); setProjectId(null); setShowProjectLanding(true); setShowIntro(true); setActiveUser(null); }}
+              title="Cambiar proyecto"
+              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontSize: 10, fontWeight: 500 }}
+            >↩</button>
+          </div>
+        )}
         <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)" }} />
         {/* Active users indicator */}
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -2648,13 +3191,26 @@ export default function App() {
 
       <div style={{ padding: "20px 20px 40px" }}>
         {activeTab === "board" && (
-          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={weights} />
+          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} />
         )}
         {activeTab === "gantt" && <GanttTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
         {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
+        {activeTab === "deps" && (
+          <DependenciesTab
+            tasks={tasks}
+            onEditTask={(t) => { setDepEditTask(t); setActiveTab("board"); }}
+          />
+        )}
         {activeTab === "config" && (
           configUnlocked ? (
-            <ConfigTab participants={participants} setParticipants={saveParticipants} indicators={indicators} setIndicators={saveIndicators} taskTypes={taskTypes} setTaskTypes={saveTaskTypes} weights={weights} setWeights={saveWeights} tasks={tasks} />
+            <ConfigTab
+              participants={participants} setParticipants={saveParticipants}
+              indicators={indicators} setIndicators={saveIndicators}
+              taskTypes={taskTypes} setTaskTypes={saveTaskTypes}
+              dimensions={dimensions} setDimensions={saveDimensions}
+              tasks={tasks} project={project}
+              projectPin={projectPin} onChangePin={saveProjectPin}
+            />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 340, gap: 16 }}>
               <div style={{ background: "#ffffff", borderRadius: 16, padding: "32px 36px", boxShadow: "0 4px 32px rgba(84,44,156,0.12)", border: "1px solid rgba(84,44,156,0.12)", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, minWidth: 300 }}>
@@ -2670,7 +3226,7 @@ export default function App() {
                   onChange={(e) => { setConfigPin(e.target.value); setPinError(false); }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      if (configPin === CONFIG_PIN) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
+                      if (configPin === projectPin) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
                       else { setPinError(true); setConfigPin(""); }
                     }
                   }}
@@ -2682,7 +3238,7 @@ export default function App() {
                 )}
                 <button
                   onClick={() => {
-                    if (configPin === CONFIG_PIN) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
+                    if (configPin === projectPin) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
                     else { setPinError(true); setConfigPin(""); }
                   }}
                   style={{ width: "100%", background: "linear-gradient(135deg, #542c9c, #6e3ebf)", color: "#ffffff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 3px 12px rgba(84,44,156,0.3)" }}

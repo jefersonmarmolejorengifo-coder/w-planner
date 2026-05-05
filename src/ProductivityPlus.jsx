@@ -1905,6 +1905,111 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
   );
 }
 
+// ─── AuthScreen ───────────────────────────────────────────
+function AuthScreen({ onAuth }) {
+  const [authTab, setAuthTab] = useState('login'); // 'login' | 'register'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+
+  const inp = { background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "11px 14px", fontSize: 14, outline: "none", fontFamily: "inherit", color: "#fff", width: "100%", boxSizing: "border-box", transition: "border-color 0.2s" };
+  const lbl = { fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 };
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password) { setError("Completa todos los campos."); return; }
+    setLoading(true); setError(''); setInfo('');
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    if (data?.user) onAuth(data.user);
+  };
+
+  const handleRegister = async () => {
+    if (!name.trim() || !email.trim() || !password) { setError("Completa todos los campos."); return; }
+    if (password.length < 6) { setError("La contraseña debe tener al menos 6 caracteres."); return; }
+    setLoading(true); setError(''); setInfo('');
+    const { data, error: err } = await supabase.auth.signUp({
+      email: email.trim(), password,
+      options: { data: { full_name: name.trim() } },
+    });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    if (data?.user && !data?.session) {
+      setInfo("Revisa tu correo para confirmar tu cuenta.");
+      return;
+    }
+    if (data?.user) onAuth(data.user);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "linear-gradient(160deg,#0d0d1a 0%,#1a1a2e 50%,#2d1b4e 100%)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9998, padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 420 }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <div style={{ fontSize: 72, fontWeight: 900, background: "linear-gradient(135deg,#ec6c04,#f5a623,#149cac)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", lineHeight: 1, letterSpacing: -3 }}>P+</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: 5, textTransform: "uppercase", marginTop: 6 }}>Productivity-Plus</div>
+        </div>
+
+        <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 0, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: 4, marginBottom: 28 }}>
+            {[['login','Iniciar sesión'],['register','Crear cuenta']].map(([t, l]) => (
+              <button key={t} onClick={() => { setAuthTab(t); setError(''); setInfo(''); }}
+                style={{ flex: 1, background: authTab === t ? "rgba(236,108,4,0.9)" : "transparent", color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: authTab === t ? 700 : 400, fontSize: 13, transition: "all 0.2s", fontFamily: "inherit" }}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {authTab === 'login' ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={lbl}>Correo electrónico</label>
+                <input style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="tu@correo.com" autoFocus />
+              </div>
+              <div>
+                <label style={lbl}>Contraseña</label>
+                <input style={inp} type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="••••••••" />
+              </div>
+              {error && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{error}</div>}
+              {info && <div style={{ fontSize: 12, color: "#4dd8e8", fontWeight: 500 }}>{info}</div>}
+              <button onClick={handleLogin} disabled={loading}
+                style={{ background: loading ? "#555" : "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: loading ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: loading ? "none" : "0 4px 20px rgba(236,108,4,0.4)", marginTop: 4, fontFamily: "inherit" }}>
+                {loading ? "Ingresando..." : "Ingresar →"}
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={lbl}>Nombre</label>
+                <input style={inp} type="text" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRegister()} placeholder="Tu nombre completo" autoFocus />
+              </div>
+              <div>
+                <label style={lbl}>Correo electrónico</label>
+                <input style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRegister()} placeholder="tu@correo.com" />
+              </div>
+              <div>
+                <label style={lbl}>Contraseña</label>
+                <input style={inp} type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRegister()} placeholder="Mínimo 6 caracteres" />
+              </div>
+              {error && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{error}</div>}
+              {info && <div style={{ fontSize: 12, color: "#4dd8e8", fontWeight: 500 }}>{info}</div>}
+              <button onClick={handleRegister} disabled={loading}
+                style={{ background: loading ? "#555" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: loading ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: loading ? "none" : "0 4px 20px rgba(84,44,156,0.4)", marginTop: 4, fontFamily: "inherit" }}>
+                {loading ? "Creando cuenta..." : "Crear cuenta →"}
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: "rgba(255,255,255,0.2)", letterSpacing: 2 }}>PRODUCTIVITY-PLUS · GESTIÓN ESTRATÉGICA</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── UserSelectScreen ─────────────────────────────────────
 const USER_COLORS = ["#ec6c04","#0aa0ab","#542c9c","#e74c3c","#27ae60","#2980b9","#e67e22","#8e44ad","#1abc9c","#c0392b"];
 const getUserColor = (name) => USER_COLORS[Math.abs([...(name||"")].reduce((h, c) => h * 31 + c.charCodeAt(0), 0)) % USER_COLORS.length];
@@ -2244,7 +2349,7 @@ function IntroScreen({ onFinish }) {
 }
 
 // ─── ProjectLandingScreen ──────────────────────────────────
-function ProjectLandingScreen({ onProjectLoaded }) {
+function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const [tab, setTab] = useState('join'); // 'create' | 'join' | 'template'
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -2270,7 +2375,7 @@ function ProjectLandingScreen({ onProjectLoaded }) {
       pin: projPin,
       dimensions: DEFAULT_DIMENSIONS,
     };
-    const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config }).select().single();
+    const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config, owner_id: authUser?.id || null }).select().single();
     if (error || !data) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setCreating(false); return; }
     localStorage.setItem('pp_project_id', String(data.id));
     onProjectLoaded(data);
@@ -2285,7 +2390,7 @@ function ProjectLandingScreen({ onProjectLoaded }) {
       pin: tplPin,
       dimensions: tpl.config?.dimensions || DEFAULT_DIMENSIONS,
     };
-    const { data: proj, error } = await supabase.from('projects').insert({ name: tpl.name, description: tpl.description, config }).select().single();
+    const { data: proj, error } = await supabase.from('projects').insert({ name: tpl.name, description: tpl.description, config, owner_id: authUser?.id || null }).select().single();
     if (error || !proj) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setTplCreating(false); return; }
     // Insert sample tasks
     const taskSchema = Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : [];
@@ -2313,6 +2418,12 @@ function ProjectLandingScreen({ onProjectLoaded }) {
     setJoining(true); setErr("");
     const { data, error } = await supabase.from('projects').select('*').eq('invite_code', code).single();
     if (error || !data) { setErr("Código inválido o proyecto no encontrado."); setJoining(false); return; }
+    if (authUser) {
+      await supabase.from('project_members').upsert(
+        { project_id: data.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email, user_id: authUser.id },
+        { onConflict: 'project_id,email' }
+      );
+    }
     localStorage.setItem('pp_project_id', String(data.id));
     onProjectLoaded(data);
   };
@@ -2328,6 +2439,13 @@ function ProjectLandingScreen({ onProjectLoaded }) {
           <div style={{ fontSize: 72, fontWeight: 900, background: "linear-gradient(135deg,#ec6c04,#f5a623,#149cac)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", lineHeight: 1, letterSpacing: -3 }}>P+</div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: 5, textTransform: "uppercase", marginTop: 6 }}>Productivity-Plus</div>
         </div>
+
+        {/* Logged-in user */}
+        {authUser && (
+          <div style={{ textAlign: 'center', marginBottom: 16, fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+            {authUser.email} · <button onClick={() => supabase.auth.signOut()} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 12, textDecoration: 'underline', fontFamily: 'inherit' }}>Cerrar sesión</button>
+          </div>
+        )}
 
         {/* Card */}
         <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
@@ -3146,6 +3264,8 @@ export default function App() {
   const [pinError, setPinError] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
   const [showUserSelect, setShowUserSelect] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [showAuth, setShowAuth] = useState(false);
   const [activeUser, setActiveUser] = useState(null);
   const [activeUsers, setActiveUsers] = useState([]);
   const [kickedMsg, setKickedMsg] = useState(null);
@@ -3195,7 +3315,7 @@ export default function App() {
     return [];
   };
 
-  const loadAllForProject = async (pid, proj) => {
+  const loadAllForProject = async (pid, proj, authUser = null) => {
     setLoading(true);
     try {
       const q = (table) => pid ? supabase.from(table).select('*').eq('project_id', pid) : supabase.from(table).select('*');
@@ -3250,6 +3370,27 @@ export default function App() {
         await supabase.from('participants').insert(defaultUser);
         setParticipants([{ id: 1, name: 'Usuario', isSuperUser: true }]);
       }
+
+      // Auto-set active user from auth
+      if (authUser && pid) {
+        const userName = authUser.user_metadata?.full_name || authUser.email.split('@')[0];
+        const isOwner = (proj || p)?.owner_id === authUser.id;
+        let part = partsData?.find(p2 => p2.auth_user_id === authUser.id || (p2.email && p2.email === authUser.email));
+        if (!part) {
+          const { data: created } = await supabase.from('participants').insert({
+            name: userName, is_super_user: isOwner, project_id: pid,
+            auth_user_id: authUser.id, email: authUser.email
+          }).select().single();
+          if (created) {
+            part = created;
+            setParticipants(prev => [...prev.filter(p2 => p2.id !== created.id), { id: created.id, name: created.name, isSuperUser: isOwner }]);
+          }
+        }
+        if (part) {
+          setActiveUser({ id: part.id, name: part.name, isSuperUser: isOwner });
+          setCurrentUserId(part.id);
+        }
+      }
     } catch (err) {
       console.error('Error cargando datos:', err);
     }
@@ -3258,48 +3399,64 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      // Check URL for ?join=CODE (invitation link)
+      // 1. Check Supabase auth session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setLoading(false);
+        // showIntro will lead to showAuth after animation
+        return;
+      }
+      const user = session.user;
+      setAuthUser(user);
+
+      // 2. Handle ?join=CODE invite link
       const params = new URLSearchParams(window.location.search);
       const joinCode = params.get('join');
       if (joinCode) {
-        const { data } = await supabase.from('projects').select('*').eq('invite_code', joinCode).single();
-        if (data) {
-          localStorage.setItem('pp_project_id', String(data.id));
-          setProjectId(data.id);
-          setProject(data);
+        const { data: proj } = await supabase.from('projects').select('*').eq('invite_code', joinCode).single();
+        if (proj) {
+          await supabase.from('project_members').upsert(
+            { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email, user_id: user.id },
+            { onConflict: 'project_id,email' }
+          );
+          localStorage.setItem('pp_project_id', String(proj.id));
+          setProjectId(proj.id); setProject(proj);
           window.history.replaceState({}, '', window.location.pathname);
-          await loadAllForProject(data.id, data);
+          await loadAllForProject(proj.id, proj, user);
           return;
         }
       }
 
+      // 3. Load stored project
       const stored = localStorage.getItem('pp_project_id');
       if (stored) {
         const pid = Number(stored);
         const { data: proj } = await supabase.from('projects').select('*').eq('id', pid).single();
         if (proj) {
-          setProjectId(pid);
-          setProject(proj);
-          await loadAllForProject(pid, proj);
+          setProjectId(pid); setProject(proj);
+          await loadAllForProject(pid, proj, user);
           return;
-        } else {
-          // Project no longer exists, clear storage
-          localStorage.removeItem('pp_project_id');
         }
+        localStorage.removeItem('pp_project_id');
       }
 
-      // No project — show landing or load without project scope (legacy)
-      const { data: projects } = await supabase.from('projects').select('id').limit(1);
-      if (projects?.length) {
-        // Has projects but no selection — show landing
-        setShowProjectLanding(true);
-        setLoading(false);
-      } else {
-        // Legacy: no projects table yet, load all data without filter
-        await loadAllForProject(null, null);
-      }
+      // 4. No project — show landing
+      setShowProjectLanding(true);
+      setLoading(false);
     };
+
     init();
+
+    // Auth state subscription
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setAuthUser(null); setActiveUser(null); setProject(null);
+        setProjectId(null); setTasks([]); setParticipants([]);
+        setShowAuth(true); setShowIntro(true); setShowProjectLanding(false);
+        setLoading(false);
+      }
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   // ── Suscripciones Realtime ─────────────────────────────────
@@ -3399,7 +3556,6 @@ export default function App() {
           // Someone newer has our userId — we get kicked
           setKickedMsg(`Alguien acaba de ingresar como "${currentActive.name}". Tu sesión ha sido cerrada.`);
           setActiveUser(null);
-          setShowUserSelect(true);
           channel.untrack();
         }
       })
@@ -3461,7 +3617,6 @@ export default function App() {
       presenceChannelRef.current.untrack();
     }
     setActiveUser(null);
-    setShowUserSelect(true);
   };
 
   const createTask = async (task) => {
@@ -3655,11 +3810,11 @@ export default function App() {
   return (
     <>
       {showProjectLanding && !loading && (
-        <ProjectLandingScreen onProjectLoaded={(proj) => {
+        <ProjectLandingScreen authUser={authUser} onProjectLoaded={(proj) => {
           setProject(proj);
           setProjectId(proj.id);
           setShowProjectLanding(false);
-          loadAllForProject(proj.id, proj);
+          loadAllForProject(proj.id, proj, authUser);
         }} />
       )}
 
@@ -3686,9 +3841,39 @@ export default function App() {
           </span>
         </div>
       )}
-      {!loading && showIntro && <IntroScreen onFinish={() => { setShowIntro(false); setShowUserSelect(true); }} />}
-      {!loading && !showIntro && showUserSelect && (
-        <UserSelectScreen participants={participants} activeUsers={activeUsers} onSelect={handleUserSelect} onConflict={handleConflict} />
+      {!loading && showIntro && <IntroScreen onFinish={() => { setShowIntro(false); if (!authUser) setShowAuth(true); }} />}
+      {!loading && !showIntro && showAuth && (
+        <AuthScreen onAuth={async (user) => {
+          setAuthUser(user);
+          setShowAuth(false);
+          // Handle pending join code
+          const params = new URLSearchParams(window.location.search);
+          const joinCode = params.get('join');
+          if (joinCode) {
+            const { data: proj } = await supabase.from('projects').select('*').eq('invite_code', joinCode).single();
+            if (proj) {
+              await supabase.from('project_members').upsert(
+                { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email, user_id: user.id },
+                { onConflict: 'project_id,email' }
+              );
+              localStorage.setItem('pp_project_id', String(proj.id));
+              setProjectId(proj.id); setProject(proj);
+              window.history.replaceState({}, '', window.location.pathname);
+              await loadAllForProject(proj.id, proj, user);
+              return;
+            }
+          }
+          // Check for stored project
+          const stored = localStorage.getItem('pp_project_id');
+          if (stored) {
+            const pid = Number(stored);
+            const { data: proj } = await supabase.from('projects').select('*').eq('id', pid).single();
+            if (proj) { setProjectId(pid); setProject(proj); await loadAllForProject(pid, proj, user); return; }
+            localStorage.removeItem('pp_project_id');
+          }
+          setShowProjectLanding(true);
+          setLoading(false);
+        }} />
       )}
       {/* Conflict modal — user is already active, offer to take over or pick another */}
       {conflictUser && (
@@ -3754,7 +3939,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <div style={{ opacity: showIntro || showUserSelect ? 0 : 1, pointerEvents: showIntro || showUserSelect ? "none" : "auto", transition: "opacity 0.6s ease 0.2s" }}>
+      <div style={{ opacity: showIntro || showAuth ? 0 : 1, pointerEvents: showIntro || showAuth ? "none" : "auto", transition: "opacity 0.6s ease 0.2s" }}>
     <style>{`
       @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes shimmer { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
@@ -3825,6 +4010,11 @@ export default function App() {
               cursor: "pointer", fontSize: 10, fontWeight: 500, transition: "all 0.2s",
             }}>Cambiar</button>
           </div>
+        )}
+        {authUser && (
+          <button onClick={() => supabase.auth.signOut()} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.4)", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontSize:10, fontWeight:500 }}>
+            Salir
+          </button>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           {/* Notifications bell */}
@@ -3905,8 +4095,9 @@ export default function App() {
         {activeTab === "focus" && (
           <FocusTab tasks={tasks} activeUser={activeUser} updateTask={updateTask} dimensions={dimensions} />
         )}
-        {activeTab === "config" && (
-          configUnlocked ? (
+        {activeTab === "config" && (() => {
+          const isOwner = project?.owner_id === authUser?.id;
+          return isOwner ? (
             <ConfigTab
               participants={participants} setParticipants={saveParticipants}
               indicators={indicators} setIndicators={saveIndicators}
@@ -3916,43 +4107,15 @@ export default function App() {
               projectPin={projectPin} onChangePin={saveProjectPin}
             />
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 340, gap: 16 }}>
-              <div style={{ background: "#ffffff", borderRadius: 16, padding: "32px 36px", boxShadow: "0 4px 32px rgba(84,44,156,0.12)", border: "1px solid rgba(84,44,156,0.12)", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, minWidth: 300 }}>
-                <div style={{ width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg, #542c9c, #6e3ebf)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: "#fff" }}>🔒</div>
-                <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#542c9c", marginBottom: 4 }}>Acceso restringido</div>
-                  <div style={{ fontSize: 12, color: "#969696" }}>Ingresa la clave para acceder a Configuración</div>
-                </div>
-                <input
-                  type="password"
-                  placeholder="Clave de acceso"
-                  value={configPin}
-                  onChange={(e) => { setConfigPin(e.target.value); setPinError(false); }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (configPin === projectPin) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
-                      else { setPinError(true); setConfigPin(""); }
-                    }
-                  }}
-                  style={{ width: "100%", border: pinError ? "1.5px solid #c0392b" : "1.5px solid #e0e0e0", borderRadius: 8, padding: "10px 14px", fontSize: 14, textAlign: "center", letterSpacing: "0.2em", outline: "none", background: pinError ? "#fde8e8" : "#fafafa", color: "#2d2d2d", fontFamily: "inherit", transition: "border-color 0.2s" }}
-                  autoFocus
-                />
-                {pinError && (
-                  <div style={{ fontSize: 12, color: "#c0392b", fontWeight: 500 }}>Clave incorrecta. Intenta de nuevo.</div>
-                )}
-                <button
-                  onClick={() => {
-                    if (configPin === projectPin) { setConfigUnlocked(true); setConfigPin(""); setPinError(false); }
-                    else { setPinError(true); setConfigPin(""); }
-                  }}
-                  style={{ width: "100%", background: "linear-gradient(135deg, #542c9c, #6e3ebf)", color: "#ffffff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 3px 12px rgba(84,44,156,0.3)" }}
-                >
-                  Ingresar
-                </button>
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", minHeight:340, gap:16 }}>
+              <div style={{ background:"#fff", borderRadius:16, padding:"32px 36px", boxShadow:"0 4px 32px rgba(84,44,156,0.12)", textAlign:"center", maxWidth:360 }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>🔒</div>
+                <div style={{ fontSize:16, fontWeight:700, color:"#542c9c", marginBottom:8 }}>Acceso restringido</div>
+                <div style={{ fontSize:13, color:"#969696", lineHeight:1.6 }}>Solo el dueño del proyecto puede acceder a la configuración.</div>
               </div>
             </div>
-          )
-        )}
+          );
+        })()}
       </div>
       <div style={{ position: "fixed", bottom: 12, left: 16, display: "flex", flexDirection: "column", gap: 1, zIndex: 50 }}>
         <span style={{ fontSize: 10, color: "#969696", fontWeight: 400, letterSpacing: "0.03em" }}>Desarrollado por Jeferson Marmolejo</span>

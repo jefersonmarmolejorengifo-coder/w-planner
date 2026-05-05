@@ -2362,10 +2362,50 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [tplPin, setTplPin] = useState("");
   const [tplCreating, setTplCreating] = useState(false);
+  const [myProjects, setMyProjects] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
 
   useEffect(() => {
     supabase.from('project_templates').select('*').then(({ data }) => { if (data) setTemplates(data); });
   }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
+    const loadMyProjects = async () => {
+      setLoadingProjects(true);
+      const seen = new Set();
+      const all = [];
+      const add = (p) => { if (p?.id && !seen.has(p.id)) { seen.add(p.id); all.push(p); } };
+
+      // Use allSettled so a missing column (migration not run) doesn't break everything
+      const [ownedRes, memberByIdRes, memberByEmailRes] = await Promise.allSettled([
+        supabase.from('projects').select('*').eq('owner_id', authUser.id),
+        supabase.from('project_members').select('project_id, projects(*)').eq('user_id', authUser.id),
+        supabase.from('project_members').select('project_id, projects(*)').eq('email', authUser.email),
+      ]);
+      (ownedRes.value?.data || []).forEach(add);
+      (memberByIdRes.value?.data || []).forEach(m => m.projects && add(m.projects));
+      (memberByEmailRes.value?.data || []).forEach(m => m.projects && add(m.projects));
+
+      // Fallback: any project ID stored in localStorage (covers projects created before auth)
+      const storedIds = [localStorage.getItem('pp_project_id'), localStorage.getItem('pp_last_project_id')].filter(Boolean);
+      await Promise.all(storedIds.map(async (pid) => {
+        const { data: p } = await supabase.from('projects').select('*').eq('id', Number(pid)).single();
+        if (p) {
+          add(p);
+          // Auto-register in project_members so future loads work without localStorage
+          await supabase.from('project_members').upsert(
+            { project_id: p.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email },
+            { onConflict: 'project_id,email' }
+          );
+        }
+      }));
+
+      setMyProjects(all);
+      setLoadingProjects(false);
+    };
+    loadMyProjects();
+  }, [authUser]);
 
   const createProject = async () => {
     if (!projName.trim()) { setErr("El nombre del proyecto es requerido."); return; }
@@ -2377,6 +2417,12 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     };
     const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config, owner_id: authUser?.id || null }).select().single();
     if (error || !data) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setCreating(false); return; }
+    if (authUser) {
+      await supabase.from('project_members').upsert(
+        { project_id: data.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email, user_id: authUser.id },
+        { onConflict: 'project_id,email' }
+      );
+    }
     localStorage.setItem('pp_project_id', String(data.id));
     onProjectLoaded(data);
   };
@@ -2392,6 +2438,12 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     };
     const { data: proj, error } = await supabase.from('projects').insert({ name: tpl.name, description: tpl.description, config, owner_id: authUser?.id || null }).select().single();
     if (error || !proj) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setTplCreating(false); return; }
+    if (authUser) {
+      await supabase.from('project_members').upsert(
+        { project_id: proj.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email, user_id: authUser.id },
+        { onConflict: 'project_id,email' }
+      );
+    }
     // Insert sample tasks
     const taskSchema = Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : [];
     if (taskSchema.length) {
@@ -2446,6 +2498,27 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
             {authUser.email} · <button onClick={() => supabase.auth.signOut()} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 12, textDecoration: 'underline', fontFamily: 'inherit' }}>Cerrar sesión</button>
           </div>
         )}
+
+        {/* My Projects */}
+        {authUser && (loadingProjects ? (
+          <div style={{ textAlign: 'center', marginBottom: 20, fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>Cargando proyectos...</div>
+        ) : myProjects.length > 0 ? (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: 3, marginBottom: 10, textAlign: 'center' }}>Mis proyectos</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {myProjects.map(proj => (
+                <button key={proj.id}
+                  onClick={() => { localStorage.setItem('pp_project_id', String(proj.id)); onProjectLoaded(proj); }}
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '14px 18px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', width: '100%', fontFamily: 'inherit' }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: proj.description ? 3 : 0 }}>{proj.name}</div>
+                  {proj.description && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>{proj.description}</div>}
+                  {proj.owner_id === authUser.id && <div style={{ fontSize: 10, color: '#ec6c04', marginTop: 5, fontWeight: 700, letterSpacing: 0.5 }}>PROPIETARIO</div>}
+                </button>
+              ))}
+            </div>
+            <div style={{ textAlign: 'center', margin: '16px 0 4px', fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>— o crea / únete a otro proyecto —</div>
+          </div>
+        ) : null)}
 
         {/* Card */}
         <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
@@ -2596,21 +2669,85 @@ function computeDepLayout(tasks) {
   };
 }
 
-function DependenciesTab({ tasks, onEditTask }) {
+function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("all");
+  const [sprintFilter, setSprintFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
-  const visible = filter === "all" ? tasks : tasks.filter(t => t.dependentTask || tasks.some(x => String(x.dependentTask) === String(t.id)));
-  const { positions, svgW, svgH, byLevel } = useMemo(() => computeDepLayout(visible), [visible]);
+  // Apply sprint + date filters to get the base task set
+  const sprintTasks = useMemo(() => {
+    let base = tasks;
+    if (sprintFilter !== "all") {
+      base = base.filter(t => String(t.sprintId) === String(sprintFilter));
+    }
+    if (dateFrom || dateTo) {
+      base = base.filter(t => {
+        const sd = t.startDate || t.endDate || "";
+        if (!sd) return false;
+        if (dateFrom && sd < dateFrom) return false;
+        if (dateTo && sd > dateTo) return false;
+        return true;
+      });
+    }
+    return base;
+  }, [tasks, sprintFilter, dateFrom, dateTo]);
 
-  const edges = visible.filter(t => t.dependentTask && positions[String(t.dependentTask)]);
+  const isFiltered = sprintFilter !== "all" || dateFrom || dateTo;
+
+  // Ghost tasks: depended-upon tasks outside current filter
+  const ghostTaskSet = useMemo(() => {
+    if (!isFiltered) return new Set();
+    const ghosts = new Set();
+    sprintTasks.forEach(t => {
+      if (t.dependentTask) {
+        const dep = tasks.find(x => String(x.id) === String(t.dependentTask));
+        if (dep && !sprintTasks.find(st => st.id === dep.id)) ghosts.add(dep.id);
+      }
+    });
+    return ghosts;
+  }, [tasks, sprintTasks, isFiltered]);
+
+  const ghostTasks = useMemo(() => [...ghostTaskSet].map(id => tasks.find(t => t.id === id)).filter(Boolean), [tasks, ghostTaskSet]);
+
+  const visibleBase = filter === "all" ? sprintTasks : sprintTasks.filter(t => t.dependentTask || sprintTasks.some(x => String(x.dependentTask) === String(t.id)));
+  const allVisible = [...visibleBase, ...ghostTasks.filter(g => !visibleBase.find(v => v.id === g.id))];
+
+  const { positions, svgW, svgH, byLevel } = useMemo(() => computeDepLayout(allVisible), [allVisible]);
+
+  const edges = allVisible.filter(t => !ghostTaskSet.has(t.id) && t.dependentTask && positions[String(t.dependentTask)]);
 
   const sel = selected ? tasks.find(t => String(t.id) === String(selected)) : null;
 
+  const inpStyle = { background: "#f4f4f4", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "5px 10px", fontSize: 12, color: "#444", outline: "none", fontFamily: "inherit", cursor: "pointer" };
+
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: "#542c9c" }}>Red de Dependencias</div>
+
+        {/* Sprint filter — only when sprints exist */}
+        {sprints.length > 0 && (
+          <select value={sprintFilter} onChange={e => { setSprintFilter(e.target.value); setSelected(null); }} style={inpStyle}>
+            <option value="all">Todos los sprints</option>
+            {sprints.map(s => (
+              <option key={s.id} value={String(s.id)}>{s.name} {s.status === 'active' ? '▶' : s.status === 'closed' ? '✓' : '○'}</option>
+            ))}
+          </select>
+        )}
+
+        {/* Date range filter */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 11, color: "#999", whiteSpace: "nowrap" }}>Inicio desde</span>
+          <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setSelected(null); }} style={inpStyle} />
+          <span style={{ fontSize: 11, color: "#999" }}>hasta</span>
+          <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setSelected(null); }} style={inpStyle} />
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ background: "#f4f4f4", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "5px 10px", fontSize: 11, color: "#666", cursor: "pointer" }}>✕ Limpiar</button>
+          )}
+        </div>
+
         <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
           {[["all","Todas las tareas"],["linked","Solo enlazadas"]].map(([v,l]) => (
             <button key={v} onClick={() => setFilter(v)}
@@ -2622,13 +2759,20 @@ function DependenciesTab({ tasks, onEditTask }) {
       </div>
 
       {/* Legend */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: ghostTasks.length > 0 ? 8 : 16 }}>
         {Object.entries(STATUS_COLORS).map(([st, c]) => (
           <div key={st} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#666" }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: c }} />{st}
           </div>
         ))}
       </div>
+
+      {ghostTasks.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, fontSize: 11, color: "#999" }}>
+          <div style={{ width: 14, height: 14, borderRadius: 3, background: "#e8e8e8", border: "1.5px dashed #bbb" }} />
+          Tareas de sprints anteriores (dependencias externas)
+        </div>
+      )}
 
       {/* Hint */}
       {edges.length === 0 && filter === "linked" && (
@@ -2644,6 +2788,9 @@ function DependenciesTab({ tasks, onEditTask }) {
           <defs>
             <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
               <path d="M0,0 L0,6 L8,3 z" fill="#542c9c" opacity="0.6" />
+            </marker>
+            <marker id="arrow-ghost" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#bbb" opacity="0.7" />
             </marker>
           </defs>
 
@@ -2663,19 +2810,24 @@ function DependenciesTab({ tasks, onEditTask }) {
             const src = positions[String(t.dependentTask)];
             const dst = positions[String(t.id)];
             if (!src || !dst) return null;
+            const isGhostSrc = ghostTaskSet.has(t.dependentTask) || ghostTaskSet.has(Number(t.dependentTask));
             const x1 = src.x + NODE_W, y1 = src.y + NODE_H / 2;
             const x2 = dst.x, y2 = dst.y + NODE_H / 2;
             const cx = (x1 + x2) / 2;
             return (
               <path key={`e-${t.id}`}
                 d={`M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`}
-                fill="none" stroke="#542c9c" strokeWidth={1.5} strokeOpacity={0.4}
-                markerEnd="url(#arrow)" />
+                fill="none"
+                stroke={isGhostSrc ? "#bbb" : "#542c9c"}
+                strokeWidth={isGhostSrc ? 1 : 1.5}
+                strokeOpacity={isGhostSrc ? 0.6 : 0.4}
+                strokeDasharray={isGhostSrc ? "5,4" : "none"}
+                markerEnd={isGhostSrc ? "url(#arrow-ghost)" : "url(#arrow)"} />
             );
           })}
 
-          {/* Nodes */}
-          {visible.map(t => {
+          {/* Regular Nodes */}
+          {visibleBase.map(t => {
             const pos = positions[String(t.id)];
             if (!pos) return null;
             const sc = STATUS_COLORS[t.status] || "#888";
@@ -2708,11 +2860,40 @@ function DependenciesTab({ tasks, onEditTask }) {
               </g>
             );
           })}
+
+          {/* Ghost Nodes (tasks from other sprints) */}
+          {ghostTasks.map(t => {
+            const pos = positions[String(t.id)];
+            if (!pos) return null;
+            const sprintOfTask = sprints.find(s => String(s.id) === String(t.sprintId));
+            const sprintLabel = sprintOfTask ? sprintOfTask.name : 'Sin sprint';
+            return (
+              <g key={`ghost-${t.id}`} style={{ cursor: "default", opacity: 0.7 }}>
+                <rect x={pos.x} y={pos.y} width={NODE_W} height={NODE_H} rx={8}
+                  fill="#f0f0f0" stroke="#c0c0c0" strokeWidth={1} strokeDasharray="5,3" />
+                <rect x={pos.x} y={pos.y} width={4} height={NODE_H} rx="2 0 0 2" fill="#bbb" />
+                <text x={pos.x + 14} y={pos.y + 17} style={{ fontSize: 9, fill: "#bbb", fontFamily: "inherit" }}>
+                  #{t.id} · {sprintLabel}
+                </text>
+                <foreignObject x={pos.x + 14} y={pos.y + 21} width={NODE_W - 20} height={30}>
+                  <div xmlns="http://www.w3.org/1999/xhtml"
+                    style={{ fontSize: 11, fontWeight: 600, color: "#999", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    {t.title || "(Sin título)"}
+                  </div>
+                </foreignObject>
+                {t.startDate && (
+                  <text x={pos.x + 14} y={pos.y + 63} style={{ fontSize: 9, fill: "#bbb", fontFamily: "inherit" }}>
+                    Inicio: {t.startDate}
+                  </text>
+                )}
+              </g>
+            );
+          })}
         </svg>
       </div>
 
       {/* Selected task detail */}
-      {sel && (
+      {sel && !ghostTaskSet.has(sel.id) && (
         <div style={{ marginTop: 16, background: "#ffffff", borderRadius: 14, padding: "18px 20px", border: `2px solid ${STATUS_COLORS[sel.status] || "#e0e0e0"}`, boxShadow: "0 4px 20px rgba(84,44,156,0.1)", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 200 }}>
             <div style={{ fontSize: 12, color: "#969696" }}>#{sel.id} · {sel.type}</div>
@@ -3433,6 +3614,13 @@ export default function App() {
         const pid = Number(stored);
         const { data: proj } = await supabase.from('projects').select('*').eq('id', pid).single();
         if (proj) {
+          // Ensure user is registered as member (self-healing for projects created before auth)
+          if (user) {
+            supabase.from('project_members').upsert(
+              { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email },
+              { onConflict: 'project_id,email' }
+            );
+          }
           setProjectId(pid); setProject(proj);
           await loadAllForProject(pid, proj, user);
           return;
@@ -3962,7 +4150,7 @@ export default function App() {
             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", letterSpacing: 1 }}>|</span>
             <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: 500 }}>{project.name}</span>
             <button
-              onClick={() => { localStorage.removeItem('pp_project_id'); setProject(null); setProjectId(null); setShowProjectLanding(true); setShowIntro(true); setActiveUser(null); }}
+              onClick={() => { const pid = localStorage.getItem('pp_project_id'); if (pid) localStorage.setItem('pp_last_project_id', pid); localStorage.removeItem('pp_project_id'); setProject(null); setProjectId(null); setShowProjectLanding(true); setActiveUser(null); }}
               title="Cambiar proyecto"
               style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontSize: 10, fontWeight: 500 }}
             >↩</button>
@@ -4084,6 +4272,7 @@ export default function App() {
           <DependenciesTab
             tasks={tasks}
             onEditTask={(t) => { setDepEditTask(t); setActiveTab("board"); }}
+            sprints={sprints}
           />
         )}
         {activeTab === "okrs" && (

@@ -4127,7 +4127,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <div style={{ opacity: showIntro || showAuth ? 0 : 1, pointerEvents: showIntro || showAuth ? "none" : "auto", transition: "opacity 0.6s ease 0.2s" }}>
+      <div style={{ opacity: showIntro || showAuth || showProjectLanding ? 0 : 1, pointerEvents: showIntro || showAuth || showProjectLanding ? "none" : "auto", transition: "opacity 0.6s ease 0.2s" }}>
     <style>{`
       @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes shimmer { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }

@@ -439,8 +439,44 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
             )}
           </F>
 
-          <F label="Tarea dependiente (ID)" half>
-            <input type="number" style={inp} value={task.dependentTask} onChange={(e) => upd("dependentTask", e.target.value)} placeholder="Ej: 12" />
+          <F label="Tareas dependientes (máx. 4)" half={false}>
+            {(() => {
+              const deps = parseDeps(task.dependentTask);
+              const [dInput, setDInput] = React.useState("");
+              const addDep = () => {
+                const id = dInput.trim();
+                if (!id || deps.length >= 4 || deps.includes(id)) { setDInput(""); return; }
+                upd("dependentTask", [...deps, id].join(','));
+                setDInput("");
+              };
+              return (
+                <div>
+                  {deps.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      {deps.map(id => {
+                        const dt = tasks.find(x => String(x.id) === id);
+                        return (
+                          <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#ede8f8', border: '1px solid #c4b5e8', borderRadius: 20, padding: '4px 10px 4px 10px', fontSize: 12, color: '#542c9c' }}>
+                            <span style={{ fontWeight: 700 }}>#{id}</span>
+                            {dt && <span style={{ color: '#888', fontSize: 11, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dt.title}</span>}
+                            <button onClick={() => upd("dependentTask", deps.filter(d => d !== id).join(','))}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 0 4px', color: '#999', fontSize: 16, lineHeight: 1, fontWeight: 700 }}>×</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {deps.length < 4 ? (
+                    <input type="number" style={inp} value={dInput}
+                      onChange={e => setDInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDep(); } }}
+                      placeholder={deps.length === 0 ? "ID de tarea y presiona Enter..." : "Agregar otra dependencia..."} />
+                  ) : (
+                    <div style={{ fontSize: 11, color: '#969696', padding: '6px 0' }}>Máximo 4 dependencias alcanzado</div>
+                  )}
+                </div>
+              );
+            })()}
           </F>
 
           {sprints.filter(s => s.status !== 'closed').length > 0 && (
@@ -2657,6 +2693,12 @@ const NODE_H = 76;
 const NODE_GAP_X = 60;
 const NODE_GAP_Y = 16;
 
+// Parse "12,15,18" or legacy "12" → ["12","15","18"]
+const parseDeps = (depStr) => {
+  if (!depStr) return [];
+  return String(depStr).split(',').map(s => s.trim()).filter(Boolean);
+};
+
 function computeDepLayout(tasks) {
   const byId = {};
   tasks.forEach(t => { byId[String(t.id)] = t; });
@@ -2667,8 +2709,9 @@ function computeDepLayout(tasks) {
     if (computing.has(id)) return 0;
     computing.add(id);
     const t = byId[id];
-    if (!t || !t.dependentTask) { levels[id] = 0; }
-    else { levels[id] = getLevel(String(t.dependentTask)) + 1; }
+    const depIds = parseDeps(t?.dependentTask);
+    if (!t || depIds.length === 0) { levels[id] = 0; }
+    else { levels[id] = Math.max(...depIds.map(did => getLevel(did))) + 1; }
     computing.delete(id);
     return levels[id];
   };
@@ -2743,7 +2786,10 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
   // Step 3: linked toggle applied to focal tasks
   const visibleBase = useMemo(() => {
     if (filter !== "linked") return focalTasks;
-    return focalTasks.filter(t => t.dependentTask || tasks.some(x => String(x.dependentTask) === String(t.id)));
+    return focalTasks.filter(t =>
+      parseDeps(t.dependentTask).length > 0 ||
+      tasks.some(x => parseDeps(x.dependentTask).includes(String(t.id)))
+    );
   }, [focalTasks, filter, tasks]);
 
   // Cross-user tasks: deps of visibleBase assigned to a different user (only when user filter active)
@@ -2751,12 +2797,12 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
     if (!isUserFiltered) return new Set();
     const cross = new Set();
     visibleBase.forEach(t => {
-      if (t.dependentTask) {
-        const dep = tasks.find(x => String(x.id) === String(t.dependentTask));
+      parseDeps(t.dependentTask).forEach(depId => {
+        const dep = tasks.find(x => String(x.id) === depId);
         if (dep && dep.responsible !== userFilter && !visibleBase.find(v => v.id === dep.id)) {
           cross.add(dep.id);
         }
-      }
+      });
     });
     return cross;
   }, [tasks, visibleBase, isUserFiltered, userFilter]);
@@ -2770,12 +2816,12 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
     if (!isSprintFiltered) return new Set();
     const ghosts = new Set();
     visibleBase.forEach(t => {
-      if (t.dependentTask) {
-        const dep = tasks.find(x => String(x.id) === String(t.dependentTask));
+      parseDeps(t.dependentTask).forEach(depId => {
+        const dep = tasks.find(x => String(x.id) === depId);
         if (dep && !visibleBase.find(v => v.id === dep.id) && !crossUserTaskSet.has(dep.id)) {
           ghosts.add(dep.id);
         }
-      }
+      });
     });
     return ghosts;
   }, [tasks, visibleBase, isSprintFiltered, crossUserTaskSet]);
@@ -2793,7 +2839,16 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
   }, [visibleBase, crossUserTasks, ghostTasks]);
 
   const { positions, svgW, svgH, byLevel } = useMemo(() => computeDepLayout(allVisible), [allVisible]);
-  const edges = visibleBase.filter(t => t.dependentTask && positions[String(t.dependentTask)]);
+  // One edge entry per {task, depId} pair
+  const edges = useMemo(() => {
+    const result = [];
+    visibleBase.forEach(t => {
+      parseDeps(t.dependentTask).forEach(depId => {
+        if (positions[depId]) result.push({ t, depId });
+      });
+    });
+    return result;
+  }, [visibleBase, positions]);
   const sel = selected ? tasks.find(t => String(t.id) === String(selected)) : null;
 
   const inpStyle = { background: "#f4f4f4", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "5px 10px", fontSize: 12, color: "#444", outline: "none", fontFamily: "inherit", cursor: "pointer" };
@@ -2909,19 +2964,19 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
             </text>
           ))}
 
-          {/* Edges */}
-          {edges.map(t => {
-            const src = positions[String(t.dependentTask)];
+          {/* Edges — one per dep pair */}
+          {edges.map(({ t, depId }) => {
+            const src = positions[depId];
             const dst = positions[String(t.id)];
             if (!src || !dst) return null;
-            const depId = t.dependentTask;
-            const isCross = crossUserTaskSet.has(depId) || crossUserTaskSet.has(Number(depId));
-            const isGhost = !isCross && (ghostTaskSet.has(depId) || ghostTaskSet.has(Number(depId)));
+            const depIdNum = Number(depId);
+            const isCross = crossUserTaskSet.has(depIdNum) || crossUserTaskSet.has(depId);
+            const isGhost = !isCross && (ghostTaskSet.has(depIdNum) || ghostTaskSet.has(depId));
             const x1 = src.x + NODE_W, y1 = src.y + NODE_H / 2;
             const x2 = dst.x,          y2 = dst.y + NODE_H / 2;
             const cx = (x1 + x2) / 2;
             return (
-              <path key={`e-${t.id}`}
+              <path key={`e-${t.id}-${depId}`}
                 d={`M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`}
                 fill="none"
                 stroke={isCross ? "#ec6c04" : isGhost ? "#bbb" : "#542c9c"}
@@ -3051,14 +3106,14 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
               {sel.responsible && <span style={{ fontSize: 11, color: "#149cac", fontWeight: 600 }}>@ {sel.responsible}</span>}
               {sel.progressPercent > 0 && <span style={{ fontSize: 11, color: "#ec6c04", fontWeight: 600 }}>{Number(sel.progressPercent).toFixed(0)}% avance</span>}
             </div>
-            {sel.dependentTask && (
+            {parseDeps(sel.dependentTask).length > 0 && (
               <div style={{ marginTop: 8, fontSize: 12, color: "#542c9c" }}>
-                Depende de tarea <strong>#{sel.dependentTask}</strong>
+                Depende de: {parseDeps(sel.dependentTask).map(id => <strong key={id}> #{id}</strong>)}
               </div>
             )}
-            {tasks.filter(x => String(x.dependentTask) === String(sel.id)).length > 0 && (
+            {tasks.filter(x => parseDeps(x.dependentTask).includes(String(sel.id))).length > 0 && (
               <div style={{ marginTop: 4, fontSize: 12, color: "#ec6c04" }}>
-                Desbloquea: {tasks.filter(x => String(x.dependentTask) === String(sel.id)).map(x => `#${x.id}`).join(", ")}
+                Desbloquea: {tasks.filter(x => parseDeps(x.dependentTask).includes(String(sel.id))).map(x => `#${x.id}`).join(", ")}
               </div>
             )}
           </div>

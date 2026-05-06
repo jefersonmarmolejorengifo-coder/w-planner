@@ -16,6 +16,9 @@ DECLARE
   o2_id    BIGINT;   -- OKR 2
   kr1_id   BIGINT;   kr2_id   BIGINT;   kr3_id   BIGINT;
   kr4_id   BIGINT;   kr5_id   BIGINT;
+  base_pid BIGINT;  -- base para IDs de participantes
+  base_ind BIGINT;  -- base para IDs de indicadores
+  base_tid BIGINT;  -- base para IDs de tareas
   -- Task IDs para dependencias
   t1  BIGINT; t2  BIGINT; t3  BIGINT; t4  BIGINT; t5  BIGINT; t6  BIGINT;
   t7  BIGINT; t8  BIGINT; t9  BIGINT; t10 BIGINT; t11 BIGINT; t12 BIGINT;
@@ -49,22 +52,24 @@ INSERT INTO projects (name, description, invite_code, config) VALUES (
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 --  2. PARTICIPANTES  (5 personas del equipo)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-INSERT INTO participants (name, role, project_id) VALUES
-  ('Ana Martinez',   'Lider de Producto',       proj_id),
-  ('Carlos Ruiz',    'Desarrollador Backend',   proj_id),
-  ('Laura Gomez',    'Disenadora UX/UI',        proj_id),
-  ('Miguel Torres',  'Desarrollador Frontend',  proj_id),
-  ('Sofia Herrera',  'Marketing & Crecimiento', proj_id);
+SELECT COALESCE(MAX(id), 0) + 1 INTO base_pid FROM participants;
+INSERT INTO participants (id, name, is_super_user, project_id) VALUES
+  (base_pid,   'Ana Martinez',  false, proj_id),
+  (base_pid+1, 'Carlos Ruiz',   false, proj_id),
+  (base_pid+2, 'Laura Gomez',   false, proj_id),
+  (base_pid+3, 'Miguel Torres', false, proj_id),
+  (base_pid+4, 'Sofia Herrera', false, proj_id);
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 --  3. INDICADORES
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-INSERT INTO indicators (name, project_id) VALUES
-  ('Adopcion de usuarios',     proj_id),
-  ('NPS (Net Promoter Score)', proj_id),
-  ('Revenue mensual',          proj_id),
-  ('Tiempo de respuesta API',  proj_id),
-  ('Cobertura de pruebas',     proj_id);
+SELECT COALESCE(MAX(id), 0) + 1 INTO base_ind FROM indicators;
+INSERT INTO indicators (id, name, project_id) VALUES
+  (base_ind,   'Adopcion de usuarios',     proj_id),
+  (base_ind+1, 'NPS (Net Promoter Score)', proj_id),
+  (base_ind+2, 'Revenue mensual',          proj_id),
+  (base_ind+3, 'Tiempo de respuesta API',  proj_id),
+  (base_ind+4, 'Cobertura de pruebas',     proj_id);
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 --  4. SPRINTS  (1 cerrado · 1 activo · 1 planificacion)
@@ -128,20 +133,22 @@ VALUES ('Cobertura de pruebas automatizadas', 80, 40, '%', o2_id)
 RETURNING id INTO kr5_id;
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
---  6. TAREAS
+--  6. TAREAS  (base_tid + offset para cada una)
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SELECT COALESCE(MAX(id), 0) + 1 INTO base_tid FROM tasks;
 
 -- ──────────────────────────────────────────────────────────────
 --  SPRINT 1 · Discovery & Diseno  (6 tareas — todas Finalizadas)
 -- ──────────────────────────────────────────────────────────────
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid,
   'Investigacion de mercado y analisis de competidores',
   'Operativa', 'Finalizada', 'Sofia Herrera',
   '2025-01-13', '2025-01-17', 8, 6, 9,
@@ -152,12 +159,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t1;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+1,
   'Entrevistas en profundidad con 20 usuarios potenciales',
   'Seguimiento', 'Finalizada', 'Ana Martinez',
   '2025-01-13', '2025-01-20', 6, 4, 8,
@@ -168,12 +176,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t2;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+2,
   'Definicion de personas y mapa de experiencia del usuario',
   'Creativa', 'Finalizada', 'Laura Gomez',
   '2025-01-20', '2025-01-22', 5, 5, 7,
@@ -184,12 +193,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t3;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+3,
   'Wireframes de flujos principales: tablero, Gantt y metricas',
   'Creativa', 'Finalizada', 'Laura Gomez',
   '2025-01-20', '2025-01-27', 7, 6, 8,
@@ -200,12 +210,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t4;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+4,
   'Validacion de prototipos con usuarios reales (usability testing)',
   'Seguimiento', 'Finalizada', 'Ana Martinez',
   '2025-01-27', '2025-01-31', 4, 4, 9,
@@ -216,12 +227,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t5;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+5,
   'Arquitectura tecnica y seleccion del stack tecnologico',
   'Operativa', 'Finalizada', 'Carlos Ruiz',
   '2025-01-20', '2025-01-31', 9, 8, 9,
@@ -236,12 +248,13 @@ INSERT INTO tasks (
 -- ──────────────────────────────────────────────────────────────
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+6,
   'Sistema de diseno y libreria de componentes UI (Design System)',
   'Creativa', 'Finalizada', 'Laura Gomez',
   '2025-02-03', '2025-02-07', 8, 7, 8,
@@ -252,12 +265,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t7;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+7,
   'Configuracion de infraestructura cloud y pipeline CI/CD',
   'Operativa', 'Finalizada', 'Carlos Ruiz',
   '2025-02-03', '2025-02-07', 6, 7, 7,
@@ -268,12 +282,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t8;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+8,
   'API de autenticacion: login, registro y recuperacion de cuenta',
   'Operativa', 'En proceso', 'Carlos Ruiz',
   '2025-02-10', '2025-02-14', 7, 8, 9,
@@ -284,12 +299,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t9;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+9,
   'Modulo de usuarios, roles y permisos granulares',
   'Operativa', 'En proceso', 'Miguel Torres',
   '2025-02-10', '2025-02-17', 8, 8, 8,
@@ -300,12 +316,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t10;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+10,
   'Dashboard principal: tablero Kanban, Gantt y vistas de proyecto',
   'Operativa', 'En proceso', 'Miguel Torres',
   '2025-02-10', '2025-02-21', 9, 9, 10,
@@ -316,12 +333,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t11;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+11,
   'Integracion de pasarela de pagos con Stripe',
   'Operativa', 'Sin iniciar', 'Carlos Ruiz',
   '2025-02-17', '2025-02-21', 8, 9, 9,
@@ -332,12 +350,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t12;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+12,
   'Diseno responsive y adaptacion a dispositivos moviles',
   'Creativa', 'En proceso', 'Laura Gomez',
   '2025-02-10', '2025-02-17', 6, 6, 7,
@@ -348,12 +367,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t13;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+13,
   'Estrategia de contenidos, blog tecnico y SEO pre-lanzamiento',
   'Administrativa', 'En proceso', 'Sofia Herrera',
   '2025-02-03', '2025-02-21', 5, 4, 7,
@@ -364,12 +384,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t14;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+14,
   'Pruebas de seguridad y auditoria OWASP Top 10',
   'Seguimiento', 'Sin iniciar', 'Carlos Ruiz',
   '2025-02-17', '2025-02-21', 6, 9, 9,
@@ -380,12 +401,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t15;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+15,
   'Auditoria de accesibilidad WCAG 2.1 nivel AA',
   'Seguimiento', 'Bloqueada', 'Laura Gomez',
   '2025-02-17', '2025-02-21', 4, 5, 7,
@@ -400,12 +422,13 @@ INSERT INTO tasks (
 -- ──────────────────────────────────────────────────────────────
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+16,
   'Pruebas de carga y optimizacion de rendimiento',
   'Seguimiento', 'Sin iniciar', 'Carlos Ruiz',
   '2025-02-24', '2025-02-28', 7, 8, 8,
@@ -416,12 +439,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t17;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+17,
   'Beta cerrada con 50 usuarios seleccionados',
   'Seguimiento', 'Sin iniciar', 'Ana Martinez',
   '2025-03-03', '2025-03-07', 8, 6, 10,
@@ -432,12 +456,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t18;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+18,
   'Campana de pre-lanzamiento en redes y comunidades',
   'Operativa', 'Sin iniciar', 'Sofia Herrera',
   '2025-02-24', '2025-03-07', 6, 5, 9,
@@ -448,12 +473,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t19;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+19,
   'Documentacion, guias de usuario y materiales de onboarding',
   'Administrativa', 'Sin iniciar', 'Ana Martinez',
   '2025-03-03', '2025-03-07', 4, 3, 6,
@@ -464,12 +490,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t20;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+20,
   'Configuracion de analytics, eventos y dashboards de negocio',
   'Operativa', 'Sin iniciar', 'Miguel Torres',
   '2025-02-24', '2025-03-07', 5, 6, 8,
@@ -480,12 +507,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t21;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+21,
   'Lanzamiento publico: Product Hunt + comunidades tech',
   'Operativa', 'Sin iniciar', 'Sofia Herrera',
   '2025-03-10', '2025-03-10', 9, 7, 10,
@@ -496,12 +524,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t22;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+22,
   'Comunicado de prensa y outreach a medios y bloggers tech',
   'Administrativa', 'Sin iniciar', 'Sofia Herrera',
   '2025-03-07', '2025-03-10', 5, 5, 8,
@@ -512,12 +541,13 @@ INSERT INTO tasks (
 ) RETURNING id INTO t23;
 
 INSERT INTO tasks (
-  title, type, status, responsible,
+  id, title, type, status, responsible,
   start_date, end_date, estimated_time, difficulty, strategic_value,
   progress_percent, comments,
   project_id, sprint_id, kr_id,
   subtasks, indicators, dimension_values, dependent_task
 ) VALUES (
+  base_tid+23,
   'War room post-lanzamiento: monitoreo y respuesta rapida 72h',
   'Seguimiento', 'Sin iniciar', 'Ana Martinez',
   '2025-03-10', '2025-03-14', 7, 6, 9,

@@ -2407,9 +2407,18 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     loadMyProjects();
   }, [authUser]);
 
+  const isPremium = authUser?.user_metadata?.plan === 'premium';
+  const projectLimit = isPremium ? 10 : 3;
+  const ownedCount = myProjects.filter(p => p.owner_id === authUser?.id).length;
+  const atLimit = ownedCount >= projectLimit;
+
   const createProject = async () => {
     if (!projName.trim()) { setErr("El nombre del proyecto es requerido."); return; }
     if (!projPin || projPin.length < 4) { setErr("La clave debe tener al menos 4 caracteres."); return; }
+    if (atLimit) {
+      setErr(`Límite alcanzado: ${projectLimit} proyectos ${isPremium ? '(Premium)' : '(cuenta gratuita)'}. ${!isPremium ? 'Actualiza a Premium para crear hasta 10 proyectos.' : ''}`);
+      return;
+    }
     setCreating(true); setErr("");
     const config = {
       pin: projPin,
@@ -2430,6 +2439,10 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const createFromTemplate = async () => {
     if (!selectedTemplate) return;
     if (!tplPin || tplPin.length < 4) { setErr("La clave debe tener al menos 4 caracteres."); return; }
+    if (atLimit) {
+      setErr(`Límite alcanzado: ${projectLimit} proyectos ${isPremium ? '(Premium)' : '(cuenta gratuita)'}. ${!isPremium ? 'Actualiza a Premium para crear hasta 10 proyectos.' : ''}`);
+      return;
+    }
     setTplCreating(true); setErr("");
     const tpl = selectedTemplate;
     const config = {
@@ -2564,10 +2577,20 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
                   value={projPin} onChange={e => setProjPin(e.target.value)} onKeyDown={e => e.key === "Enter" && createProject()} placeholder="Mínimo 4 caracteres..." />
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 4 }}>Solo el dueño del proyecto conoce esta clave</div>
               </div>
+              {authUser && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: atLimit ? 'rgba(248,113,113,0.1)' : 'rgba(255,255,255,0.05)', border: `1px solid ${atLimit ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 8, padding: '8px 12px' }}>
+                  <span style={{ fontSize: 11, color: atLimit ? '#f87171' : 'rgba(255,255,255,0.45)' }}>
+                    Proyectos creados: {ownedCount} / {projectLimit}
+                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: isPremium ? '#f5a623' : 'rgba(255,255,255,0.3)', textTransform: 'uppercase' }}>
+                    {isPremium ? 'Premium' : 'Gratuito'}
+                  </span>
+                </div>
+              )}
               {err && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{err}</div>}
-              <button onClick={createProject} disabled={creating}
-                style={{ ...btnBase, background: creating ? "#555" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", boxShadow: creating ? "none" : "0 4px 20px rgba(84,44,156,0.4)", marginTop: 4 }}>
-                {creating ? "Creando proyecto..." : "Crear proyecto →"}
+              <button onClick={createProject} disabled={creating || atLimit}
+                style={{ ...btnBase, background: (creating || atLimit) ? '#555' : 'linear-gradient(135deg,#542c9c,#6e3ebf)', color: '#fff', boxShadow: (creating || atLimit) ? 'none' : '0 4px 20px rgba(84,44,156,0.4)', marginTop: 4, opacity: atLimit ? 0.6 : 1, cursor: atLimit ? 'not-allowed' : 'pointer' }}>
+                {creating ? 'Creando proyecto...' : atLimit ? `Límite de ${projectLimit} proyectos alcanzado` : 'Crear proyecto →'}
               </button>
             </div>
           )}
@@ -2600,10 +2623,20 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
                     <input type="password" style={{ ...inp, background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", color: "#fff" }}
                       value={tplPin} onChange={e => setTplPin(e.target.value)} placeholder="Mínimo 4 caracteres..." autoFocus />
                   </div>
+                  {authUser && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: atLimit ? 'rgba(248,113,113,0.1)' : 'rgba(255,255,255,0.05)', border: `1px solid ${atLimit ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 8, padding: '8px 12px' }}>
+                      <span style={{ fontSize: 11, color: atLimit ? '#f87171' : 'rgba(255,255,255,0.45)' }}>
+                        Proyectos creados: {ownedCount} / {projectLimit}
+                      </span>
+                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: isPremium ? '#f5a623' : 'rgba(255,255,255,0.3)', textTransform: 'uppercase' }}>
+                        {isPremium ? 'Premium' : 'Gratuito'}
+                      </span>
+                    </div>
+                  )}
                   {err && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{err}</div>}
-                  <button onClick={createFromTemplate} disabled={tplCreating}
-                    style={{ ...btnBase, background: tplCreating ? "#555" : "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", boxShadow: tplCreating ? "none" : "0 4px 20px rgba(236,108,4,0.4)" }}>
-                    {tplCreating ? "Creando..." : `Crear proyecto desde "${selectedTemplate.name}" →`}
+                  <button onClick={createFromTemplate} disabled={tplCreating || atLimit}
+                    style={{ ...btnBase, background: (tplCreating || atLimit) ? '#555' : 'linear-gradient(135deg,#ec6c04,#f07d1e)', color: '#fff', boxShadow: (tplCreating || atLimit) ? 'none' : '0 4px 20px rgba(236,108,4,0.4)', opacity: atLimit ? 0.6 : 1, cursor: atLimit ? 'not-allowed' : 'pointer' }}>
+                    {tplCreating ? 'Creando...' : atLimit ? `Límite de ${projectLimit} proyectos alcanzado` : `Crear proyecto desde "${selectedTemplate.name}" →`}
                   </button>
                 </div>
               )}
@@ -2675,13 +2708,17 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
   const [sprintFilter, setSprintFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [userFilter, setUserFilter] = useState("all");
 
-  // Apply sprint + date filters to get the base task set
+  const allUsers = useMemo(() => {
+    const u = new Set(tasks.map(t => t.responsible).filter(Boolean));
+    return [...u].sort();
+  }, [tasks]);
+
+  // Step 1: sprint + date filter
   const sprintTasks = useMemo(() => {
     let base = tasks;
-    if (sprintFilter !== "all") {
-      base = base.filter(t => String(t.sprintId) === String(sprintFilter));
-    }
+    if (sprintFilter !== "all") base = base.filter(t => String(t.sprintId) === String(sprintFilter));
     if (dateFrom || dateTo) {
       base = base.filter(t => {
         const sd = t.startDate || t.endDate || "";
@@ -2694,40 +2731,86 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
     return base;
   }, [tasks, sprintFilter, dateFrom, dateTo]);
 
-  const isFiltered = sprintFilter !== "all" || dateFrom || dateTo;
+  // Step 2: user filter → focal tasks
+  const focalTasks = useMemo(() => {
+    if (userFilter === "all") return sprintTasks;
+    return sprintTasks.filter(t => t.responsible === userFilter);
+  }, [sprintTasks, userFilter]);
 
-  // Ghost tasks: depended-upon tasks outside current filter
-  const ghostTaskSet = useMemo(() => {
-    if (!isFiltered) return new Set();
-    const ghosts = new Set();
-    sprintTasks.forEach(t => {
+  const isSprintFiltered = sprintFilter !== "all" || dateFrom || dateTo;
+  const isUserFiltered = userFilter !== "all";
+
+  // Step 3: linked toggle applied to focal tasks
+  const visibleBase = useMemo(() => {
+    if (filter !== "linked") return focalTasks;
+    return focalTasks.filter(t => t.dependentTask || tasks.some(x => String(x.dependentTask) === String(t.id)));
+  }, [focalTasks, filter, tasks]);
+
+  // Cross-user tasks: deps of visibleBase assigned to a different user (only when user filter active)
+  const crossUserTaskSet = useMemo(() => {
+    if (!isUserFiltered) return new Set();
+    const cross = new Set();
+    visibleBase.forEach(t => {
       if (t.dependentTask) {
         const dep = tasks.find(x => String(x.id) === String(t.dependentTask));
-        if (dep && !sprintTasks.find(st => st.id === dep.id)) ghosts.add(dep.id);
+        if (dep && dep.responsible !== userFilter && !visibleBase.find(v => v.id === dep.id)) {
+          cross.add(dep.id);
+        }
+      }
+    });
+    return cross;
+  }, [tasks, visibleBase, isUserFiltered, userFilter]);
+
+  const crossUserTasks = useMemo(() =>
+    [...crossUserTaskSet].map(id => tasks.find(t => t.id === id)).filter(Boolean),
+    [tasks, crossUserTaskSet]);
+
+  // Ghost tasks: sprint-external deps not already handled by crossUser
+  const ghostTaskSet = useMemo(() => {
+    if (!isSprintFiltered) return new Set();
+    const ghosts = new Set();
+    visibleBase.forEach(t => {
+      if (t.dependentTask) {
+        const dep = tasks.find(x => String(x.id) === String(t.dependentTask));
+        if (dep && !visibleBase.find(v => v.id === dep.id) && !crossUserTaskSet.has(dep.id)) {
+          ghosts.add(dep.id);
+        }
       }
     });
     return ghosts;
-  }, [tasks, sprintTasks, isFiltered]);
+  }, [tasks, visibleBase, isSprintFiltered, crossUserTaskSet]);
 
-  const ghostTasks = useMemo(() => [...ghostTaskSet].map(id => tasks.find(t => t.id === id)).filter(Boolean), [tasks, ghostTaskSet]);
+  const ghostTasks = useMemo(() =>
+    [...ghostTaskSet].map(id => tasks.find(t => t.id === id)).filter(Boolean),
+    [tasks, ghostTaskSet]);
 
-  const visibleBase = filter === "all" ? sprintTasks : sprintTasks.filter(t => t.dependentTask || sprintTasks.some(x => String(x.dependentTask) === String(t.id)));
-  const allVisible = [...visibleBase, ...ghostTasks.filter(g => !visibleBase.find(v => v.id === g.id))];
+  const allVisible = useMemo(() => {
+    const combined = [...visibleBase];
+    [...crossUserTasks, ...ghostTasks].forEach(t => {
+      if (!combined.find(v => v.id === t.id)) combined.push(t);
+    });
+    return combined;
+  }, [visibleBase, crossUserTasks, ghostTasks]);
 
   const { positions, svgW, svgH, byLevel } = useMemo(() => computeDepLayout(allVisible), [allVisible]);
-
-  const edges = allVisible.filter(t => !ghostTaskSet.has(t.id) && t.dependentTask && positions[String(t.dependentTask)]);
-
+  const edges = visibleBase.filter(t => t.dependentTask && positions[String(t.dependentTask)]);
   const sel = selected ? tasks.find(t => String(t.id) === String(selected)) : null;
 
   const inpStyle = { background: "#f4f4f4", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "5px 10px", fontSize: 12, color: "#444", outline: "none", fontFamily: "inherit", cursor: "pointer" };
+
+  // First name + last initial: "Ana Martinez" → "Ana M."
+  const shortName = (name) => {
+    if (!name) return "";
+    const parts = name.trim().split(" ");
+    return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[1][0]}.`;
+  };
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: "#542c9c" }}>Red de Dependencias</div>
 
-        {/* Sprint filter — only when sprints exist */}
+        {/* Sprint filter */}
         {sprints.length > 0 && (
           <select value={sprintFilter} onChange={e => { setSprintFilter(e.target.value); setSelected(null); }} style={inpStyle}>
             <option value="all">Todos los sprints</option>
@@ -2744,12 +2827,21 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
           <span style={{ fontSize: 11, color: "#999" }}>hasta</span>
           <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setSelected(null); }} style={inpStyle} />
           {(dateFrom || dateTo) && (
-            <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ background: "#f4f4f4", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "5px 10px", fontSize: 11, color: "#666", cursor: "pointer" }}>✕ Limpiar</button>
+            <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ background: "#f4f4f4", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "5px 10px", fontSize: 11, color: "#666", cursor: "pointer" }}>Limpiar</button>
           )}
         </div>
 
+        {/* User filter */}
+        {allUsers.length > 0 && (
+          <select value={userFilter} onChange={e => { setUserFilter(e.target.value); setSelected(null); }}
+            style={{ ...inpStyle, borderColor: isUserFiltered ? "#149cac" : "#e0e0e0", color: isUserFiltered ? "#149cac" : "#444", fontWeight: isUserFiltered ? 700 : 400 }}>
+            <option value="all">Todos los responsables</option>
+            {allUsers.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        )}
+
         <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
-          {[["all","Todas las tareas"],["linked","Solo enlazadas"]].map(([v,l]) => (
+          {[["all","Todas"],["linked","Solo enlazadas"]].map(([v,l]) => (
             <button key={v} onClick={() => setFilter(v)}
               style={{ background: filter === v ? "linear-gradient(135deg,#542c9c,#6e3ebf)" : "#f4f4f4", color: filter === v ? "#fff" : "#666", border: "none", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: filter === v ? 700 : 400 }}>
               {l}
@@ -2758,8 +2850,8 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
         </div>
       </div>
 
-      {/* Legend */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: ghostTasks.length > 0 ? 8 : 16 }}>
+      {/* Status legend */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
         {Object.entries(STATUS_COLORS).map(([st, c]) => (
           <div key={st} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#666" }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: c }} />{st}
@@ -2767,14 +2859,24 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
         ))}
       </div>
 
-      {ghostTasks.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, fontSize: 11, color: "#999" }}>
-          <div style={{ width: 14, height: 14, borderRadius: 3, background: "#e8e8e8", border: "1.5px dashed #bbb" }} />
-          Tareas de sprints anteriores (dependencias externas)
+      {/* External nodes legend */}
+      {(ghostTasks.length > 0 || crossUserTasks.length > 0) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 14, fontSize: 11, color: "#999" }}>
+          {ghostTasks.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 14, height: 14, borderRadius: 3, background: "#e8e8e8", border: "1.5px dashed #bbb" }} />
+              Dependencias de otros sprints
+            </div>
+          )}
+          {crossUserTasks.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 14, height: 14, borderRadius: 3, background: "#fff0e0", border: "1.5px dashed rgba(236,108,4,0.6)" }} />
+              Dependencias de otro responsable
+            </div>
+          )}
         </div>
       )}
 
-      {/* Hint */}
       {edges.length === 0 && filter === "linked" && (
         <div style={{ textAlign: "center", padding: "60px 20px", color: "#969696", fontSize: 14 }}>
           No hay tareas con dependencias registradas.<br />
@@ -2792,15 +2894,17 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
             <marker id="arrow-ghost" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
               <path d="M0,0 L0,6 L8,3 z" fill="#bbb" opacity="0.7" />
             </marker>
+            <marker id="arrow-cross" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#ec6c04" opacity="0.7" />
+            </marker>
           </defs>
 
-          {/* Level column headers */}
+          {/* Column headers */}
           {Object.keys(byLevel).map(lvl => (
             <text key={lvl}
-              x={Number(lvl) * (NODE_W + NODE_GAP_X) + 24 + NODE_W / 2}
-              y={12}
+              x={Number(lvl) * (NODE_W + NODE_GAP_X) + 24 + NODE_W / 2} y={12}
               textAnchor="middle"
-              style={{ fontSize: 10, fill: "#aaa", fontFamily: "inherit", textTransform: "uppercase", letterSpacing: 2 }}>
+              style={{ fontSize: 10, fill: "#aaa", fontFamily: "inherit", letterSpacing: 2 }}>
               {Number(lvl) === 0 ? "Nivel 0 · Origen" : `Nivel ${lvl}`}
             </text>
           ))}
@@ -2810,19 +2914,21 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
             const src = positions[String(t.dependentTask)];
             const dst = positions[String(t.id)];
             if (!src || !dst) return null;
-            const isGhostSrc = ghostTaskSet.has(t.dependentTask) || ghostTaskSet.has(Number(t.dependentTask));
+            const depId = t.dependentTask;
+            const isCross = crossUserTaskSet.has(depId) || crossUserTaskSet.has(Number(depId));
+            const isGhost = !isCross && (ghostTaskSet.has(depId) || ghostTaskSet.has(Number(depId)));
             const x1 = src.x + NODE_W, y1 = src.y + NODE_H / 2;
-            const x2 = dst.x, y2 = dst.y + NODE_H / 2;
+            const x2 = dst.x,          y2 = dst.y + NODE_H / 2;
             const cx = (x1 + x2) / 2;
             return (
               <path key={`e-${t.id}`}
                 d={`M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`}
                 fill="none"
-                stroke={isGhostSrc ? "#bbb" : "#542c9c"}
-                strokeWidth={isGhostSrc ? 1 : 1.5}
-                strokeOpacity={isGhostSrc ? 0.6 : 0.4}
-                strokeDasharray={isGhostSrc ? "5,4" : "none"}
-                markerEnd={isGhostSrc ? "url(#arrow-ghost)" : "url(#arrow)"} />
+                stroke={isCross ? "#ec6c04" : isGhost ? "#bbb" : "#542c9c"}
+                strokeWidth={isCross || isGhost ? 1 : 1.5}
+                strokeOpacity={isCross || isGhost ? 0.6 : 0.4}
+                strokeDasharray={isCross || isGhost ? "5,4" : "none"}
+                markerEnd={isCross ? "url(#arrow-cross)" : isGhost ? "url(#arrow-ghost)" : "url(#arrow)"} />
             );
           })}
 
@@ -2833,6 +2939,7 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
             const sc = STATUS_COLORS[t.status] || "#888";
             const sl = STATUS_LIGHT[t.status] || "#f4f4f4";
             const isSel = String(selected) === String(t.id);
+            const name = shortName(t.responsible);
             return (
               <g key={t.id} style={{ cursor: "pointer" }} onClick={() => setSelected(isSel ? null : String(t.id))}>
                 <rect x={pos.x} y={pos.y} width={NODE_W} height={NODE_H} rx={8}
@@ -2840,50 +2947,91 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
                   strokeWidth={isSel ? 2.5 : 1}
                   style={{ filter: isSel ? `drop-shadow(0 4px 12px ${sc}66)` : "none", transition: "all 0.2s" }} />
                 <rect x={pos.x} y={pos.y} width={4} height={NODE_H} rx="2 0 0 2" fill={sc} />
-                <text x={pos.x + 14} y={pos.y + 18} style={{ fontSize: 9, fill: "#aaa", fontFamily: "inherit" }}>
+                {/* type row */}
+                <text x={pos.x + 14} y={pos.y + 14} style={{ fontSize: 9, fill: "#aaa", fontFamily: "inherit" }}>
                   #{t.id} · {t.type}
                 </text>
-                <foreignObject x={pos.x + 14} y={pos.y + 22} width={NODE_W - 20} height={34}>
+                {/* title */}
+                <foreignObject x={pos.x + 14} y={pos.y + 18} width={NODE_W - 20} height={32}>
                   <div xmlns="http://www.w3.org/1999/xhtml"
-                    style={{ fontSize: 12, fontWeight: 700, color: "#2d2d2d", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    style={{ fontSize: 11, fontWeight: 700, color: "#2d2d2d", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
                     {t.title || "(Sin título)"}
                   </div>
                 </foreignObject>
-                <text x={pos.x + 14} y={pos.y + 64} style={{ fontSize: 10, fill: sc, fontWeight: 700, fontFamily: "inherit" }}>
+                {/* status + responsible */}
+                <text x={pos.x + 14} y={pos.y + 62} style={{ fontSize: 10, fill: sc, fontWeight: 700, fontFamily: "inherit" }}>
                   {t.status}
                 </text>
-                {t.responsible && (
-                  <text x={pos.x + NODE_W - 10} y={pos.y + 64} textAnchor="end" style={{ fontSize: 9, fill: "#888", fontFamily: "inherit" }}>
-                    {t.responsible.split(" ")[0]}
+                {name && (
+                  <text x={pos.x + NODE_W - 8} y={pos.y + 62} textAnchor="end"
+                    style={{ fontSize: 10, fill: "#149cac", fontWeight: 600, fontFamily: "inherit" }}>
+                    {name}
                   </text>
                 )}
               </g>
             );
           })}
 
-          {/* Ghost Nodes (tasks from other sprints) */}
+          {/* Cross-user Nodes (orange dashed — different responsible) */}
+          {crossUserTasks.map(t => {
+            const pos = positions[String(t.id)];
+            if (!pos) return null;
+            const name = shortName(t.responsible);
+            return (
+              <g key={`cross-${t.id}`} style={{ cursor: "default", opacity: 0.88 }}>
+                <rect x={pos.x} y={pos.y} width={NODE_W} height={NODE_H} rx={8}
+                  fill="#fff8ed" stroke="rgba(236,108,4,0.55)" strokeWidth={1.5} strokeDasharray="5,3" />
+                <rect x={pos.x} y={pos.y} width={4} height={NODE_H} rx="2 0 0 2" fill="#ec6c04" />
+                <text x={pos.x + 14} y={pos.y + 14} style={{ fontSize: 9, fill: "#c8855a", fontFamily: "inherit" }}>
+                  #{t.id} · {t.type}
+                </text>
+                <foreignObject x={pos.x + 14} y={pos.y + 18} width={NODE_W - 20} height={32}>
+                  <div xmlns="http://www.w3.org/1999/xhtml"
+                    style={{ fontSize: 11, fontWeight: 600, color: "#a0600a", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    {t.title || "(Sin título)"}
+                  </div>
+                </foreignObject>
+                <text x={pos.x + 14} y={pos.y + 62} style={{ fontSize: 10, fill: "#ec6c04", fontWeight: 700, fontFamily: "inherit" }}>
+                  {t.status}
+                </text>
+                {name && (
+                  <text x={pos.x + NODE_W - 8} y={pos.y + 62} textAnchor="end"
+                    style={{ fontSize: 10, fill: "#ec6c04", fontWeight: 700, fontFamily: "inherit" }}>
+                    {name}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Ghost Nodes (grey dashed — other sprint/date) */}
           {ghostTasks.map(t => {
             const pos = positions[String(t.id)];
             if (!pos) return null;
             const sprintOfTask = sprints.find(s => String(s.id) === String(t.sprintId));
             const sprintLabel = sprintOfTask ? sprintOfTask.name : 'Sin sprint';
+            const name = shortName(t.responsible);
             return (
               <g key={`ghost-${t.id}`} style={{ cursor: "default", opacity: 0.7 }}>
                 <rect x={pos.x} y={pos.y} width={NODE_W} height={NODE_H} rx={8}
                   fill="#f0f0f0" stroke="#c0c0c0" strokeWidth={1} strokeDasharray="5,3" />
                 <rect x={pos.x} y={pos.y} width={4} height={NODE_H} rx="2 0 0 2" fill="#bbb" />
-                <text x={pos.x + 14} y={pos.y + 17} style={{ fontSize: 9, fill: "#bbb", fontFamily: "inherit" }}>
+                <text x={pos.x + 14} y={pos.y + 14} style={{ fontSize: 9, fill: "#bbb", fontFamily: "inherit" }}>
                   #{t.id} · {sprintLabel}
                 </text>
-                <foreignObject x={pos.x + 14} y={pos.y + 21} width={NODE_W - 20} height={30}>
+                <foreignObject x={pos.x + 14} y={pos.y + 18} width={NODE_W - 20} height={32}>
                   <div xmlns="http://www.w3.org/1999/xhtml"
                     style={{ fontSize: 11, fontWeight: 600, color: "#999", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
                     {t.title || "(Sin título)"}
                   </div>
                 </foreignObject>
-                {t.startDate && (
-                  <text x={pos.x + 14} y={pos.y + 63} style={{ fontSize: 9, fill: "#bbb", fontFamily: "inherit" }}>
-                    Inicio: {t.startDate}
+                <text x={pos.x + 14} y={pos.y + 62} style={{ fontSize: 9, fill: "#bbb", fontFamily: "inherit" }}>
+                  {t.startDate || ""}
+                </text>
+                {name && (
+                  <text x={pos.x + NODE_W - 8} y={pos.y + 62} textAnchor="end"
+                    style={{ fontSize: 10, fill: "#bbb", fontFamily: "inherit" }}>
+                    {name}
                   </text>
                 )}
               </g>
@@ -2893,29 +3041,28 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
       </div>
 
       {/* Selected task detail */}
-      {sel && !ghostTaskSet.has(sel.id) && (
+      {sel && !ghostTaskSet.has(sel.id) && !crossUserTaskSet.has(sel.id) && (
         <div style={{ marginTop: 16, background: "#ffffff", borderRadius: 14, padding: "18px 20px", border: `2px solid ${STATUS_COLORS[sel.status] || "#e0e0e0"}`, boxShadow: "0 4px 20px rgba(84,44,156,0.1)", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 200 }}>
             <div style={{ fontSize: 12, color: "#969696" }}>#{sel.id} · {sel.type}</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#2d2d2d", marginTop: 2, marginBottom: 8 }}>{sel.title}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: STATUS_LIGHT[sel.status], color: STATUS_COLORS[sel.status], fontWeight: 700 }}>{sel.status}</span>
-              {sel.responsible && <span style={{ fontSize: 11, color: "#149cac", fontWeight: 500 }}>👤 {sel.responsible}</span>}
+              {sel.responsible && <span style={{ fontSize: 11, color: "#149cac", fontWeight: 600 }}>@ {sel.responsible}</span>}
               {sel.progressPercent > 0 && <span style={{ fontSize: 11, color: "#ec6c04", fontWeight: 600 }}>{Number(sel.progressPercent).toFixed(0)}% avance</span>}
             </div>
             {sel.dependentTask && (
               <div style={{ marginTop: 8, fontSize: 12, color: "#542c9c" }}>
-                ↳ Depende de la tarea <strong>#{sel.dependentTask}</strong>
+                Depende de tarea <strong>#{sel.dependentTask}</strong>
               </div>
             )}
             {tasks.filter(x => String(x.dependentTask) === String(sel.id)).length > 0 && (
               <div style={{ marginTop: 4, fontSize: 12, color: "#ec6c04" }}>
-                → Desbloquea: {tasks.filter(x => String(x.dependentTask) === String(sel.id)).map(x => `#${x.id}`).join(", ")}
+                Desbloquea: {tasks.filter(x => String(x.dependentTask) === String(sel.id)).map(x => `#${x.id}`).join(", ")}
               </div>
             )}
           </div>
-          <button
-            onClick={() => { onEditTask(sel); setSelected(null); }}
+          <button onClick={() => { onEditTask(sel); setSelected(null); }}
             style={{ background: "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", cursor: "pointer", fontWeight: 700, fontSize: 13, alignSelf: "center" }}>
             Editar tarea →
           </button>

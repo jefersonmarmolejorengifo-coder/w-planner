@@ -163,11 +163,12 @@ const inp = {
 const readonlyInp = { ...inp, background: "#f4f4f4", color: "#969696", cursor: "default", border: "1.5px solid #e8e8e8" };
 
 // ─── TaskForm ──────────────────────────────────────────────
-function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [] }) {
+function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [] }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
   const isSuperUser = currentUser?.isSuperUser;
   const typeOptions = taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES;
+  const [depInput, setDepInput] = useState("");
 
   const upd = (key, val) =>
     setTask((prev) => {
@@ -442,12 +443,11 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
           <F label="Tareas dependientes (máx. 4)" half={false}>
             {(() => {
               const deps = parseDeps(task.dependentTask);
-              const [dInput, setDInput] = React.useState("");
               const addDep = () => {
-                const id = dInput.trim();
-                if (!id || deps.length >= 4 || deps.includes(id)) { setDInput(""); return; }
+                const id = depInput.trim();
+                if (!id || deps.length >= 4 || deps.includes(id)) { setDepInput(""); return; }
                 upd("dependentTask", [...deps, id].join(','));
-                setDInput("");
+                setDepInput("");
               };
               return (
                 <div>
@@ -456,7 +456,7 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
                       {deps.map(id => {
                         const dt = tasks.find(x => String(x.id) === id);
                         return (
-                          <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#ede8f8', border: '1px solid #c4b5e8', borderRadius: 20, padding: '4px 10px 4px 10px', fontSize: 12, color: '#542c9c' }}>
+                          <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#ede8f8', border: '1px solid #c4b5e8', borderRadius: 20, padding: '4px 10px', fontSize: 12, color: '#542c9c' }}>
                             <span style={{ fontWeight: 700 }}>#{id}</span>
                             {dt && <span style={{ color: '#888', fontSize: 11, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dt.title}</span>}
                             <button onClick={() => upd("dependentTask", deps.filter(d => d !== id).join(','))}
@@ -467,8 +467,8 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
                     </div>
                   )}
                   {deps.length < 4 ? (
-                    <input type="number" style={inp} value={dInput}
-                      onChange={e => setDInput(e.target.value)}
+                    <input type="number" style={inp} value={depInput}
+                      onChange={e => setDepInput(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDep(); } }}
                       placeholder={deps.length === 0 ? "ID de tarea y presiona Enter..." : "Agregar otra dependencia..."} />
                   ) : (
@@ -827,7 +827,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}
         >
-          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} />
+          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} />
         </Modal>
       )}
     </div>

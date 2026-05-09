@@ -1,17 +1,45 @@
+import {
+  assertProjectAccess,
+  corsHeaders,
+  createSupabase,
+  getAuthenticatedUser,
+  getBearerToken,
+  getOrigin,
+  jsonResponse,
+} from "./_auth.js";
+
 export const config = { runtime: 'edge' };
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
-function jsonError(msg, status) {
-  return new Response(JSON.stringify({ error: msg }), {
-    status,
-    headers: { ...CORS, "Content-Type": "application/json" },
-  });
+function jsonError(msg, status, headers) {
+  return jsonResponse({ error: msg }, status, headers);
 }
+
+const isDateOnly = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value || "");
+
+const normalizeTask = (r) => ({
+  id: r.id,
+  title: r.title || "",
+  status: r.status || "Sin iniciar",
+  responsible: r.responsible || "",
+  indicator: r.indicator || "",
+  indicators: r.indicators || [],
+  progressPercent: r.progress_percent ?? 0,
+  progress_percent: r.progress_percent ?? 0,
+  aporteSnapshot: r.aporte_snapshot ?? 0,
+  aporte_snapshot: r.aporte_snapshot ?? 0,
+  comments: r.comments || "",
+  subtasks: r.subtasks || [],
+  startDate: r.start_date || "",
+  start_date: r.start_date || "",
+  endDate: r.end_date || "",
+  end_date: r.end_date || "",
+  expectedDelivery: r.expected_delivery || "",
+  expected_delivery: r.expected_delivery || "",
+  type: r.type || "",
+  difficulty: r.difficulty ?? 5,
+  strategicValue: r.strategic_value ?? 5,
+  strategic_value: r.strategic_value ?? 5,
+});
 
 function buildPrompt({ weekStart, weekEnd, tasks }) {
 
@@ -73,8 +101,6 @@ function buildPrompt({ weekStart, weekEnd, tasks }) {
   });
 
   const prog = (t) => t.progressPercent || t.progress_percent || 0;
-  const aporte = (t) => t.aporteSnapshot || t.aporte_snapshot || 0;
-
   const todosLosTextos = tasks.map(t =>
     `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${prog(t)}% | Indicador: ${t.indicator || "N/A"} | Entregable: ${t.expectedDelivery || t.expected_delivery || "no definido"} | Comentarios: ${t.comments || "sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + s.text).join(", ") : "ninguna"}`
   ).join("\n");
@@ -210,18 +236,57 @@ REGLAS DE DISEÑO PARA CORREO:
 }
 
 export default async function handler(req) {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
-  if (req.method !== "POST") return jsonError("Method not allowed", 405);
+  const headers = corsHeaders(getOrigin(req));
+  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers });
+  if (req.method !== "POST") return jsonError("Method not allowed", 405, headers);
 
   let body;
-  try { body = await req.json(); } catch { return jsonError("Body inválido", 400); }
+  try { body = await req.json(); } catch { return jsonError("Body inválido", 400, headers); }
 
-  const { weekStart, weekEnd, tasks, participants, indicators } = body;
-  if (!weekStart || !weekEnd || !Array.isArray(tasks)) {
-    return jsonError("weekStart, weekEnd y tasks son requeridos", 400);
+  const { weekStart, weekEnd, projectId } = body;
+  if (!projectId || !isDateOnly(weekStart) || !isDateOnly(weekEnd)) {
+    return jsonError("projectId, weekStart y weekEnd son requeridos", 400, headers);
+  }
+  if (weekStart > weekEnd) {
+    return jsonError("weekStart no puede ser posterior a weekEnd", 400, headers);
   }
 
+  const internalSecret = req.headers.get("x-cron-secret");
+  const isInternal = process.env.CRON_SECRET && internalSecret === process.env.CRON_SECRET;
+  const token = getBearerToken(req);
+
+  let supabase;
+  try {
+    if (isInternal) {
+      supabase = createSupabase(null, { admin: true });
+    } else {
+      const user = await getAuthenticatedUser(token);
+      supabase = createSupabase(token);
+      await assertProjectAccess(supabase, user, projectId, { ownerOnly: true });
+    }
+  } catch (err) {
+    return jsonError(err.message, err.status || 500, headers);
+  }
+
+  const [
+    { data: tasksRaw, error: tasksError },
+    { data: participants },
+    { data: indicators },
+  ] = await Promise.all([
+    supabase.from("tasks").select("*").eq("project_id", projectId).order("id"),
+    supabase.from("participants").select("*").eq("project_id", projectId).order("id"),
+    supabase.from("indicators").select("*").eq("project_id", projectId).order("id"),
+  ]);
+
+  if (tasksError) {
+    return jsonError(`Error leyendo tareas: ${tasksError.message}`, 500, headers);
+  }
+
+  const tasks = (tasksRaw || []).map(normalizeTask);
   const prompt = buildPrompt({ weekStart, weekEnd, tasks, participants, indicators });
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return jsonError("ANTHROPIC_API_KEY no esta configurada", 500, headers);
+  }
 
   // Call Anthropic with streaming enabled
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -241,8 +306,8 @@ export default async function handler(req) {
 
   if (!anthropicRes.ok) {
     let errMsg = `Anthropic API error ${anthropicRes.status}`;
-    try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch {}
-    return jsonError(errMsg, 502);
+    try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep fallback */ }
+    return jsonError(errMsg, 502, headers);
   }
 
   // Transform Anthropic SSE stream → plain HTML text stream
@@ -269,7 +334,9 @@ export default async function handler(req) {
               if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
                 controller.enqueue(encoder.encode(evt.delta.text));
               }
-            } catch {}
+            } catch {
+              // Ignore malformed SSE keepalive lines.
+            }
           }
         }
       } catch (err) {
@@ -280,6 +347,6 @@ export default async function handler(req) {
   });
 
   return new Response(htmlStream, {
-    headers: { ...CORS, "Content-Type": "text/html; charset=utf-8" },
+    headers: { ...headers, "Content-Type": "text/html; charset=utf-8" },
   });
 }

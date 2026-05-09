@@ -1,6 +1,35 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import * as XLSX from "xlsx";
 import { supabase } from './supabaseClient';
+
+const getAuthJsonHeaders = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Debes iniciar sesión nuevamente.");
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${session.access_token}`,
+  };
+};
+
+const joinProjectByCode = async (code, user) => {
+  const inviteCode = String(code || "").trim();
+  if (!inviteCode) return null;
+
+  const { data: joined, error: rpcError } = await supabase.rpc(
+    "join_project_by_invite_code",
+    { invite_code_input: inviteCode }
+  );
+  if (!rpcError && joined) return joined;
+
+  const { data: proj } = await supabase.from('projects').select('*').eq('invite_code', inviteCode).single();
+  if (!proj) return null;
+  if (user) {
+    await supabase.from('project_members').upsert(
+      { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email, user_id: user.id },
+      { onConflict: 'project_id,email' }
+    );
+  }
+  return proj;
+};
 
 const STATUS_COLORS = {
   "No programada": "#969696",
@@ -673,7 +702,7 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 }
 
 // ─── BoardTab ──────────────────────────────────────────────
-function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, keyResults = [], sprints = [] }) {
+function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, nextId, keyResults = [], sprints = [] }) {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
   const [taskHistory, setTaskHistory] = useState([]);
@@ -721,15 +750,28 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
     setTaskHistory([]);
     setModal(t.id);
     if (projectId) {
-      const { data } = await supabase.from('task_history').select('*').eq('task_id', t.id).order('changed_at', { ascending: false }).limit(20);
+      const { data } = await supabase.from('task_history').select('*').eq('task_id', t.id).eq('project_id', projectId).order('changed_at', { ascending: false }).limit(20);
       if (data) setTaskHistory(data);
     }
   };
 
   // Open edit modal when triggered from DependenciesTab
   useEffect(() => {
-    if (editTaskFromDep) { openEdit(editTaskFromDep); if (onDepEditDone) onDepEditDone(); }
-  }, [editTaskFromDep]);
+    if (!editTaskFromDep) return undefined;
+    let active = true;
+    const openFromDependencyGraph = async () => {
+      setForm({ ...editTaskFromDep });
+      setTaskHistory([]);
+      setModal(editTaskFromDep.id);
+      if (projectId) {
+        const { data } = await supabase.from('task_history').select('*').eq('task_id', editTaskFromDep.id).eq('project_id', projectId).order('changed_at', { ascending: false }).limit(20);
+        if (active && data) setTaskHistory(data);
+      }
+      if (active && onDepEditDone) onDepEditDone();
+    };
+    openFromDependencyGraph();
+    return () => { active = false; };
+  }, [editTaskFromDep, onDepEditDone, projectId]);
 
   const save = async () => {
     if (!form.title.trim()) { alert("El título es obligatorio"); return; }
@@ -876,7 +918,7 @@ function GanttTab({ tasks, participants, indicators, taskTypes }) {
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     }
     return ms;
-  }, [dateFrom, dateTo, startMs, endMs, totalMs]);
+  }, [dateFrom, startMs, endMs, totalMs]);
 
   const fmtShort = (d) => { if (!d) return ""; const [, m, day] = d.split("-"); return `${day}/${m}`; };
   const fmtFull  = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${day}/${m}/${y}`; };
@@ -898,7 +940,7 @@ function GanttTab({ tasks, participants, indicators, taskTypes }) {
       cur = new Date(nextMs);
     }
     return result;
-  }, [dateFrom, dateTo, startMs, endMs, totalMs]);
+  }, [dateFrom, dateTo, startMs, totalMs]);
 
   const todayX = ((new Date(today).getTime() - startMs) / totalMs) * CHART_W;
   const bx = (s) => Math.max(0, ((new Date(s).getTime() - startMs) / totalMs) * CHART_W);
@@ -1080,8 +1122,39 @@ function GanttTab({ tasks, participants, indicators, taskTypes }) {
   );
 }
 
+function MetricsSection({ title, children }) {
+  return (
+    <div style={{ background: "#ffffff", border: "none", borderRadius: 14, padding: 18, marginBottom: 12, boxShadow: "0 2px 14px rgba(84,44,156,0.07)" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#542c9c", marginBottom: 12 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, color = "var(--color-text-primary)" }) {
+  return (
+    <div style={{ background: "#ffffff", borderRadius: 10, padding: "14px 16px", boxShadow: "0 2px 10px rgba(84,44,156,0.08)" }}>
+      <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 500, color }}>{value}</div>
+    </div>
+  );
+}
+
+function MetricRow({ label, value, color, light }) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "7px 10px", borderRadius: 6, borderLeft: `3px solid ${color}`,
+      background: light, marginBottom: 5,
+    }}>
+      <span style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 500, color }}>{value}</span>
+    </div>
+  );
+}
+
 // ─── MetricsTab ────────────────────────────────────────────
-function MetricsTab({ tasks, participants, indicators, taskTypes }) {
+function MetricsTab({ tasks, participants, taskTypes }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selParticipant, setSelParticipant] = useState("");
@@ -1131,35 +1204,10 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
     const completionPct = eligible.length > 0 ? +((finalizadas.length / eligible.length) * 100).toFixed(2) : 0;
 
     return { byStatus, byType, byIndicator, ptsByIndicator, totalPts, avgTimeByType, completionPct, finalizadas: finalizadas.length, eligible: eligible.length };
-  }, [filtered]);
+  }, [filtered, taskTypes]);
 
   const ss = { background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-secondary)", borderRadius: 6, padding: "6px 8px", fontSize: 12, cursor: "pointer", outline: "none", fontFamily: "inherit" };
   const si = { ...ss, color: "var(--color-text-primary)" };
-
-  const Sec = ({ title, children }) => (
-    <div style={{ background: "#ffffff", border: "none", borderRadius: 14, padding: 18, marginBottom: 12, boxShadow: "0 2px 14px rgba(84,44,156,0.07)" }}>
-      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#542c9c", marginBottom: 12 }}>{title}</div>
-      {children}
-    </div>
-  );
-
-  const MetCard = ({ label, value, color = "var(--color-text-primary)" }) => (
-    <div style={{ background: "#ffffff", borderRadius: 10, padding: "14px 16px", boxShadow: "0 2px 10px rgba(84,44,156,0.08)" }}>
-      <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 500, color }}>{value}</div>
-    </div>
-  );
-
-  const Row = ({ label, value, color, light }) => (
-    <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center",
-      padding: "7px 10px", borderRadius: 6, borderLeft: `3px solid ${color}`,
-      background: light, marginBottom: 5,
-    }}>
-      <span style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{label}</span>
-      <span style={{ fontSize: 14, fontWeight: 500, color }}>{value}</span>
-    </div>
-  );
 
   return (
     <div>
@@ -1181,29 +1229,29 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
       ) : (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
-            <MetCard label="Total tareas" value={filtered.length} />
-            <MetCard label="Finalizadas" value={metrics.finalizadas} color="#3B6D11" />
-            <MetCard label="Valor de Aporte total" value={Number(metrics.totalPts).toFixed(2)} color="#BA7517" />
+            <MetricCard label="Total tareas" value={filtered.length} />
+            <MetricCard label="Finalizadas" value={metrics.finalizadas} color="#3B6D11" />
+            <MetricCard label="Valor de Aporte total" value={Number(metrics.totalPts).toFixed(2)} color="#BA7517" />
           </div>
 
-          <Sec title="Tareas por estado">
+          <MetricsSection title="Tareas por estado">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6 }}>
               {ESTADOS.map((s) => metrics.byStatus[s] > 0 && (
-                <Row key={s} label={s} value={metrics.byStatus[s]} color={STATUS_COLORS[s]} light={STATUS_LIGHT[s]} />
+                <MetricRow key={s} label={s} value={metrics.byStatus[s]} color={STATUS_COLORS[s]} light={STATUS_LIGHT[s]} />
               ))}
             </div>
-          </Sec>
+          </MetricsSection>
 
-          <Sec title="Tareas por tipo">
+          <MetricsSection title="Tareas por tipo">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 6 }}>
               {(taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES).map((tp) => metrics.byType[tp] > 0 && (
-                <Row key={tp} label={tp} value={metrics.byType[tp]} color={TYPE_COLORS[tp]} light="var(--color-background-secondary)" />
+                <MetricRow key={tp} label={tp} value={metrics.byType[tp]} color={TYPE_COLORS[tp]} light="var(--color-background-secondary)" />
               ))}
             </div>
-          </Sec>
+          </MetricsSection>
 
           {Object.keys(metrics.byIndicator).length > 0 && (
-            <Sec title="Tareas e indicadores clave">
+            <MetricsSection title="Tareas e indicadores clave">
               {Object.entries(metrics.byIndicator).map(([ind, cnt]) => (
                 <div key={ind} style={{ display: "flex", justifyContent: "space-between", padding: "7px 10px", background: "var(--color-background-secondary)", borderRadius: 6, marginBottom: 5 }}>
                   <span style={{ fontSize: 12, color: "var(--color-text-primary)" }}>{ind}</span>
@@ -1213,10 +1261,10 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
                   </div>
                 </div>
               ))}
-            </Sec>
+            </MetricsSection>
           )}
 
-          <Sec title="Tiempo promedio de resolución (días · solo tareas Finalizadas)">
+          <MetricsSection title="Tiempo promedio de resolución (días · solo tareas Finalizadas)">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 6 }}>
               {(taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES).map((tp) => metrics.avgTimeByType[tp] !== null && (
                 <div key={tp} style={{ padding: "8px 10px", background: "var(--color-background-secondary)", borderRadius: 6, borderLeft: `3px solid ${TYPE_COLORS[tp]}` }}>
@@ -1225,7 +1273,7 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
                 </div>
               ))}
             </div>
-          </Sec>
+          </MetricsSection>
 
           <div style={{
             background: "linear-gradient(135deg, #149cac 0%, #0d7a87 100%)",
@@ -1254,7 +1302,7 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
           </div>
 
           {participants.length > 0 && (
-            <Sec title="Carga de trabajo por persona">
+            <MetricsSection title="Carga de trabajo por persona">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {participants.map(p => {
                   const today = new Date().toISOString().split('T')[0];
@@ -1282,7 +1330,7 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
                   );
                 })}
               </div>
-            </Sec>
+            </MetricsSection>
           )}
         </>
       )}
@@ -1292,14 +1340,8 @@ function MetricsTab({ tasks, participants, indicators, taskTypes }) {
 
 // ─── DimensionEditor ───────────────────────────────────────
 function DimensionEditor({ dimensions, setDimensions }) {
-  const init = Array.isArray(dimensions) && dimensions.length ? dimensions : DEFAULT_DIMENSIONS;
-  const [local, setLocal] = useState(init);
+  const local = Array.isArray(dimensions) && dimensions.length ? dimensions : DEFAULT_DIMENSIONS;
   const [newLabel, setNewLabel] = useState("");
-
-  useEffect(() => {
-    const next = Array.isArray(dimensions) && dimensions.length ? dimensions : DEFAULT_DIMENSIONS;
-    setLocal(next);
-  }, [dimensions]);
 
   const total = local.reduce((s, d) => s + (d.weight || 0), 0);
 
@@ -1327,13 +1369,11 @@ function DimensionEditor({ dimensions, setDimensions }) {
       const idx = next.findIndex(d => d.key !== key);
       next[idx] = { ...next[idx], weight: next[idx].weight + diff };
     }
-    setLocal(next);
     setDimensions(next);
   };
 
   const updateLabel = (key, label) => {
     const next = local.map(d => d.key === key ? { ...d, label } : d);
-    setLocal(next);
     setDimensions(next);
   };
 
@@ -1344,7 +1384,6 @@ function DimensionEditor({ dimensions, setDimensions }) {
     const base = Math.floor(100 / (local.length + 1));
     const newDim = { key, label, weight: base, builtin: false };
     const next = redistributeWeights([...local.map(d => ({ ...d, weight: Math.max(1, Math.floor(d.weight * local.length / (local.length + 1))) })), newDim]);
-    setLocal(next);
     setDimensions(next);
     setNewLabel("");
   };
@@ -1352,7 +1391,6 @@ function DimensionEditor({ dimensions, setDimensions }) {
   const removeDimension = (key) => {
     const next = redistributeWeights(local.filter(d => d.key !== key));
     if (next.length === 0) return;
-    setLocal(next);
     setDimensions(next);
   };
 
@@ -1420,8 +1458,17 @@ function DimensionEditor({ dimensions, setDimensions }) {
   );
 }
 
+function ConfigSection({ title, children }) {
+  return (
+    <div style={{ background: "#ffffff", border: "none", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)" }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#542c9c", marginBottom: 14 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
 // ─── ConfigTab ─────────────────────────────────────────────
-function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, dimensions, setDimensions, tasks, project, projectPin, onChangePin, onInvite }) {
+function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, dimensions, setDimensions, project, onChangePin }) {
   const [newP, setNewP] = useState("");
   const [newI, setNewI] = useState("");
   const [newType, setNewType] = useState("");
@@ -1449,17 +1496,17 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
   const sendInvite = async () => {
     if (!inviteEmail.includes("@")) { setInviteMsg("Correo inválido."); return; }
+    if (!project?.id) { setInviteMsg("No hay proyecto activo."); return; }
     setInviting(true);
     setInviteMsg("Enviando invitación...");
     try {
+      const headers = await getAuthJsonHeaders();
       const res = await fetch('/api/invite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           email: inviteEmail,
-          projectName: project?.name || 'Productivity-Plus',
-          inviteCode: project?.invite_code || '',
-          baseUrl: window.location.origin,
+          projectId: project.id,
         }),
       });
       const data = await res.json();
@@ -1480,7 +1527,8 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
   };
 
   useEffect(() => {
-    supabase.from('email_config').select('*').eq('id', 1).single()
+    if (!project?.id) return;
+    supabase.from('email_config').select('*').eq('project_id', project.id).maybeSingle()
       .then(({ data }) => {
         if (data) {
           setEmails(data.emails || []);
@@ -1491,15 +1539,18 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
           setDaysForward(data.days_forward ?? 7);
         }
       });
-  }, []);
+  }, [project?.id]);
 
   const saveEmailConfig = async () => {
+    if (!project?.id) { setEmailMsg("No hay proyecto activo."); return; }
     setEmailSaving(true);
-    await supabase.from('email_config')
-      .update({ emails, frequency, send_day: sendDay, send_hour: sendHour, days_back: daysBack, days_forward: daysForward })
-      .eq('id', 1);
+    const { error } = await supabase.from('email_config')
+      .upsert(
+        { project_id: project.id, emails, frequency, send_day: sendDay, send_hour: sendHour, days_back: daysBack, days_forward: daysForward },
+        { onConflict: 'project_id' }
+      );
     setEmailSaving(false);
-    setEmailMsg("Configuración guardada ✓");
+    setEmailMsg(error ? "Error: " + error.message : "Configuración guardada ✓");
     setTimeout(() => setEmailMsg(""), 3000);
   };
 
@@ -1511,6 +1562,11 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
     }
     setGenerating(true);
     setReportMsg("Generando reporte con IA... esto puede tomar 30 segundos.");
+    if (!project?.id) {
+      setReportMsg("Error: no hay proyecto activo.");
+      setGenerating(false);
+      return;
+    }
 
     const today = new Date();
     const fmt = (d) => d.toISOString().split("T")[0];
@@ -1527,14 +1583,15 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
     const weekEnd = fmt(end);
 
     try {
+      const headers = await getAuthJsonHeaders();
       const genRes = await fetch('/api/generate-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tasks, participants, indicators, weekStart, weekEnd }),
+        headers,
+        body: JSON.stringify({ projectId: project.id, weekStart, weekEnd }),
       });
       if (!genRes.ok) {
         let errMsg = `Error del servidor (${genRes.status})`;
-        try { const e = await genRes.json(); errMsg = e.error || errMsg; } catch {}
+        try { const e = await genRes.json(); errMsg = e.error || errMsg; } catch { /* keep generic server error */ }
         throw new Error(errMsg);
       }
       const html = await genRes.text();
@@ -1543,8 +1600,8 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
       const sendRes = await fetch('/api/send-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emails, html, weekStart, weekEnd }),
+        headers,
+        body: JSON.stringify({ projectId: project.id, emails, html, weekStart, weekEnd }),
       });
       const sendText = await sendRes.text();
       let sendData;
@@ -1553,7 +1610,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
       await supabase.from('email_config')
         .update({ last_sent: new Date().toISOString() })
-        .eq('id', 1);
+        .eq('project_id', project.id);
 
       setReportMsg("✓ Reporte enviado a " + emails.length + " correo(s)");
     } catch (err) {
@@ -1603,19 +1660,12 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
   const si = { background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-secondary)", color: "var(--color-text-primary)", borderRadius: 6, padding: "8px 10px", fontSize: 13, outline: "none", fontFamily: "inherit", flex: 1 };
   const addBtn = { background: "linear-gradient(135deg, #542c9c, #6e3ebf)", border: "none", color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600, boxShadow: "0 3px 10px rgba(84,44,156,0.3)" };
 
-  const Sec = ({ title, children }) => (
-    <div style={{ background: "#ffffff", border: "none", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)" }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#542c9c", marginBottom: 14 }}>{title}</div>
-      {children}
-    </div>
-  );
-
   return (
     <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", gap: 20 }}>
 
       {/* ── Proyecto ───────────────────────── */}
       {project && (
-        <Sec title="🏗️ Proyecto">
+        <ConfigSection title="🏗️ Proyecto">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#f9f8fd", borderRadius: 8, border: "1px solid rgba(84,44,156,0.12)" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#542c9c", flex: 1 }}>{project.name}</span>
@@ -1661,11 +1711,11 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
               {inviteMsg && <div style={{ fontSize: 12, marginTop: 6, color: inviteMsg.startsWith("Error") ? "#c0392b" : "#27ae60", fontWeight: 500 }}>{inviteMsg}</div>}
             </div>
           </div>
-        </Sec>
+        </ConfigSection>
       )}
 
       {/* ── Cambio de clave ─────────────────── */}
-      <Sec title="🔐 Clave de configuración">
+      <ConfigSection title="🔐 Clave de configuración">
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <input
             type="password" value={newPin} onChange={e => setNewPin(e.target.value)}
@@ -1681,9 +1731,9 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
           </button>
           {pinChangeMsg && <div style={{ fontSize: 12, color: pinChangeMsg.startsWith("✓") ? "#27ae60" : "#c0392b", fontWeight: 500 }}>{pinChangeMsg}</div>}
         </div>
-      </Sec>
+      </ConfigSection>
 
-      <Sec title="👥 Participantes">
+      <ConfigSection title="👥 Participantes">
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input style={si} value={newP} onChange={(e) => setNewP(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addP()} placeholder="Nombre del participante..." />
           <button onClick={addP} style={addBtn}>Agregar</button>
@@ -1719,9 +1769,9 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
             ))}
           </div>
         )}
-      </Sec>
+      </ConfigSection>
 
-      <Sec title="📊 Indicadores clave">
+      <ConfigSection title="📊 Indicadores clave">
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input style={si} value={newI} onChange={(e) => setNewI(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addI()} placeholder="Nombre del indicador..." />
           <button onClick={addI} style={addBtn}>Agregar</button>
@@ -1739,9 +1789,9 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
             ))}
           </div>
         )}
-      </Sec>
+      </ConfigSection>
 
-      <Sec title="🧩 Tipos de tarea">
+      <ConfigSection title="🧩 Tipos de tarea">
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input style={si} value={newType} onChange={(e) => setNewType(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addType()} placeholder="Nombre del tipo..." />
           <button onClick={addType} style={addBtn}>Agregar</button>
@@ -1759,14 +1809,14 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
             ))}
           </div>
         )}
-      </Sec>
+      </ConfigSection>
 
-      <Sec title="⚖️ Dimensiones de Valor de Aporte">
+      <ConfigSection title="⚖️ Dimensiones de Valor de Aporte">
         <div style={{ fontSize: 12, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>
           Define las dimensiones que se evalúan en cada tarea y su peso relativo en el cálculo de aporte. Puedes renombrar, ajustar pesos y agregar o quitar dimensiones personalizadas.
         </div>
         <DimensionEditor dimensions={dimensions} setDimensions={setDimensions} />
-      </Sec>
+      </ConfigSection>
 
       <div style={{ background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)", border: "1px solid rgba(84,44,156,0.1)" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#542c9c", borderBottom: "2px solid #ede8f8", paddingBottom: 10, marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
@@ -2191,7 +2241,7 @@ function IntroScreen({ onFinish }) {
     const t4 = setTimeout(() => setPhase(4), 3000);
     const t5 = setTimeout(() => onFinish(), 4200);
     return () => [t1,t2,t3,t4,t5].forEach(clearTimeout);
-  }, []);
+  }, [onFinish]);
 
   return (
     <div
@@ -2496,18 +2546,21 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     // Insert sample tasks
     const taskSchema = Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : [];
     if (taskSchema.length) {
-      const now = new Date().toISOString();
-      const sampleTasks = taskSchema.map((t, i) => ({
-        id: i + 1, title: t.title, type: t.type || 'Operativa', status: t.status || 'Sin iniciar',
-        project_id: proj.id, estimated_time: 5, difficulty: 5, strategic_value: 5,
-        progress_percent: 0, subtasks: [], indicators: [],
-      }));
+      const sampleTasks = [];
+      for (const [i, t] of taskSchema.entries()) {
+        const { data: claimedId } = await supabase.rpc('claim_task_id');
+        sampleTasks.push({
+          id: claimedId || Date.now() + i, title: t.title, type: t.type || 'Operativa', status: t.status || 'Sin iniciar',
+          project_id: proj.id, estimated_time: 5, difficulty: 5, strategic_value: 5,
+          progress_percent: 0, subtasks: [], indicators: [],
+        });
+      }
       await supabase.from('tasks').insert(sampleTasks);
     }
     // Insert sample indicators
     const inds = Array.isArray(tpl.indicators) ? tpl.indicators : [];
     if (inds.length) {
-      await supabase.from('indicators').insert(inds.map((name, i) => ({ id: i + 1, name, project_id: proj.id })));
+      await supabase.from('indicators').insert(inds.map((name) => ({ name, project_id: proj.id })));
     }
     localStorage.setItem('pp_project_id', String(proj.id));
     onProjectLoaded(proj);
@@ -2517,14 +2570,8 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     const code = joinCode.trim();
     if (!code) { setErr("Ingresa el código de invitación."); return; }
     setJoining(true); setErr("");
-    const { data, error } = await supabase.from('projects').select('*').eq('invite_code', code).single();
-    if (error || !data) { setErr("Código inválido o proyecto no encontrado."); setJoining(false); return; }
-    if (authUser) {
-      await supabase.from('project_members').upsert(
-        { project_id: data.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email, user_id: authUser.id },
-        { onConflict: 'project_id,email' }
-      );
-    }
+    const data = await joinProjectByCode(code, authUser);
+    if (!data) { setErr("Código inválido o proyecto no encontrado."); setJoining(false); return; }
     localStorage.setItem('pp_project_id', String(data.id));
     onProjectLoaded(data);
   };
@@ -3143,7 +3190,7 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
   const saveOkr = async () => {
     if (!form.title.trim()) return;
     if (editId) {
-      await supabase.from('okrs').update({ title: form.title, description: form.description, quarter: form.quarter, year: form.year }).eq('id', editId);
+      await supabase.from('okrs').update({ title: form.title, description: form.description, quarter: form.quarter, year: form.year }).eq('id', editId).eq('project_id', projectId);
       setOkrs(prev => prev.map(o => o.id === editId ? { ...o, ...form } : o));
     } else {
       const { data } = await supabase.from('okrs').insert({ ...form, project_id: projectId, status: 'active' }).select().single();
@@ -3154,20 +3201,20 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
 
   const deleteOkr = async (id) => {
     if (!confirm('¿Eliminar este objetivo y todos sus resultados clave?')) return;
-    await supabase.from('okrs').delete().eq('id', id);
+    await supabase.from('okrs').delete().eq('id', id).eq('project_id', projectId);
     setOkrs(prev => prev.filter(o => o.id !== id));
     setKeyResults(prev => prev.filter(kr => kr.okr_id !== id));
   };
 
   const toggleStatus = async (okr) => {
     const ns = okr.status === 'active' ? 'closed' : 'active';
-    await supabase.from('okrs').update({ status: ns }).eq('id', okr.id);
+    await supabase.from('okrs').update({ status: ns }).eq('id', okr.id).eq('project_id', projectId);
     setOkrs(prev => prev.map(o => o.id === okr.id ? { ...o, status: ns } : o));
   };
 
   const saveKr = async () => {
     if (!krForm.title.trim() || !addingKrFor) return;
-    const { data } = await supabase.from('key_results').insert({ ...krForm, okr_id: addingKrFor, current_value: 0 }).select().single();
+    const { data } = await supabase.from('key_results').insert({ ...krForm, okr_id: addingKrFor, project_id: projectId, current_value: 0 }).select().single();
     if (data) setKeyResults(prev => [...prev, data]);
     setKrForm({ title: '', target_value: 100, unit: '%' });
     setAddingKrFor(null);
@@ -3175,12 +3222,12 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
 
   const updateKrValue = async (kr, delta) => {
     const nv = Math.max(0, Math.min(Number(kr.target_value), Number(kr.current_value) + delta));
-    await supabase.from('key_results').update({ current_value: nv }).eq('id', kr.id);
+    await supabase.from('key_results').update({ current_value: nv }).eq('id', kr.id).eq('project_id', projectId);
     setKeyResults(prev => prev.map(k => k.id === kr.id ? { ...k, current_value: nv } : k));
   };
 
   const deleteKr = async (id) => {
-    await supabase.from('key_results').delete().eq('id', id);
+    await supabase.from('key_results').delete().eq('id', id).eq('project_id', projectId);
     setKeyResults(prev => prev.filter(k => k.id !== id));
   };
 
@@ -3307,7 +3354,7 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
 }
 
 // ─── SprintsTab ────────────────────────────────────────────
-function SprintsTab({ projectId, sprints, setSprints, tasks, updateTask }) {
+function SprintsTab({ projectId, sprints, setSprints, tasks }) {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', goal: '', start_date: '', end_date: '' });
   const today = new Date().toISOString().split('T')[0];
@@ -3327,18 +3374,18 @@ function SprintsTab({ projectId, sprints, setSprints, tasks, updateTask }) {
 
   const startSprint = async (id) => {
     if (activeSprint) { alert('Ya hay un sprint activo. Ciérralo antes de iniciar otro.'); return; }
-    await supabase.from('sprints').update({ status: 'active' }).eq('id', id);
+    await supabase.from('sprints').update({ status: 'active' }).eq('id', id).eq('project_id', projectId);
     setSprints(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
   };
 
   const closeSprint = async (id) => {
-    await supabase.from('sprints').update({ status: 'closed' }).eq('id', id);
+    await supabase.from('sprints').update({ status: 'closed' }).eq('id', id).eq('project_id', projectId);
     setSprints(prev => prev.map(s => s.id === id ? { ...s, status: 'closed' } : s));
   };
 
   const deleteSprint = async (id) => {
     if (!confirm('¿Eliminar este sprint?')) return;
-    await supabase.from('sprints').delete().eq('id', id);
+    await supabase.from('sprints').delete().eq('id', id).eq('project_id', projectId);
     setSprints(prev => prev.filter(s => s.id !== id));
   };
 
@@ -3642,11 +3689,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(null);
   const [dimensions, setDimensions] = useState(DEFAULT_DIMENSIONS);
-  const [configUnlocked, setConfigUnlocked] = useState(false);
-  const [configPin, setConfigPin] = useState("");
-  const [pinError, setPinError] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
-  const [showUserSelect, setShowUserSelect] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [activeUser, setActiveUser] = useState(null);
@@ -3657,7 +3700,6 @@ export default function App() {
   const [projectId, setProjectId] = useState(null);
   const [project, setProject] = useState(null);
   const [showProjectLanding, setShowProjectLanding] = useState(false);
-  const [projectPin, setProjectPin] = useState(DEFAULT_PIN);
   const [depEditTask, setDepEditTask] = useState(null);
   const [okrs, setOkrs] = useState([]);
   const [keyResults, setKeyResults] = useState([]);
@@ -3667,36 +3709,6 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem('pp_dismissed_notifs') || '[]'); } catch { return []; }
   });
   const sessionIdRef = useRef(crypto.randomUUID());
-
-  const loadParticipants = async () => {
-    const { data, error } = await supabase.from('participants').select('*').order('id');
-    if (!error && data) {
-      setParticipants(data.map((p) => ({ id: p.id, name: p.name, isSuperUser: p.is_super_user })));
-      return data;
-    }
-    return [];
-  };
-
-  const loadIndicators = async () => {
-    const { data, error } = await supabase.from('indicators').select('*').order('id');
-    if (!error && data) {
-      setIndicators(data);
-      return data;
-    }
-    return [];
-  };
-
-  const loadTaskTypes = async () => {
-    const { data, error } = await supabase
-      .from('task_types')
-      .select('*')
-      .order('name', { ascending: true });
-    if (!error && data) {
-      setTaskTypes(data.map((t) => ({ id: t.id, name: t.name })));
-      return data;
-    }
-    return [];
-  };
 
   const loadAllForProject = async (pid, proj, authUser = null) => {
     setLoading(true);
@@ -3714,7 +3726,7 @@ export default function App() {
         q('tasks').order('id'),
         q('participants').order('id'),
         q('indicators').order('id'),
-        supabase.from('task_types').select('*').order('name', { ascending: true }),
+        pid ? supabase.from('task_types').select('*').eq('project_id', pid).order('name', { ascending: true }) : supabase.from('task_types').select('*').order('name', { ascending: true }),
         q('app_config'),
         pid ? supabase.from('okrs').select('*').eq('project_id', pid).order('year').order('quarter') : Promise.resolve({ data: [] }),
         pid ? supabase.from('sprints').select('*').eq('project_id', pid).order('created_at') : Promise.resolve({ data: [] }),
@@ -3745,13 +3757,15 @@ export default function App() {
       const p = proj || project;
       if (p?.config) {
         if (Array.isArray(p.config.dimensions) && p.config.dimensions.length) setDimensions(p.config.dimensions);
-        if (p.config.pin) setProjectPin(p.config.pin);
       }
 
       if (!partsData?.length && pid) {
-        const defaultUser = { id: 1, name: 'Usuario', is_super_user: true, project_id: pid };
-        await supabase.from('participants').insert(defaultUser);
-        setParticipants([{ id: 1, name: 'Usuario', isSuperUser: true }]);
+        const { data: createdDefault } = await supabase
+          .from('participants')
+          .insert({ name: 'Usuario', is_super_user: true, project_id: pid })
+          .select()
+          .single();
+        if (createdDefault) setParticipants([{ id: createdDefault.id, name: createdDefault.name, isSuperUser: true }]);
       }
 
       // Auto-set active user from auth
@@ -3796,12 +3810,8 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       const joinCode = params.get('join');
       if (joinCode) {
-        const { data: proj } = await supabase.from('projects').select('*').eq('invite_code', joinCode).single();
+        const proj = await joinProjectByCode(joinCode, user);
         if (proj) {
-          await supabase.from('project_members').upsert(
-            { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email, user_id: user.id },
-            { onConflict: 'project_id,email' }
-          );
           localStorage.setItem('pp_project_id', String(proj.id));
           setProjectId(proj.id); setProject(proj);
           window.history.replaceState({}, '', window.location.pathname);
@@ -3838,7 +3848,7 @@ export default function App() {
     init();
 
     // Auth state subscription
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         setAuthUser(null); setActiveUser(null); setProject(null);
         setProjectId(null); setTasks([]); setParticipants([]);
@@ -3847,56 +3857,60 @@ export default function App() {
       }
     });
     return () => subscription.unsubscribe();
+    // Initialization must run once; subsequent project changes are handled explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Suscripciones Realtime ─────────────────────────────────
   useEffect(() => {
+    if (!projectId) return undefined;
+    const projectFilter = `project_id=eq.${projectId}`;
     const channel = supabase
-      .channel('productivity-plus-realtime')
+      .channel(`productivity-plus-realtime-${projectId}`)
 
       // TASKS
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
         setTasks(prev => {
           if (prev.find(t => t.id === payload.new.id)) return prev;
           return [...prev, dbToTask(payload.new)].sort((a, b) => a.id - b.id);
         });
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
         setTasks(prev => prev.map(t => t.id === payload.new.id ? dbToTask(payload.new) : t));
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' }, (payload) => {
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
         setTasks(prev => prev.filter(t => t.id !== payload.old.id));
       })
 
       // PARTICIPANTS
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants' }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
         setParticipants(prev => {
           if (prev.find(p => p.id === payload.new.id)) return prev;
           return [...prev, { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user }];
         });
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participants' }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
         setParticipants(prev => prev.map(p =>
           p.id === payload.new.id ? { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user } : p
         ));
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'participants' }, (payload) => {
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
         setParticipants(prev => prev.filter(p => p.id !== payload.old.id));
       })
 
       // INDICATORS
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'indicators' }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'indicators', filter: projectFilter }, (payload) => {
         setIndicators(prev => {
           if (prev.find(i => i.id === payload.new.id)) return prev;
           return [...prev, { id: payload.new.id, name: payload.new.name }];
         });
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'indicators' }, (payload) => {
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'indicators', filter: projectFilter }, (payload) => {
         setIndicators(prev => prev.filter(i => i.id !== payload.old.id));
       })
 
       // APP_CONFIG
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_config' }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_config', filter: projectFilter }, (payload) => {
         const { key, value } = payload.new;
         if (key === 'nextId') setNextId(Number(value));
         if (key === 'currentUserId') setCurrentUserId(value === null ? null : Number(value));
@@ -3905,7 +3919,7 @@ export default function App() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [projectId]);
 
   // ── Presence: track active users in real time ──────────────
   const presenceChannelRef = useRef(null);
@@ -3915,7 +3929,8 @@ export default function App() {
 
   // Single channel per session — key is our unique sessionId
   useEffect(() => {
-    const channel = supabase.channel('productivity-plus-presence', {
+    if (!projectId) return undefined;
+    const channel = supabase.channel(`productivity-plus-presence-${projectId}`, {
       config: { presence: { key: sessionIdRef.current } },
     });
 
@@ -3952,8 +3967,8 @@ export default function App() {
       .subscribe();
 
     presenceChannelRef.current = channel;
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+    return () => { supabase.removeChannel(channel); presenceChannelRef.current = null; };
+  }, [projectId]);
 
   // Track/untrack our presence when activeUser changes
   useEffect(() => {
@@ -3979,18 +3994,6 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [activeUser]);
 
-  const handleUserSelect = (participant) => {
-    setKickedMsg(null);
-    setConflictUser(null);
-    setActiveUser(participant);
-    setCurrentUserId(participant.id);
-    setShowUserSelect(false);
-  };
-
-  const handleConflict = (participant) => {
-    setConflictUser(participant);
-  };
-
   const handleForceEntry = () => {
     if (!conflictUser) return;
     setKickedMsg(null);
@@ -3999,7 +4002,6 @@ export default function App() {
     // Force enter — our newer onlineAt will kick the old session via sync
     setActiveUser(p);
     setCurrentUserId(p.id);
-    setShowUserSelect(false);
   };
 
   const handleChangeUser = () => {
@@ -4034,7 +4036,9 @@ export default function App() {
     if (Array.isArray(dimensions) && dimensions.length) {
       dbTask.aporte_snapshot = calcAporte(task, dimensions);
     }
-    const { error } = await supabase.from('tasks').update(dbTask).eq('id', task.id);
+    let updateQuery = supabase.from('tasks').update(dbTask).eq('id', task.id);
+    if (projectId) updateQuery = updateQuery.eq('project_id', projectId);
+    const { error } = await updateQuery;
     if (!error) {
       // Log significant field changes to task_history
       if (projectId && activeUser) {
@@ -4060,7 +4064,9 @@ export default function App() {
   };
 
   const deleteTask = async (id) => {
-    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    let deleteQuery = supabase.from('tasks').delete().eq('id', id);
+    if (projectId) deleteQuery = deleteQuery.eq('project_id', projectId);
+    const { error } = await deleteQuery;
     if (!error) {
       setTasks(prev => prev.filter(t => t.id !== id));
     } else {
@@ -4077,9 +4083,9 @@ export default function App() {
     for (const p of toInsert)
       await supabase.from('participants').insert({ id: p.id, name: p.name, is_super_user: p.isSuperUser, project_id: projectId || undefined });
     for (const p of toUpdate)
-      await supabase.from('participants').update({ name: p.name, is_super_user: p.isSuperUser }).eq('id', p.id);
+      await supabase.from('participants').update({ name: p.name, is_super_user: p.isSuperUser }).eq('id', p.id).eq('project_id', projectId);
     for (const p of toDelete)
-      await supabase.from('participants').delete().eq('id', p.id);
+      await supabase.from('participants').delete().eq('id', p.id).eq('project_id', projectId);
     setParticipants(next);
   };
 
@@ -4091,7 +4097,7 @@ export default function App() {
     for (const i of toInsert)
       await supabase.from('indicators').insert({ id: i.id, name: i.name, project_id: projectId || undefined });
     for (const i of toDelete)
-      await supabase.from('indicators').delete().eq('id', i.id);
+      await supabase.from('indicators').delete().eq('id', i.id).eq('project_id', projectId);
     setIndicators(next);
   };
 
@@ -4102,12 +4108,12 @@ export default function App() {
     const toUpdate = next.filter(n => prev.find(p => p.id === n.id));
     const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
     for (const t of toInsert)
-      await supabase.from('task_types').insert({ name: t.name });
+      await supabase.from('task_types').insert({ name: t.name, project_id: projectId || undefined });
     for (const t of toUpdate)
-      await supabase.from('task_types').update({ name: t.name }).eq('id', t.id);
+      await supabase.from('task_types').update({ name: t.name }).eq('id', t.id).eq('project_id', projectId);
     for (const t of toDelete)
-      await supabase.from('task_types').delete().eq('id', t.id);
-    const { data, error } = await supabase.from('task_types').select('*').order('name', { ascending: true });
+      await supabase.from('task_types').delete().eq('id', t.id).eq('project_id', projectId);
+    const { data, error } = await supabase.from('task_types').select('*').eq('project_id', projectId).order('name', { ascending: true });
     if (!error && data) setTaskTypes(data.map((t) => ({ id: t.id, name: t.name })));
     return next;
   };
@@ -4122,7 +4128,6 @@ export default function App() {
   };
 
   const saveProjectPin = async (pin) => {
-    setProjectPin(pin);
     if (projectId && project) {
       const newConfig = { ...(project.config || {}), pin };
       await supabase.from('projects').update({ config: newConfig }).eq('id', projectId);
@@ -4130,14 +4135,9 @@ export default function App() {
     }
   };
 
-  const saveCurrentUser = async (id) => {
-    setCurrentUserId(id);
-    await supabase.from('app_config').update({ value: id }).eq('key', 'currentUserId');
-  };
-
   const currentUser = useMemo(() => participants.find((p) => p.id === currentUserId) || null, [participants, currentUserId]);
 
-  const exportXLSX = () => {
+  const exportCSV = () => {
     if (tasks.length === 0) { alert("No hay tareas para exportar."); return; }
     const data = tasks.map((t) => ({
       "ID": t.id,
@@ -4162,10 +4162,24 @@ export default function App() {
       "Subtareas": t.subtasks.map(s => (s.done ? "✓ " : "○ ") + (s.text || s)).join(" | "),
       "Tarea dependiente (ID)": t.dependentTask || "",
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Tareas");
-    XLSX.writeFile(wb, `productivity-plus_${new Date().toISOString().split("T")[0]}.xlsx`);
+    const headers = Object.keys(data[0]);
+    const escapeCell = (value) => {
+      const text = String(value ?? "");
+      return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    };
+    const csv = [
+      headers.map(escapeCell).join(","),
+      ...data.map((row) => headers.map((header) => escapeCell(row[header])).join(",")),
+    ].join("\r\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `productivity-plus_${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   const today = new Date().toISOString().split('T')[0];
@@ -4240,12 +4254,8 @@ export default function App() {
           const params = new URLSearchParams(window.location.search);
           const joinCode = params.get('join');
           if (joinCode) {
-            const { data: proj } = await supabase.from('projects').select('*').eq('invite_code', joinCode).single();
+            const proj = await joinProjectByCode(joinCode, user);
             if (proj) {
-              await supabase.from('project_members').upsert(
-                { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email, user_id: user.id },
-                { onConflict: 'project_id,email' }
-              );
               localStorage.setItem('pp_project_id', String(proj.id));
               setProjectId(proj.id); setProject(proj);
               window.history.replaceState({}, '', window.location.pathname);
@@ -4436,13 +4446,13 @@ export default function App() {
           <button onClick={() => window.print()} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 500 }}>
             🖨 PDF
           </button>
-          <button onClick={exportXLSX} style={{
+          <button onClick={exportCSV} style={{
             background: "rgba(20,156,172,0.2)",
             border: "1px solid rgba(20,156,172,0.5)",
             color: "#4dd8e8",
             borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 500,
           }}>
-            ↓ Exportar XLSX
+            ↓ Exportar CSV
           </button>
         </div>
       </div>
@@ -4451,7 +4461,7 @@ export default function App() {
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => { if (tab.id !== "config") setConfigUnlocked(false); setActiveTab(tab.id); }}
+            onClick={() => setActiveTab(tab.id)}
             style={{
               background: "none", border: "none",
               borderBottom: activeTab === tab.id ? "2.5px solid #542c9c" : "2.5px solid transparent",
@@ -4466,10 +4476,10 @@ export default function App() {
 
       <div style={{ padding: "20px 20px 40px" }}>
         {activeTab === "board" && (
-          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} projectId={projectId} keyResults={keyResults} sprints={sprints} />
+          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} projectId={projectId} nextId={nextId} keyResults={keyResults} sprints={sprints} />
         )}
         {activeTab === "gantt" && <GanttTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
-        {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
+        {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} taskTypes={taskTypes} />}
         {activeTab === "deps" && (
           <DependenciesTab
             tasks={tasks}
@@ -4481,7 +4491,7 @@ export default function App() {
           <OKRsTab projectId={projectId} okrs={okrs} setOkrs={setOkrs} keyResults={keyResults} setKeyResults={setKeyResults} tasks={tasks} />
         )}
         {activeTab === "sprints" && (
-          <SprintsTab projectId={projectId} sprints={sprints} setSprints={setSprints} tasks={tasks} updateTask={updateTask} />
+          <SprintsTab projectId={projectId} sprints={sprints} setSprints={setSprints} tasks={tasks} />
         )}
         {activeTab === "focus" && (
           <FocusTab tasks={tasks} activeUser={activeUser} updateTask={updateTask} dimensions={dimensions} />
@@ -4494,8 +4504,8 @@ export default function App() {
               indicators={indicators} setIndicators={saveIndicators}
               taskTypes={taskTypes} setTaskTypes={saveTaskTypes}
               dimensions={dimensions} setDimensions={saveDimensions}
-              tasks={tasks} project={project}
-              projectPin={projectPin} onChangePin={saveProjectPin}
+              project={project}
+              onChangePin={saveProjectPin}
             />
           ) : (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", minHeight:340, gap:16 }}>

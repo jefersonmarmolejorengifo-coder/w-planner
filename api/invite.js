@@ -1,17 +1,47 @@
+import {
+  applyCors,
+  assertProjectAccess,
+  createSupabase,
+  getAppBaseUrl,
+  getAuthenticatedUser,
+  getBearerToken,
+  handleApiError,
+} from "./_auth.js";
+import { getResendConfig } from "./_email.js";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  applyCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { email, projectName, inviteCode, baseUrl } = req.body || {};
-  if (!email || !inviteCode) return res.status(400).json({ error: 'email and inviteCode son requeridos' });
+  try {
+    const { email, projectId } = req.body || {};
+    const to = String(email || "").trim().toLowerCase();
+    if (!EMAIL_RE.test(to)) return res.status(400).json({ error: 'Correo inválido' });
 
-  const inviteUrl = `${baseUrl || 'https://productivity-plus.vercel.app'}?join=${inviteCode}`;
-  const year = new Date().getFullYear();
+    const token = getBearerToken(req);
+    const user = await getAuthenticatedUser(token);
+    const supabase = createSupabase(token);
+    const { project } = await assertProjectAccess(supabase, user, projectId, { ownerOnly: true });
 
-  const html = `<!DOCTYPE html>
+    const inviteUrl = `${getAppBaseUrl()}?join=${encodeURIComponent(project.invite_code)}`;
+    const safeInviteUrl = escapeHtml(inviteUrl);
+    const projectNameText = project.name || "Productivity-Plus";
+    const projectName = escapeHtml(projectNameText);
+    const inviteCode = escapeHtml(project.invite_code);
+    const year = new Date().getFullYear();
+
+    const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f4f4f8;font-family:Arial,sans-serif;">
   <div style="max-width:560px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.1);">
@@ -27,7 +57,7 @@ export default async function handler(req, res) {
         la herramienta de gestión de equipos de alto rendimiento.
       </p>
       <div style="text-align:center;margin:32px 0;">
-        <a href="${inviteUrl}"
+        <a href="${safeInviteUrl}"
            style="background:linear-gradient(135deg,#ec6c04,#f07d1e);color:#ffffff;text-decoration:none;padding:15px 36px;border-radius:10px;font-weight:700;font-size:15px;display:inline-block;box-shadow:0 4px 16px rgba(236,108,4,0.35);">
           Unirse al proyecto →
         </a>
@@ -50,17 +80,17 @@ export default async function handler(req, res) {
   </div>
 </body></html>`;
 
-  try {
+    const { apiKey, from } = getResendConfig();
     const resendRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: process.env.REPORT_FROM_EMAIL || 'onboarding@resend.dev',
-        to: email,
-        subject: `Invitación a ${projectName} — Productivity-Plus`,
+        from,
+        to,
+        subject: `Invitación a ${projectNameText} — Productivity-Plus`,
         html,
       }),
     });
@@ -72,6 +102,6 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ ok: true });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return handleApiError(err, res);
   }
 }

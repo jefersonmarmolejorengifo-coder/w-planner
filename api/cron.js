@@ -1,20 +1,21 @@
-import { createClient } from "@supabase/supabase-js";
+import { createSupabase } from "./_auth.js";
+import { getResendConfig, normalizeRecipients, sanitizeReportHtml } from "./_email.js";
 
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
-);
+const DAY_MAP = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
 
-const DAY_MAP = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
-
-// Get current date/time in Colombia (UTC-5) correctly
 function getColombiaNow() {
   const now = new Date();
-  // Build a Date object that represents "now" in Colombia
-  const colombiaOffset = -5 * 60; // minutes
+  const colombiaOffset = -5 * 60;
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  const colombiaMs = utcMs + colombiaOffset * 60000;
-  return new Date(colombiaMs);
+  return new Date(utcMs + colombiaOffset * 60000);
 }
 
 function shouldSendToday(config) {
@@ -22,10 +23,9 @@ function shouldSendToday(config) {
   const currentHour = colombia.getHours();
   const configHour = config.send_hour ?? 8;
 
-  // Only run at the configured hour (cron runs every hour)
   if (currentHour !== configHour) return false;
 
-  const now = new Date(); // real UTC for date math
+  const now = new Date();
   const freq = config.frequency || "weekly";
   const lastSent = config.last_sent ? new Date(config.last_sent) : null;
   const daysSinceLast = lastSent ? (now - lastSent) / (1000 * 60 * 60 * 24) : Infinity;
@@ -33,7 +33,7 @@ function shouldSendToday(config) {
   if (freq === "daily") return daysSinceLast >= 0.8;
 
   if (freq === "weekly" || freq === "biweekly") {
-    const todayDay = colombia.getDay(); // day of week in Colombia
+    const todayDay = colombia.getDay();
     const targetDay = DAY_MAP[config.send_day || "monday"] ?? 1;
     if (todayDay !== targetDay) return false;
     return freq === "weekly" ? daysSinceLast >= 5 : daysSinceLast >= 12;
@@ -53,126 +53,120 @@ function computeDateRange(config) {
   const daysBack = config.days_back ?? 7;
   const daysForward = config.days_forward ?? 7;
 
-  let start;
-  if (daysBack === 0) {
-    start = "2020-01-01";
-  } else {
-    const s = new Date(now);
-    s.setDate(now.getDate() - daysBack);
-    start = fmt(s);
-  }
-  const e = new Date(now);
-  e.setDate(now.getDate() + daysForward);
-  const end = fmt(e);
+  const startDate = new Date(now);
+  startDate.setDate(now.getDate() - daysBack);
 
-  return { weekStart: start, weekEnd: end };
+  const endDate = new Date(now);
+  endDate.setDate(now.getDate() + daysForward);
+
+  return {
+    weekStart: daysBack === 0 ? "2020-01-01" : fmt(startDate),
+    weekEnd: fmt(endDate),
+  };
+}
+
+const getBaseUrl = () =>
+  process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : process.env.APP_BASE_URL || "https://productivity-plus.vercel.app";
+
+async function generateReport({ projectId, weekStart, weekEnd }) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) throw new Error("CRON_SECRET no esta configurado");
+
+  const genRes = await fetch(`${getBaseUrl()}/api/generate-report`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Cron-Secret": cronSecret,
+    },
+    body: JSON.stringify({ projectId, weekStart, weekEnd }),
+  });
+
+  if (!genRes.ok) {
+    const errText = await genRes.text();
+    throw new Error(`Generate failed (${genRes.status}): ${errText.substring(0, 200)}`);
+  }
+
+  return genRes.text();
+}
+
+async function sendReportEmail({ emails, html, weekStart, weekEnd }) {
+  const recipients = normalizeRecipients(emails);
+  const safeHtml = sanitizeReportHtml(html);
+  const { apiKey, from } = getResendConfig();
+
+  const sendRes = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      from,
+      to: recipients,
+      subject: `Reporte Productivity-Plus - ${weekStart} al ${weekEnd}`,
+      html: safeHtml,
+    }),
+  });
+
+  const sendData = await sendRes.json().catch(() => ({}));
+  if (!sendRes.ok || sendData.error) {
+    throw new Error("Send failed: " + JSON.stringify(sendData.error || sendData));
+  }
 }
 
 export default async function handler(req, res) {
-  // Verify cron secret to prevent unauthorized calls
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    return res.status(503).json({ error: "Cron is not configured" });
+  }
+
   const authHeader = req.headers.authorization;
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
   try {
-    // 1. Read email config
-    const { data: config, error: cfgErr } = await supabase
-      .from("email_config").select("*").eq("id", 1).single();
-    if (cfgErr || !config) return res.status(200).json({ skipped: true, reason: "No config found" });
-    if (!config.emails || config.emails.length === 0) return res.status(200).json({ skipped: true, reason: "No emails configured" });
+    const supabase = createSupabase(null, { admin: true });
+    const { data: configs, error } = await supabase
+      .from("email_config")
+      .select("*")
+      .not("project_id", "is", null);
 
-    // 2. Check if we should send today
-    const colombia = getColombiaNow();
-    const debugInfo = {
-      colombiaHour: colombia.getHours(),
-      colombiaDay: colombia.getDay(),
-      configHour: config.send_hour ?? 8,
-      configDay: config.send_day || "monday",
-      frequency: config.frequency || "weekly",
-      lastSent: config.last_sent || "never",
-    };
-    console.log("[cron] Check:", JSON.stringify(debugInfo));
+    if (error) return res.status(500).json({ error: "Error reading email config: " + error.message });
+    if (!configs?.length) return res.status(200).json({ skipped: true, reason: "No project email configs found" });
 
-    if (!shouldSendToday(config)) {
-      return res.status(200).json({ skipped: true, reason: "Not scheduled for now", debug: debugInfo });
+    const results = [];
+    for (const config of configs) {
+      if (!config.emails?.length) {
+        results.push({ project_id: config.project_id, skipped: true, reason: "No emails configured" });
+        continue;
+      }
+
+      if (!shouldSendToday(config)) {
+        results.push({ project_id: config.project_id, skipped: true, reason: "Not scheduled for now" });
+        continue;
+      }
+
+      const { weekStart, weekEnd } = computeDateRange(config);
+      const html = await generateReport({ projectId: config.project_id, weekStart, weekEnd });
+      await sendReportEmail({ emails: config.emails, html, weekStart, weekEnd });
+
+      await supabase
+        .from("email_config")
+        .update({ last_sent: new Date().toISOString() })
+        .eq("id", config.id);
+
+      results.push({
+        project_id: config.project_id,
+        ok: true,
+        sent_to: config.emails.length,
+        range: `${weekStart} -> ${weekEnd}`,
+      });
     }
 
-    // 3. Read tasks from Supabase
-    const { data: tasksRaw, error: taskErr } = await supabase.from("tasks").select("*");
-    if (taskErr) return res.status(500).json({ error: "Error reading tasks: " + taskErr.message });
-
-    const tasks = (tasksRaw || []).map(r => ({
-      id: r.id, title: r.title || "", status: r.status || "Sin iniciar",
-      responsible: r.responsible || "", indicator: r.indicator || "",
-      indicators: r.indicators || [],
-      progressPercent: r.progress_percent ?? 0, progress_percent: r.progress_percent ?? 0,
-      aporteSnapshot: r.aporte_snapshot ?? 0, aporte_snapshot: r.aporte_snapshot ?? 0,
-      comments: r.comments || "", subtasks: r.subtasks || [],
-      startDate: r.start_date || "", start_date: r.start_date || "",
-      endDate: r.end_date || "", end_date: r.end_date || "",
-      expectedDelivery: r.expected_delivery || "", expected_delivery: r.expected_delivery || "",
-      type: r.type || "", difficulty: r.difficulty ?? 5,
-      strategicValue: r.strategic_value ?? 5, strategic_value: r.strategic_value ?? 5,
-    }));
-
-    // 4. Read participants and indicators
-    const [{ data: participants }, { data: indicators }] = await Promise.all([
-      supabase.from("participants").select("*"),
-      supabase.from("indicators").select("*"),
-    ]);
-
-    // 5. Compute date range from config
-    const { weekStart, weekEnd } = computeDateRange(config);
-
-    // 6. Call generate-report (our own edge function)
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "https://productivity-plus.vercel.app";
-
-    const genRes = await fetch(`${baseUrl}/api/generate-report`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tasks, participants, indicators, weekStart, weekEnd }),
-    });
-
-    if (!genRes.ok) {
-      const errText = await genRes.text();
-      return res.status(500).json({ error: `Generate failed (${genRes.status}): ${errText.substring(0, 200)}` });
-    }
-
-    const html = await genRes.text();
-
-    // 7. Send emails via Resend
-    const sendRes = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: process.env.REPORT_FROM_EMAIL || "onboarding@resend.dev",
-        to: config.emails,
-        subject: `Reporte Productivity-Plus · ${weekStart} al ${weekEnd}`,
-        html,
-      }),
-    });
-
-    const sendData = await sendRes.json();
-    if (sendData.error) {
-      return res.status(500).json({ error: "Send failed: " + JSON.stringify(sendData.error) });
-    }
-
-    // 8. Update last_sent
-    await supabase.from("email_config")
-      .update({ last_sent: new Date().toISOString() })
-      .eq("id", 1);
-
-    return res.status(200).json({
-      ok: true,
-      sent_to: config.emails.length,
-      range: `${weekStart} → ${weekEnd}`,
-    });
+    return res.status(200).json({ ok: true, results });
   } catch (err) {
     console.error("[cron] Error:", err);
     return res.status(500).json({ error: err.message });

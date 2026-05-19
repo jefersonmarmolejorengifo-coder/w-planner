@@ -3060,25 +3060,29 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const ownedCount = myProjects.filter(p => p.owner_id === authUser?.id).length;
   const atLimit = ownedCount >= projectLimit;
 
-  // Pulls the current Supabase session and returns the authenticated user id
-  // that will actually back the JWT on the next request. Falling back to
-  // `authUser` (React state) is risky: it may be stale or out of sync with
-  // the JWT, which triggers an RLS denial ("owner_id = auth.uid()").
+  // Returns the authenticated user that will actually back the JWT on the
+  // next request. We must use auth.getUser() (server round-trip) instead of
+  // auth.getSession() (local cache only): a cached session can look fine
+  // while its access_token is already expired, causing RLS to see
+  // auth.uid() = NULL even though the React layer thinks we're logged in.
+  // If validation fails, try refreshing once before giving up.
   const getSessionUserOrFail = async () => {
-    const { data: { session }, error } = await supabase.auth.getSession();
-    if (error) {
-      console.error('[createProject] getSession error:', error);
-      return { error: 'No se pudo verificar tu sesión. Recarga la página e inicia sesión de nuevo.' };
+    const probe = await supabase.auth.getUser();
+    if (!probe.error && probe.data?.user) {
+      return { user: probe.data.user };
     }
-    if (!session?.user?.id) {
-      // Try a refresh once before giving up.
-      const { data: refreshed } = await supabase.auth.refreshSession();
-      if (!refreshed?.session?.user?.id) {
-        return { error: 'Tu sesión expiró. Vuelve a iniciar sesión para crear proyectos.' };
-      }
-      return { user: refreshed.session.user };
+    console.warn('[auth] getUser failed, attempting refresh', probe.error);
+    const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+    if (refreshErr || !refreshed?.session?.user) {
+      console.error('[auth] refresh failed', refreshErr);
+      return { error: 'Tu sesión expiró. Vuelve a iniciar sesión para crear proyectos.' };
     }
-    return { user: session.user };
+    // Re-validate after refresh to be sure.
+    const recheck = await supabase.auth.getUser();
+    if (recheck.error || !recheck.data?.user) {
+      return { error: 'No se pudo validar tu sesión. Cierra sesión y vuelve a entrar.' };
+    }
+    return { user: recheck.data.user };
   };
 
   const confirmDeleteProject = async () => {

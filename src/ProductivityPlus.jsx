@@ -110,6 +110,10 @@ const emptyTask = (id) => ({
   dimensionValues: {},
   krId: null,
   sprintId: null,
+  customFields: {},
+  updatedAt: null,
+  closedAt: null,
+  lastModifiedBy: '',
 });
 
 // ─── calcAporte ────────────────────────────────────────────
@@ -192,7 +196,224 @@ const inp = {
 const readonlyInp = { ...inp, background: "#f4f4f4", color: "#969696", cursor: "default", border: "1.5px solid #e8e8e8" };
 
 // ─── TaskForm ──────────────────────────────────────────────
-function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [] }) {
+// ── Custom field helpers ──────────────────────────────────────
+// Auto fields (type='auto') derive their value from a fixed source column on
+// the task row. Allowed sources are fixed in DB/UI to keep the contract tight.
+const AUTO_FIELD_SOURCES = {
+  created_at:       (task) => task.createdAt || '',
+  updated_at:       (task) => task.updatedAt ? new Date(task.updatedAt).toLocaleString('es-CO', { timeZone: 'America/Bogota', hour12: false }) : '',
+  closed_at:        (task) => task.closedAt ? new Date(task.closedAt).toLocaleString('es-CO', { timeZone: 'America/Bogota', hour12: false }) : '',
+  last_modified_by: (task) => task.lastModifiedBy || '',
+};
+const AUTO_FIELD_SOURCE_LABELS = {
+  created_at:       'Fecha de creación',
+  updated_at:       'Última modificación',
+  closed_at:        'Fecha de cierre',
+  last_modified_by: 'Último usuario que modificó',
+};
+
+// Returns the visible value of a custom field given the task and the def.
+// Used by both the form and (later) the card / CSV / report layers.
+function readCustomFieldValue(def, task) {
+  if (!def) return undefined;
+  if (def.type === 'auto') {
+    const src = def.config?.source;
+    const fn = AUTO_FIELD_SOURCES[src];
+    return fn ? fn(task) : '';
+  }
+  const v = task?.customFields?.[def.key];
+  if (v === undefined || v === null) {
+    if (def.type === 'multiselect' || def.type === 'subitems') return [];
+    return '';
+  }
+  return v;
+}
+
+// CustomFieldsRenderer — renders a list of field defs as form inputs in
+// `edit` mode or as labeled read-only values in `view` mode. Designed to be
+// dropped inside the existing TaskForm grid (gridColumn: span 1 or span 2
+// depending on def.config.half).
+function CustomFieldsRenderer({ defs, task, onChange, mode = 'edit' }) {
+  if (!Array.isArray(defs) || !defs.length) return null;
+  const active = defs.filter(d => !d.deleted_at);
+  if (!active.length) return null;
+
+  const inpLocal = {
+    background: '#fafafa', border: '1.5px solid #e0e0e0', borderRadius: 8,
+    color: '#2d2d2d', padding: '8px 12px', fontSize: 13, width: '100%',
+    boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
+  };
+  const readonlyLocal = { ...inpLocal, background: '#f4f4f4', color: '#969696', cursor: 'default', border: '1.5px solid #e8e8e8' };
+
+  const fieldWrap = (def, children) => (
+    <div key={def.id} style={{ gridColumn: def.config?.half ? 'span 1' : 'span 2' }}>
+      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#542c9c', marginBottom: 5 }}>
+        {def.label}{def.required && def.type !== 'auto' ? ' *' : ''}
+      </label>
+      {children}
+    </div>
+  );
+
+  const setVal = (key, val) => onChange && onChange(key, val);
+
+  return (
+    <>
+      {active.map(def => {
+        const value = readCustomFieldValue(def, task);
+
+        if (def.type === 'auto') {
+          return fieldWrap(def, <input style={readonlyLocal} readOnly value={value || ''} />);
+        }
+
+        if (mode === 'view') {
+          // Compact read-only rendering for view-only contexts (detail panels).
+          let display = '';
+          if (def.type === 'multiselect' && Array.isArray(value)) display = value.join(', ');
+          else if (def.type === 'subitems' && Array.isArray(value)) display = `${value.filter(i => i.done).length}/${value.length} completados`;
+          else display = String(value ?? '');
+          return fieldWrap(def, <input style={readonlyLocal} readOnly value={display} />);
+        }
+
+        if (def.type === 'text') {
+          return fieldWrap(def, (
+            <input
+              style={inpLocal}
+              value={value || ''}
+              maxLength={def.config?.maxLength || 200}
+              placeholder={def.config?.placeholder || ''}
+              onChange={(e) => setVal(def.key, e.target.value)}
+            />
+          ));
+        }
+
+        if (def.type === 'textarea') {
+          return fieldWrap(def, (
+            <textarea
+              style={{ ...inpLocal, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }}
+              value={value || ''}
+              maxLength={def.config?.maxLength || 2000}
+              placeholder={def.config?.placeholder || ''}
+              onChange={(e) => setVal(def.key, e.target.value)}
+            />
+          ));
+        }
+
+        if (def.type === 'date') {
+          return fieldWrap(def, (
+            <input
+              type="date"
+              style={inpLocal}
+              value={value || ''}
+              onChange={(e) => setVal(def.key, e.target.value)}
+            />
+          ));
+        }
+
+        if (def.type === 'select') {
+          const options = Array.isArray(def.config?.options) ? def.config.options : [];
+          return fieldWrap(def, (
+            <select style={inpLocal} value={value || ''} onChange={(e) => setVal(def.key, e.target.value)}>
+              <option value="">— Sin valor —</option>
+              {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              {value && !options.includes(value) && <option value={value}>{value}</option>}
+            </select>
+          ));
+        }
+
+        if (def.type === 'multiselect') {
+          const options = Array.isArray(def.config?.options) ? def.config.options : [];
+          const selected = Array.isArray(value) ? value : [];
+          const max = def.config?.maxSelections || options.length || 20;
+          return fieldWrap(def, (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {options.length === 0 && (
+                <span style={{ fontSize: 12, color: '#9ca3af' }}>Sin opciones configuradas.</span>
+              )}
+              {options.map(opt => {
+                const isSel = selected.includes(opt);
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => {
+                      if (isSel) setVal(def.key, selected.filter(s => s !== opt));
+                      else if (selected.length < max) setVal(def.key, [...selected, opt]);
+                    }}
+                    style={{
+                      padding: '5px 10px', borderRadius: 999, fontSize: 12,
+                      border: isSel ? '1.5px solid #542c9c' : '1px solid #d4d4d8',
+                      background: isSel ? '#ede8f8' : '#fafafa',
+                      color: isSel ? '#542c9c' : '#525252',
+                      cursor: 'pointer', fontWeight: isSel ? 600 : 500, fontFamily: 'inherit',
+                    }}
+                  >
+                    {isSel && <span style={{ marginRight: 4 }}>✓</span>}{opt}
+                  </button>
+                );
+              })}
+              {selected.length >= max && (
+                <span style={{ fontSize: 11, color: '#9ca3af', alignSelf: 'center' }}>Máximo {max} selecciones</span>
+              )}
+            </div>
+          ));
+        }
+
+        if (def.type === 'subitems') {
+          const items = Array.isArray(value) ? value : [];
+          const max = def.config?.maxItems || 20;
+          const update = (next) => setVal(def.key, next);
+          return fieldWrap(def, (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {items.map((it, i) => (
+                // Use a stable per-item uid so editing/deleting one row
+                // does not steal focus from another.
+                <div key={it.uid || `idx-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!it.done}
+                    onChange={() => {
+                      const arr = items.map((x, idx) => idx === i ? { ...x, done: !x.done } : x);
+                      update(arr);
+                    }}
+                  />
+                  <input
+                    style={{ ...inpLocal, flex: 1 }}
+                    value={it.text || ''}
+                    onChange={(e) => {
+                      const arr = items.map((x, idx) => idx === i ? { ...x, text: e.target.value } : x);
+                      update(arr);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => update(items.filter((_, idx) => idx !== i))}
+                    style={{ background: '#fde8e8', border: '1px solid #f5c6c6', color: '#c0392b', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13 }}
+                  >✕</button>
+                </div>
+              ))}
+              {items.length < max && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const uid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                    update([...items, { uid, text: '', done: false }]);
+                  }}
+                  style={{ alignSelf: 'flex-start', background: '#f5f0ff', border: '1px dashed #a78bda', color: '#542c9c', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                >+ Agregar sub-ítem</button>
+              )}
+            </div>
+          ));
+        }
+
+        // Unknown type — render as plain readonly for forward compat.
+        return fieldWrap(def, <input style={readonlyLocal} readOnly value={typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')} />);
+      })}
+    </>
+  );
+}
+
+function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [], customFieldDefs = [] }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
   const isSuperUser = currentUser?.isSuperUser;
@@ -534,6 +755,18 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
             <textarea style={{ ...inp, minHeight: 72, resize: "vertical" }} value={task.comments} onChange={(e) => upd("comments", e.target.value)} />
           </F>
 
+          {customFieldDefs && customFieldDefs.length > 0 && (
+            <CustomFieldsRenderer
+              defs={customFieldDefs}
+              task={task}
+              mode="edit"
+              onChange={(key, val) => {
+                const nextCustom = { ...(task.customFields || {}), [key]: val };
+                upd('customFields', nextCustom);
+              }}
+            />
+          )}
+
           <F label={`Subtareas (${task.subtasks.length}/20)`}>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {task.subtasks.map((st, i) => (
@@ -702,7 +935,7 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 }
 
 // ─── BoardTab ──────────────────────────────────────────────
-function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, nextId, keyResults = [], sprints = [] }) {
+function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, nextId, keyResults = [], sprints = [], taskFieldDefs = [] }) {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
   const [taskHistory, setTaskHistory] = useState([]);
@@ -869,7 +1102,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}
         >
-          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} />
+          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} customFieldDefs={taskFieldDefs} />
         </Modal>
       )}
     </div>
@@ -1467,8 +1700,320 @@ function ConfigSection({ title, children }) {
   );
 }
 
+// ─── FieldDefEditor ────────────────────────────────────────
+// Owner-only editor for the per-project custom card schema (task_field_defs).
+// Soft-deletes on remove to preserve historical values inside tasks.custom_fields.
+const FIELD_TYPE_LABELS = {
+  text:        'Texto corto (una línea)',
+  textarea:    'Texto largo (multilínea)',
+  date:        'Fecha',
+  select:      'Lista desplegable (una opción)',
+  multiselect: 'Multi-opción (pastillas, varias)',
+  subitems:    'Sub-ítems con checkbox',
+  auto:        'Campo automático (sistema)',
+};
+
+const FIELD_TYPE_HINTS = {
+  text:        'Ej: "Cliente", "Código externo".',
+  textarea:    'Ej: "Notas extendidas", "Riesgos".',
+  date:        'Ej: "Fecha objetivo", "Vencimiento contractual".',
+  select:      'Una sola opción. Configura la lista de valores.',
+  multiselect: 'Varias opciones tipo pastilla. Configura la lista de valores.',
+  subitems:    'Lista interna con texto + checkbox (similar a las sub-tareas).',
+  auto:        'Lectura no editable. Elige qué columna del sistema reflejar.',
+};
+
+function slugifyKey(label) {
+  return String(label || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^[^a-z]+/, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 50) || 'campo';
+}
+
+function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
+  const [showNew, setShowNew] = useState(false);
+  const [draft, setDraft] = useState({ label: '', type: 'text', required: false, show_on_card: false, options: '', source: 'created_at' });
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const inpStyle = { background: '#fafafa', border: '1.5px solid #e0e0e0', borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' };
+  const labelStyle = { display: 'block', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#542c9c', marginBottom: 5 };
+  const usedKeys = new Set(defs.filter(d => !d.deleted_at).map(d => d.key));
+
+  const buildConfigFromDraft = (d) => {
+    if (d.type === 'select' || d.type === 'multiselect') {
+      const options = String(d.options || '')
+        .split(/\r?\n|,/)
+        .map(s => s.trim())
+        .filter(Boolean);
+      return { options, ...(d.type === 'multiselect' && d.maxSelections ? { maxSelections: Number(d.maxSelections) } : {}) };
+    }
+    if (d.type === 'auto') {
+      return { source: d.source || 'created_at' };
+    }
+    if (d.type === 'text' && d.maxLength) return { maxLength: Number(d.maxLength) };
+    if (d.type === 'textarea' && d.maxLength) return { maxLength: Number(d.maxLength) };
+    if (d.type === 'subitems' && d.maxItems) return { maxItems: Number(d.maxItems) };
+    return {};
+  };
+
+  const handleAdd = async () => {
+    setError('');
+    const label = draft.label.trim();
+    if (!label) { setError('Pon una etiqueta para el campo.'); return; }
+    let key = slugifyKey(label);
+    // Avoid collisions with existing active keys.
+    let n = 1;
+    let candidate = key;
+    while (usedKeys.has(candidate)) {
+      n += 1;
+      candidate = (key + '_' + n).slice(0, 50);
+    }
+    key = candidate;
+    const config = buildConfigFromDraft(draft);
+    if ((draft.type === 'select' || draft.type === 'multiselect') && (!config.options || !config.options.length)) {
+      setError('Agrega al menos una opción (una por línea o separadas por coma).'); return;
+    }
+    setBusy(true);
+    const { error: err } = await onAdd({
+      key, label, type: draft.type,
+      required: !!draft.required,
+      show_on_card: !!draft.show_on_card,
+      config,
+    });
+    setBusy(false);
+    if (err) {
+      setError(err.message || 'Error al guardar el campo.');
+      return;
+    }
+    setDraft({ label: '', type: 'text', required: false, show_on_card: false, options: '', source: 'created_at' });
+    setShowNew(false);
+  };
+
+  const startEdit = (def) => {
+    setEditingId(def.id);
+    setEditDraft({
+      label: def.label,
+      required: !!def.required,
+      show_on_card: !!def.show_on_card,
+      options: (def.config?.options || []).join('\n'),
+      source: def.config?.source || 'created_at',
+      maxLength: def.config?.maxLength || '',
+      maxItems: def.config?.maxItems || '',
+      maxSelections: def.config?.maxSelections || '',
+    });
+    setError('');
+  };
+
+  const handleSaveEdit = async (def) => {
+    if (!editDraft) return;
+    setError('');
+    const label = editDraft.label.trim();
+    if (!label) { setError('La etiqueta no puede ir vacía.'); return; }
+    const patch = {
+      label,
+      required: !!editDraft.required,
+      show_on_card: !!editDraft.show_on_card,
+      config: buildConfigFromDraft({ ...editDraft, type: def.type }),
+    };
+    setBusy(true);
+    const { error: err } = await onUpdate(def.id, patch);
+    setBusy(false);
+    if (err) { setError(err.message || 'Error al guardar.'); return; }
+    setEditingId(null);
+    setEditDraft(null);
+  };
+
+  const handleDelete = async (def) => {
+    if (!window.confirm(`¿Eliminar el campo "${def.label}"? Los valores ya capturados quedarán archivados.`)) return;
+    setBusy(true);
+    const { error: err } = await onDelete(def.id);
+    setBusy(false);
+    if (err) setError(err.message || 'Error al eliminar.');
+  };
+
+  const move = async (def, dir) => {
+    const ordered = [...defs].sort((a, b) => (a.position - b.position) || (a.id - b.id));
+    const idx = ordered.findIndex(d => d.id === def.id);
+    if (idx < 0) return;
+    const swap = dir === 'up' ? idx - 1 : idx + 1;
+    if (swap < 0 || swap >= ordered.length) return;
+    const next = [...ordered];
+    [next[idx], next[swap]] = [next[swap], next[idx]];
+    await onReorder(next.map(d => d.id));
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {defs.length === 0 ? (
+        <p style={{ fontSize: 12, color: '#888', textAlign: 'center', padding: '12px 0' }}>
+          Aún no hay campos personalizados. Agrega el primero para que aparezca en cada tarjeta.
+        </p>
+      ) : (
+        defs.map((def) => (
+          <div key={def.id} style={{ background: '#fafafa', borderRadius: 8, border: '1px solid rgba(84,44,156,0.08)', padding: '10px 12px' }}>
+            {editingId === def.id ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={labelStyle}>Etiqueta</label>
+                    <input style={inpStyle} value={editDraft.label} onChange={(e) => setEditDraft(d => ({ ...d, label: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Tipo (no editable)</label>
+                    <input style={{ ...inpStyle, background: '#f0f0f0', color: '#888' }} value={FIELD_TYPE_LABELS[def.type] || def.type} readOnly />
+                  </div>
+                </div>
+                {def.type === 'auto' && (
+                  <div>
+                    <label style={labelStyle}>Origen automático</label>
+                    <select style={inpStyle} value={editDraft.source} onChange={(e) => setEditDraft(d => ({ ...d, source: e.target.value }))}>
+                      {Object.entries(AUTO_FIELD_SOURCE_LABELS).map(([k, lbl]) => <option key={k} value={k}>{lbl}</option>)}
+                    </select>
+                  </div>
+                )}
+                {(def.type === 'select' || def.type === 'multiselect') && (
+                  <div>
+                    <label style={labelStyle}>Opciones (una por línea)</label>
+                    <textarea style={{ ...inpStyle, minHeight: 70 }} value={editDraft.options} onChange={(e) => setEditDraft(d => ({ ...d, options: e.target.value }))} />
+                  </div>
+                )}
+                {def.type === 'multiselect' && (
+                  <div>
+                    <label style={labelStyle}>Máx. selecciones (opcional)</label>
+                    <input style={inpStyle} type="number" min="1" max="50" value={editDraft.maxSelections} onChange={(e) => setEditDraft(d => ({ ...d, maxSelections: e.target.value }))} />
+                  </div>
+                )}
+                {(def.type === 'text' || def.type === 'textarea') && (
+                  <div>
+                    <label style={labelStyle}>Máx. caracteres (opcional)</label>
+                    <input style={inpStyle} type="number" min="1" value={editDraft.maxLength} onChange={(e) => setEditDraft(d => ({ ...d, maxLength: e.target.value }))} />
+                  </div>
+                )}
+                {def.type === 'subitems' && (
+                  <div>
+                    <label style={labelStyle}>Máx. sub-ítems (opcional)</label>
+                    <input style={inpStyle} type="number" min="1" max="50" value={editDraft.maxItems} onChange={(e) => setEditDraft(d => ({ ...d, maxItems: e.target.value }))} />
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 14, alignItems: 'center', fontSize: 12 }}>
+                  {def.type !== 'auto' && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#525252' }}>
+                      <input type="checkbox" checked={editDraft.required} onChange={(e) => setEditDraft(d => ({ ...d, required: e.target.checked }))} />
+                      Requerido
+                    </label>
+                  )}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#525252' }}>
+                    <input type="checkbox" checked={editDraft.show_on_card} onChange={(e) => setEditDraft(d => ({ ...d, show_on_card: e.target.checked }))} />
+                    Mostrar en tarjeta resumida
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button disabled={busy} onClick={() => handleSaveEdit(def)} style={{ background: 'linear-gradient(135deg, #ec6c04, #f07d1e)', border: 'none', color: '#fff', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                    Guardar
+                  </button>
+                  <button disabled={busy} onClick={() => { setEditingId(null); setEditDraft(null); setError(''); }} style={{ background: '#fff', border: '1px solid #e0e0e0', color: '#525252', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12 }}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#2d2d2d' }}>{def.label}</div>
+                  <div style={{ fontSize: 11, color: '#888', marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <span>🔖 {FIELD_TYPE_LABELS[def.type] || def.type}</span>
+                    <span>· clave: <code style={{ fontSize: 11 }}>{def.key}</code></span>
+                    {def.required && <span style={{ color: '#c0392b' }}>· requerido</span>}
+                    {def.show_on_card && <span style={{ color: '#149cac' }}>· en tarjeta</span>}
+                    {def.type === 'auto' && def.config?.source && <span>· origen: {AUTO_FIELD_SOURCE_LABELS[def.config.source] || def.config.source}</span>}
+                  </div>
+                </div>
+                <button onClick={() => move(def, 'up')} title="Subir" style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 12 }}>▲</button>
+                <button onClick={() => move(def, 'down')} title="Bajar" style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 12 }}>▼</button>
+                <button onClick={() => startEdit(def)} style={{ background: '#ede8f8', border: '1px solid #d4c4f0', color: '#542c9c', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Editar</button>
+                <button onClick={() => handleDelete(def)} style={{ background: '#fde8e8', border: '1px solid #f5c6c6', color: '#c0392b', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>✕</button>
+              </div>
+            )}
+          </div>
+        ))
+      )}
+
+      {showNew ? (
+        <div style={{ background: '#fff', borderRadius: 8, border: '1.5px dashed #a78bda', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div>
+              <label style={labelStyle}>Etiqueta visible</label>
+              <input style={inpStyle} value={draft.label} onChange={(e) => setDraft(d => ({ ...d, label: e.target.value }))} placeholder="Ej: Cliente, Riesgo, Próxima acción..." />
+            </div>
+            <div>
+              <label style={labelStyle}>Tipo de campo</label>
+              <select style={inpStyle} value={draft.type} onChange={(e) => setDraft(d => ({ ...d, type: e.target.value }))}>
+                {Object.entries(FIELD_TYPE_LABELS).map(([k, lbl]) => <option key={k} value={k}>{lbl}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: '#888' }}>{FIELD_TYPE_HINTS[draft.type]}</div>
+
+          {draft.type === 'auto' && (
+            <div>
+              <label style={labelStyle}>Origen automático</label>
+              <select style={inpStyle} value={draft.source} onChange={(e) => setDraft(d => ({ ...d, source: e.target.value }))}>
+                {Object.entries(AUTO_FIELD_SOURCE_LABELS).map(([k, lbl]) => <option key={k} value={k}>{lbl}</option>)}
+              </select>
+            </div>
+          )}
+          {(draft.type === 'select' || draft.type === 'multiselect') && (
+            <div>
+              <label style={labelStyle}>Opciones (una por línea o separadas por coma)</label>
+              <textarea style={{ ...inpStyle, minHeight: 70 }} value={draft.options} onChange={(e) => setDraft(d => ({ ...d, options: e.target.value }))} placeholder={'Opción A\nOpción B\nOpción C'} />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', fontSize: 12 }}>
+            {draft.type !== 'auto' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#525252' }}>
+                <input type="checkbox" checked={draft.required} onChange={(e) => setDraft(d => ({ ...d, required: e.target.checked }))} />
+                Requerido
+              </label>
+            )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#525252' }}>
+              <input type="checkbox" checked={draft.show_on_card} onChange={(e) => setDraft(d => ({ ...d, show_on_card: e.target.checked }))} />
+              Mostrar en tarjeta resumida
+            </label>
+          </div>
+
+          {error && <div style={{ fontSize: 12, color: '#c0392b' }}>{error}</div>}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button disabled={busy} onClick={handleAdd} style={{ background: 'linear-gradient(135deg, #ec6c04, #f07d1e)', border: 'none', color: '#fff', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+              {busy ? 'Guardando…' : 'Agregar campo'}
+            </button>
+            <button disabled={busy} onClick={() => { setShowNew(false); setError(''); }} style={{ background: '#fff', border: '1px solid #e0e0e0', color: '#525252', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13 }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => { setShowNew(true); setError(''); }} style={{ alignSelf: 'flex-start', background: '#f5f0ff', border: '1px dashed #a78bda', color: '#542c9c', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          + Nuevo campo personalizado
+        </button>
+      )}
+
+      {error && !showNew && <div style={{ fontSize: 12, color: '#c0392b' }}>{error}</div>}
+    </div>
+  );
+}
+
 // ─── ConfigTab ─────────────────────────────────────────────
-function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, dimensions, setDimensions, project, onChangePin }) {
+function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, dimensions, setDimensions, project, onChangePin, taskFieldDefs = [], addTaskFieldDef, updateTaskFieldDef, deleteTaskFieldDef, reorderTaskFieldDefs }) {
   const [newP, setNewP] = useState("");
   const [newI, setNewI] = useState("");
   const [newType, setNewType] = useState("");
@@ -1816,6 +2361,19 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
           Define las dimensiones que se evalúan en cada tarea y su peso relativo en el cálculo de aporte. Puedes renombrar, ajustar pesos y agregar o quitar dimensiones personalizadas.
         </div>
         <DimensionEditor dimensions={dimensions} setDimensions={setDimensions} />
+      </ConfigSection>
+
+      <ConfigSection title="🧩 Estructura de la tarjeta (campos personalizados)">
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>
+          Agrega los campos que se mostrarán en cada tarjeta de tarea: texto, fechas, listas de opciones, sub-ítems o campos automáticos (fecha de creación, última modificación, etc.). Los campos básicos del sistema (ID, título, estado, etc.) y la calculadora de aporte se mantienen siempre.
+        </div>
+        <FieldDefEditor
+          defs={taskFieldDefs}
+          onAdd={addTaskFieldDef}
+          onUpdate={updateTaskFieldDef}
+          onDelete={deleteTaskFieldDef}
+          onReorder={reorderTaskFieldDefs}
+        />
       </ConfigSection>
 
       <div style={{ background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)", border: "1px solid rgba(84,44,156,0.1)" }}>
@@ -2450,6 +3008,10 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const [tplCreating, setTplCreating] = useState(false);
   const [myProjects, setMyProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(null); // project being confirmed for deletion
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletingBusy, setDeletingBusy] = useState(false);
+  const DELETE_CONFIRM_PHRASE = 'Borrar Proyecto';
 
   useEffect(() => {
     supabase.from('project_templates').select('*').then(({ data }) => { if (data) setTemplates(data); });
@@ -2498,6 +3060,56 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const ownedCount = myProjects.filter(p => p.owner_id === authUser?.id).length;
   const atLimit = ownedCount >= projectLimit;
 
+  // Pulls the current Supabase session and returns the authenticated user id
+  // that will actually back the JWT on the next request. Falling back to
+  // `authUser` (React state) is risky: it may be stale or out of sync with
+  // the JWT, which triggers an RLS denial ("owner_id = auth.uid()").
+  const getSessionUserOrFail = async () => {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) {
+      console.error('[createProject] getSession error:', error);
+      return { error: 'No se pudo verificar tu sesión. Recarga la página e inicia sesión de nuevo.' };
+    }
+    if (!session?.user?.id) {
+      // Try a refresh once before giving up.
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (!refreshed?.session?.user?.id) {
+        return { error: 'Tu sesión expiró. Vuelve a iniciar sesión para crear proyectos.' };
+      }
+      return { user: refreshed.session.user };
+    }
+    return { user: session.user };
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!deletingProject) return;
+    if (deleteConfirmText !== DELETE_CONFIRM_PHRASE) {
+      setErr(`Debes escribir exactamente "${DELETE_CONFIRM_PHRASE}" para confirmar.`);
+      return;
+    }
+    setDeletingBusy(true);
+    setErr('');
+    const { error } = await supabase.from('projects').delete().eq('id', deletingProject.id);
+    setDeletingBusy(false);
+    if (error) {
+      console.error('[deleteProject] error:', error);
+      setErr('No se pudo borrar el proyecto: ' + (error.message || 'desconocido'));
+      return;
+    }
+    // Clean up local references so we don't try to reopen the dead project.
+    const stored = localStorage.getItem('pp_project_id');
+    if (stored && Number(stored) === Number(deletingProject.id)) {
+      localStorage.removeItem('pp_project_id');
+    }
+    const storedLast = localStorage.getItem('pp_last_project_id');
+    if (storedLast && Number(storedLast) === Number(deletingProject.id)) {
+      localStorage.removeItem('pp_last_project_id');
+    }
+    setMyProjects(prev => prev.filter(p => p.id !== deletingProject.id));
+    setDeletingProject(null);
+    setDeleteConfirmText('');
+  };
+
   const createProject = async () => {
     if (!projName.trim()) { setErr("El nombre del proyecto es requerido."); return; }
     if (!projPin || projPin.length < 4) { setErr("La clave debe tener al menos 4 caracteres."); return; }
@@ -2506,18 +3118,28 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
       return;
     }
     setCreating(true); setErr("");
+    const session = await getSessionUserOrFail();
+    if (session.error) { setErr(session.error); setCreating(false); return; }
+    const ownerId = session.user.id;
     const config = {
       pin: projPin,
       dimensions: DEFAULT_DIMENSIONS,
     };
-    const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config, owner_id: authUser?.id || null }).select().single();
-    if (error || !data) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setCreating(false); return; }
-    if (authUser) {
-      await supabase.from('project_members').upsert(
-        { project_id: data.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email, user_id: authUser.id },
-        { onConflict: 'project_id,email' }
-      );
+    const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config, owner_id: ownerId }).select().single();
+    if (error || !data) {
+      console.error('[createProject] insert error:', error);
+      const msg = error?.message || 'desconocido';
+      const isRls = error?.code === '42501' || /row-level security/i.test(msg);
+      setErr(isRls
+        ? 'Tu sesión no coincide con el dueño esperado. Cierra sesión y vuelve a entrar.'
+        : 'Error creando proyecto: ' + msg);
+      setCreating(false);
+      return;
     }
+    await supabase.from('project_members').upsert(
+      { project_id: data.id, email: session.user.email, name: session.user.user_metadata?.full_name || session.user.email, user_id: ownerId },
+      { onConflict: 'project_id,email' }
+    );
     localStorage.setItem('pp_project_id', String(data.id));
     onProjectLoaded(data);
   };
@@ -2530,19 +3152,29 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
       return;
     }
     setTplCreating(true); setErr("");
+    const session = await getSessionUserOrFail();
+    if (session.error) { setErr(session.error); setTplCreating(false); return; }
+    const ownerId = session.user.id;
     const tpl = selectedTemplate;
     const config = {
       pin: tplPin,
       dimensions: tpl.config?.dimensions || DEFAULT_DIMENSIONS,
     };
-    const { data: proj, error } = await supabase.from('projects').insert({ name: tpl.name, description: tpl.description, config, owner_id: authUser?.id || null }).select().single();
-    if (error || !proj) { setErr("Error creando proyecto: " + (error?.message || 'unknown')); setTplCreating(false); return; }
-    if (authUser) {
-      await supabase.from('project_members').upsert(
-        { project_id: proj.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email, user_id: authUser.id },
-        { onConflict: 'project_id,email' }
-      );
+    const { data: proj, error } = await supabase.from('projects').insert({ name: tpl.name, description: tpl.description, config, owner_id: ownerId }).select().single();
+    if (error || !proj) {
+      console.error('[createFromTemplate] insert error:', error);
+      const msg = error?.message || 'desconocido';
+      const isRls = error?.code === '42501' || /row-level security/i.test(msg);
+      setErr(isRls
+        ? 'Tu sesión no coincide con el dueño esperado. Cierra sesión y vuelve a entrar.'
+        : 'Error creando proyecto: ' + msg);
+      setTplCreating(false);
+      return;
     }
+    await supabase.from('project_members').upsert(
+      { project_id: proj.id, email: session.user.email, name: session.user.user_metadata?.full_name || session.user.email, user_id: ownerId },
+      { onConflict: 'project_id,email' }
+    );
     // Insert sample tasks
     const taskSchema = Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : [];
     if (taskSchema.length) {
@@ -2602,15 +3234,28 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
           <div style={{ marginBottom: 24 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: 3, marginBottom: 10, textAlign: 'center' }}>Mis proyectos</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {myProjects.map(proj => (
-                <button key={proj.id}
-                  onClick={() => { localStorage.setItem('pp_project_id', String(proj.id)); onProjectLoaded(proj); }}
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '14px 18px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', width: '100%', fontFamily: 'inherit' }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: proj.description ? 3 : 0 }}>{proj.name}</div>
-                  {proj.description && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>{proj.description}</div>}
-                  {proj.owner_id === authUser.id && <div style={{ fontSize: 10, color: '#ec6c04', marginTop: 5, fontWeight: 700, letterSpacing: 0.5 }}>PROPIETARIO</div>}
-                </button>
-              ))}
+              {myProjects.map(proj => {
+                const isOwner = proj.owner_id === authUser.id;
+                return (
+                  <div key={proj.id} style={{ position: 'relative', display: 'flex', alignItems: 'stretch', gap: 0 }}>
+                    <button
+                      onClick={() => { localStorage.setItem('pp_project_id', String(proj.id)); onProjectLoaded(proj); }}
+                      style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRight: isOwner ? 'none' : '1px solid rgba(255,255,255,0.12)', borderRadius: isOwner ? '12px 0 0 12px' : 12, padding: '14px 18px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', fontFamily: 'inherit', color: 'inherit' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: proj.description ? 3 : 0 }}>{proj.name}</div>
+                      {proj.description && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>{proj.description}</div>}
+                      {isOwner && <div style={{ fontSize: 10, color: '#ec6c04', marginTop: 5, fontWeight: 700, letterSpacing: 0.5 }}>PROPIETARIO</div>}
+                    </button>
+                    {isOwner && (
+                      <button
+                        title="Borrar proyecto"
+                        onClick={(e) => { e.stopPropagation(); setDeletingProject(proj); setDeleteConfirmText(''); setErr(''); }}
+                        style={{ background: 'rgba(220,38,38,0.15)', border: '1px solid rgba(220,38,38,0.3)', borderLeft: 'none', borderRadius: '0 12px 12px 0', color: '#f87171', cursor: 'pointer', padding: '0 14px', fontSize: 16, fontFamily: 'inherit', transition: 'all 0.2s' }}>
+                        🗑
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div style={{ textAlign: 'center', margin: '16px 0 4px', fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>— o crea / únete a otro proyecto —</div>
           </div>
@@ -2730,6 +3375,46 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
           PRODUCTIVITY-PLUS · GESTIÓN ESTRATÉGICA
         </div>
       </div>
+
+      {/* ── Confirm-delete-project modal ─────────────────── */}
+      {deletingProject && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
+             onClick={() => { if (!deletingBusy) { setDeletingProject(null); setDeleteConfirmText(''); setErr(''); } }}>
+          <div onClick={(e) => e.stopPropagation()}
+               style={{ background: 'rgba(20,18,28,0.98)', border: '1px solid rgba(220,38,38,0.4)', borderRadius: 16, padding: '28px 28px 24px', maxWidth: 460, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.7)' }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: '#f87171', marginBottom: 8, letterSpacing: 0.3 }}>⚠ Borrar proyecto</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 1.55, marginBottom: 14 }}>
+              Vas a borrar <strong style={{ color: '#fff' }}>"{deletingProject.name}"</strong>. Se eliminarán para siempre todas sus tareas, indicadores, OKRs, sprints, plantillas de campos, historial y miembros. <strong style={{ color: '#fcd34d' }}>Esta acción no se puede deshacer.</strong>
+            </div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+              Escribe <code style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: 4, color: '#fcd34d' }}>{DELETE_CONFIRM_PHRASE}</code> para confirmar
+            </label>
+            <input
+              autoFocus
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              disabled={deletingBusy}
+              placeholder={DELETE_CONFIRM_PHRASE}
+              style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.08)', border: '1.5px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '10px 12px', fontSize: 13, color: '#fff', outline: 'none', fontFamily: 'inherit', marginBottom: 12 }}
+            />
+            {err && <div style={{ fontSize: 12, color: '#f87171', marginBottom: 10 }}>{err}</div>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                disabled={deletingBusy}
+                onClick={() => { setDeletingProject(null); setDeleteConfirmText(''); setErr(''); }}
+                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '9px 18px', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
+                Cancelar
+              </button>
+              <button
+                disabled={deletingBusy || deleteConfirmText !== DELETE_CONFIRM_PHRASE}
+                onClick={confirmDeleteProject}
+                style={{ background: deleteConfirmText === DELETE_CONFIRM_PHRASE && !deletingBusy ? 'linear-gradient(135deg,#dc2626,#ef4444)' : 'rgba(220,38,38,0.3)', border: 'none', borderRadius: 8, padding: '9px 18px', color: '#fff', cursor: deleteConfirmText === DELETE_CONFIRM_PHRASE && !deletingBusy ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}>
+                {deletingBusy ? 'Borrando…' : 'Borrar definitivamente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3649,6 +4334,10 @@ const dbToTask = (r) => ({
   dimensionValues: r.dimension_values || {},
   krId: r.kr_id || null,
   sprintId: r.sprint_id || null,
+  customFields: (r.custom_fields && typeof r.custom_fields === 'object' && !Array.isArray(r.custom_fields)) ? r.custom_fields : {},
+  updatedAt: r.updated_at || null,
+  closedAt: r.closed_at || null,
+  lastModifiedBy: r.last_modified_by || '',
 });
 
 const taskToDb = (t) => ({
@@ -3678,6 +4367,9 @@ const taskToDb = (t) => ({
   dimension_values: t.dimensionValues || {},
   kr_id: t.krId || null,
   sprint_id: t.sprintId || null,
+  custom_fields: (t.customFields && typeof t.customFields === 'object' && !Array.isArray(t.customFields)) ? t.customFields : {},
+  last_modified_by: t.lastModifiedBy || '',
+  // updated_at / closed_at are managed by the DB trigger set_task_auto_fields.
 });
 
 export default function App() {
@@ -3704,6 +4396,10 @@ export default function App() {
   const [okrs, setOkrs] = useState([]);
   const [keyResults, setKeyResults] = useState([]);
   const [sprints, setSprints] = useState([]);
+  const [taskFieldDefs, setTaskFieldDefs] = useState([]);
+  // false when migration 008 is not yet applied (custom_fields column / table
+  // missing). Used to gracefully degrade taskToDb / addTaskFieldDef.
+  const [hasCustomFieldsSchema, setHasCustomFieldsSchema] = useState(true);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [dismissedNotifs, setDismissedNotifs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('pp_dismissed_notifs') || '[]'); } catch { return []; }
@@ -3722,6 +4418,7 @@ export default function App() {
         { data: configData },
         { data: okrsData },
         { data: sprintsData },
+        { data: fieldDefsData, error: fieldDefsErr },
       ] = await Promise.all([
         q('tasks').order('id'),
         q('participants').order('id'),
@@ -3730,6 +4427,9 @@ export default function App() {
         q('app_config'),
         pid ? supabase.from('okrs').select('*').eq('project_id', pid).order('year').order('quarter') : Promise.resolve({ data: [] }),
         pid ? supabase.from('sprints').select('*').eq('project_id', pid).order('created_at') : Promise.resolve({ data: [] }),
+        pid
+          ? supabase.from('task_field_defs').select('*').eq('project_id', pid).is('deleted_at', null).order('position', { ascending: true }).order('id', { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       if (tasksData) setTasks(tasksData.map(dbToTask));
@@ -3752,6 +4452,21 @@ export default function App() {
         }
       }
       if (sprintsData) setSprints(sprintsData);
+      // task_field_defs may fail silently on old DBs (pre-migration 008);
+      // treat absent as "no custom fields configured" so the app still works.
+      if (fieldDefsErr) {
+        if (fieldDefsErr.code === '42P01') {
+          console.warn('task_field_defs table not found — apply migration 008 to enable custom fields.');
+          setHasCustomFieldsSchema(false);
+        } else {
+          console.error('Error cargando task_field_defs:', fieldDefsErr);
+          setHasCustomFieldsSchema(true);
+        }
+        setTaskFieldDefs([]);
+      } else {
+        setHasCustomFieldsSchema(true);
+        setTaskFieldDefs(Array.isArray(fieldDefsData) ? fieldDefsData : []);
+      }
 
       // Load dimensions and pin from project config
       const p = proj || project;
@@ -3916,6 +4631,29 @@ export default function App() {
         if (key === 'currentUserId') setCurrentUserId(value === null ? null : Number(value));
       })
 
+      // TASK_FIELD_DEFS — schema of custom card fields per project.
+      // Treats soft-deleted rows (deleted_at NOT NULL) as removals so the
+      // UI stays in sync without an extra query.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_field_defs', filter: projectFilter }, (payload) => {
+        const row = payload.new;
+        if (row.deleted_at) return;
+        setTaskFieldDefs(prev => {
+          if (prev.find(d => d.id === row.id)) return prev;
+          return [...prev, row].sort((a, b) => (a.position - b.position) || (a.id - b.id));
+        });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_field_defs', filter: projectFilter }, (payload) => {
+        const row = payload.new;
+        setTaskFieldDefs(prev => {
+          const without = prev.filter(d => d.id !== row.id);
+          if (row.deleted_at) return without;
+          return [...without, row].sort((a, b) => (a.position - b.position) || (a.id - b.id));
+        });
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'task_field_defs', filter: projectFilter }, (payload) => {
+        setTaskFieldDefs(prev => prev.filter(d => d.id !== payload.old.id));
+      })
+
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -4019,6 +4757,12 @@ export default function App() {
     if (Array.isArray(dimensions) && dimensions.length) {
       dbTask.aporte_snapshot = calcAporte(task, dimensions);
     }
+    // Strip fields added by migration 008 when the schema is not yet applied
+    // so the insert does not fail with 42703 on an older DB.
+    if (!hasCustomFieldsSchema) {
+      delete dbTask.custom_fields;
+      delete dbTask.last_modified_by;
+    }
     const { error } = await supabase.from('tasks').insert(dbTask);
     if (!error) {
       setTasks(prev => [...prev, task]);
@@ -4032,9 +4776,18 @@ export default function App() {
     if (task.status === 'Finalizada' && !task.finalizedAt) {
       task = { ...task, finalizedAt: getColombiaNow() };
     }
+    // Stamp the editor for the "last modified by" auto field. Server-side
+    // updated_at / closed_at are handled by the set_task_auto_fields trigger.
+    if (activeUser?.name) {
+      task = { ...task, lastModifiedBy: activeUser.name };
+    }
     const dbTask = { ...taskToDb(task) };
     if (Array.isArray(dimensions) && dimensions.length) {
       dbTask.aporte_snapshot = calcAporte(task, dimensions);
+    }
+    if (!hasCustomFieldsSchema) {
+      delete dbTask.custom_fields;
+      delete dbTask.last_modified_by;
     }
     let updateQuery = supabase.from('tasks').update(dbTask).eq('id', task.id);
     if (projectId) updateQuery = updateQuery.eq('project_id', projectId);
@@ -4049,6 +4802,36 @@ export default function App() {
             { field: 'responsible', oldV: oldTask.responsible, newV: task.responsible },
             { field: 'progressPercent', oldV: String(oldTask.progressPercent), newV: String(task.progressPercent) },
           ];
+          // Diff custom fields too. We only audit keys present in either
+          // old or new map — defs that didn't exist when the row was written
+          // still surface here if the value differs.
+          const oldCustom = oldTask.customFields || {};
+          const newCustom = task.customFields || {};
+          const allCustomKeys = new Set([...Object.keys(oldCustom), ...Object.keys(newCustom)]);
+          // Stable serializer: sort object keys recursively so that two
+          // semantically equal objects produce the same string, avoiding
+          // phantom diffs in task_history.
+          const stableStringify = (v) => {
+            if (v === undefined || v === null) return '';
+            if (Array.isArray(v)) {
+              try { return '[' + v.map(stableStringify).join(',') + ']'; } catch { return String(v); }
+            }
+            if (typeof v === 'object') {
+              try {
+                const keys = Object.keys(v).sort();
+                return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+              } catch { return String(v); }
+            }
+            return JSON.stringify(v);
+          };
+          const stringify = stableStringify;
+          allCustomKeys.forEach((k) => {
+            const ov = stringify(oldCustom[k]);
+            const nv = stringify(newCustom[k]);
+            if (ov !== nv) {
+              tracked.push({ field: `customField:${k}`, oldV: ov, newV: nv });
+            }
+          });
           for (const f of tracked) {
             if (f.oldV !== f.newV) {
               supabase.from('task_history').insert({ task_id: task.id, project_id: projectId, changed_by: activeUser.name, field_name: f.field, old_value: f.oldV, new_value: f.newV }).then(() => {});
@@ -4124,6 +4907,103 @@ export default function App() {
       const newConfig = { ...(project.config || {}), dimensions: dims };
       await supabase.from('projects').update({ config: newConfig }).eq('id', projectId);
       setProject(prev => ({ ...prev, config: newConfig }));
+    }
+  };
+
+  // ── Custom field defs CRUD ──────────────────────────────────
+  // Realtime keeps `taskFieldDefs` in sync, so each helper also returns the
+  // server row so callers (e.g. form modal) can react immediately.
+  const addTaskFieldDef = async (payload) => {
+    if (!projectId) return { error: new Error('No project selected') };
+    let key = String(payload.key || '').trim();
+    // Resolve collisions against ALL keys ever used in this project,
+    // including soft-deleted ones, to avoid mixing archived historical values
+    // (stored in tasks.custom_fields[key]) with new ones under the same key.
+    if (key) {
+      const { data: allKeys } = await supabase
+        .from('task_field_defs')
+        .select('key')
+        .eq('project_id', projectId);
+      const used = new Set((allKeys || []).map(r => r.key));
+      if (used.has(key)) {
+        const base = key.slice(0, 47);
+        let n = 2;
+        while (used.has(`${base}_${n}`) && n < 1000) n += 1;
+        key = `${base}_${n}`;
+      }
+    }
+    const insertPayload = {
+      project_id: projectId,
+      key,
+      label: String(payload.label || '').trim(),
+      type: payload.type,
+      config: payload.config || {},
+      position: typeof payload.position === 'number' ? payload.position : taskFieldDefs.length,
+      required: !!payload.required,
+      show_on_card: !!payload.show_on_card,
+    };
+    const { data, error } = await supabase.from('task_field_defs').insert(insertPayload).select().single();
+    if (!error && data) {
+      setTaskFieldDefs(prev => {
+        if (prev.find(d => d.id === data.id)) return prev;
+        return [...prev, data].sort((a, b) => (a.position - b.position) || (a.id - b.id));
+      });
+    }
+    return { data, error };
+  };
+
+  const updateTaskFieldDefById = async (id, patch) => {
+    if (!projectId) return { error: new Error('No project selected') };
+    const safePatch = { ...patch };
+    // Never let the client move a def to another project or undelete via update.
+    delete safePatch.project_id;
+    delete safePatch.id;
+    const { data, error } = await supabase
+      .from('task_field_defs')
+      .update(safePatch)
+      .eq('id', id)
+      .eq('project_id', projectId)
+      .select()
+      .single();
+    if (!error && data) {
+      setTaskFieldDefs(prev => prev.map(d => d.id === id ? data : d).sort((a, b) => (a.position - b.position) || (a.id - b.id)));
+    }
+    return { data, error };
+  };
+
+  const deleteTaskFieldDef = async (id) => {
+    if (!projectId) return { error: new Error('No project selected') };
+    // Soft delete to preserve historical values stored in tasks.custom_fields.
+    const { error } = await supabase
+      .from('task_field_defs')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('project_id', projectId);
+    if (!error) {
+      setTaskFieldDefs(prev => prev.filter(d => d.id !== id));
+    }
+    return { error };
+  };
+
+  const reorderTaskFieldDefs = async (orderedIds) => {
+    if (!projectId) return;
+    // Optimistic local reorder
+    setTaskFieldDefs(prev => {
+      const map = new Map(prev.map(d => [d.id, d]));
+      return orderedIds
+        .map((id, idx) => map.get(id) ? { ...map.get(id), position: idx } : null)
+        .filter(Boolean);
+    });
+    // Persist in parallel to minimise the realtime "list dancing" effect
+    // (each UPDATE fires a separate event; doing them at once batches the
+    // perceived re-render). For larger schemas consider an RPC.
+    const ops = orderedIds.map((id, i) =>
+      supabase.from('task_field_defs').update({ position: i }).eq('id', id).eq('project_id', projectId)
+    );
+    const results = await Promise.all(ops);
+    const firstErr = results.find(r => r.error);
+    if (firstErr) {
+      console.error('Error reordenando campos:', firstErr.error);
     }
   };
 
@@ -4476,7 +5356,7 @@ export default function App() {
 
       <div style={{ padding: "20px 20px 40px" }}>
         {activeTab === "board" && (
-          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} projectId={projectId} nextId={nextId} keyResults={keyResults} sprints={sprints} />
+          <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} projectId={projectId} nextId={nextId} keyResults={keyResults} sprints={sprints} taskFieldDefs={taskFieldDefs} />
         )}
         {activeTab === "gantt" && <GanttTab tasks={tasks} participants={participants} indicators={indicators} taskTypes={taskTypes} />}
         {activeTab === "metrics" && <MetricsTab tasks={tasks} participants={participants} taskTypes={taskTypes} />}
@@ -4506,6 +5386,11 @@ export default function App() {
               dimensions={dimensions} setDimensions={saveDimensions}
               project={project}
               onChangePin={saveProjectPin}
+              taskFieldDefs={taskFieldDefs}
+              addTaskFieldDef={addTaskFieldDef}
+              updateTaskFieldDef={updateTaskFieldDefById}
+              deleteTaskFieldDef={deleteTaskFieldDef}
+              reorderTaskFieldDefs={reorderTaskFieldDefs}
             />
           ) : (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", minHeight:340, gap:16 }}>

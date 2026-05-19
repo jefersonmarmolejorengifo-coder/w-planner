@@ -3129,13 +3129,22 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
       pin: projPin,
       dimensions: DEFAULT_DIMENSIONS,
     };
+    console.info('[createProject] sending insert', { ownerIdSent: ownerId, sessionUserId: session.user.id, sessionEmail: session.user.email });
     const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config, owner_id: ownerId }).select().single();
     if (error || !data) {
-      console.error('[createProject] insert error:', error);
+      console.error('[createProject] insert error', {
+        code: error?.code,
+        status: error?.status,
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        ownerIdSent: ownerId,
+        sessionUserId: session.user.id,
+      });
       const msg = error?.message || 'desconocido';
-      const isRls = error?.code === '42501' || /row-level security/i.test(msg);
+      const isRls = error?.code === '42501' || /row-level security/i.test(msg) || error?.status === 403;
       setErr(isRls
-        ? 'Tu sesión no coincide con el dueño esperado. Cierra sesión y vuelve a entrar.'
+        ? `RLS denegó la inserción. Detalles en consola. (code=${error?.code || error?.status || '?'})`
         : 'Error creando proyecto: ' + msg);
       setCreating(false);
       return;

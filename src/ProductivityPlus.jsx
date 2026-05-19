@@ -3129,31 +3129,37 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
       pin: projPin,
       dimensions: DEFAULT_DIMENSIONS,
     };
-    const payload = { name: projName.trim(), description: projDesc.trim(), config, owner_id: ownerId };
-    console.info('[createProject] sending insert', { ownerIdSent: ownerId, sessionUserId: session.user.id, sessionEmail: session.user.email });
-    let { data, error } = await supabase.from('projects').insert(payload).select().single();
+    console.info('[createProject] sending RPC create_project_secure', { sessionUserId: session.user.id, sessionEmail: session.user.email });
 
-    // Recover from stale-JWT 42501: if the client thinks owner_id and
-    // session.user.id match but Postgres still says RLS denied, the
-    // access_token sent on the wire is likely outdated. Force a refresh
-    // and retry once.
-    if (error && (error.code === '42501' || /row-level security/i.test(error.message || ''))) {
-      console.warn('[createProject] 42501 with matching ids → forcing token refresh and retrying once');
-      const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
-      if (!refreshErr && refreshed?.session?.user?.id === ownerId) {
-        const retry = await supabase.from('projects').insert(payload).select().single();
-        data = retry.data; error = retry.error;
-      } else if (!refreshErr && refreshed?.session?.user?.id && refreshed.session.user.id !== ownerId) {
-        // After refresh the JWT belongs to a different user → recompute payload.
-        const newOwnerId = refreshed.session.user.id;
-        console.warn('[createProject] refreshed JWT belongs to a different user, re-sending with', newOwnerId);
-        const retry = await supabase.from('projects').insert({ ...payload, owner_id: newOwnerId }).select().single();
-        data = retry.data; error = retry.error;
-      }
+    // Preferred path: server-side RPC that derives owner_id from auth.uid().
+    // Removes any room for client/server JWT desync to cause an RLS denial.
+    let data = null;
+    let error = null;
+    const rpc = await supabase.rpc('create_project_secure', {
+      p_name: projName.trim(),
+      p_description: projDesc.trim(),
+      p_config: config,
+    });
+    if (!rpc.error && rpc.data) {
+      data = rpc.data;
+    } else if (rpc.error?.code === '42883' || /function .* does not exist/i.test(rpc.error?.message || '')) {
+      // Migration 009 not applied yet — fall back to the legacy direct insert.
+      console.warn('[createProject] RPC not found, falling back to direct insert');
+      const payload = { name: projName.trim(), description: projDesc.trim(), config, owner_id: ownerId };
+      const ins = await supabase.from('projects').insert(payload).select().single();
+      data = ins.data; error = ins.error;
+    } else {
+      error = rpc.error;
     }
 
     if (error || !data) {
-      console.error('[createProject] insert error', {
+      // Server-side observability: ask the DB what it sees in the JWT.
+      let diag = null;
+      try {
+        const d = await supabase.rpc('whoami_diag');
+        diag = d.error ? { rpcError: d.error.message } : d.data;
+      } catch (e) { diag = { caught: String(e) }; }
+      console.error('[createProject] failed', {
         code: error?.code,
         status: error?.status,
         message: error?.message,
@@ -3161,12 +3167,16 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
         hint: error?.hint,
         ownerIdSent: ownerId,
         sessionUserId: session.user.id,
+        serverWhoami: diag,
       });
       const msg = error?.message || 'desconocido';
+      const isAuthNull = /auth\.uid is NULL/i.test(msg) || diag?.uid === null;
       const isRls = error?.code === '42501' || /row-level security/i.test(msg) || error?.status === 403;
-      setErr(isRls
-        ? 'Tu sesión está vencida o desincronizada. Cierra sesión y vuelve a entrar.'
-        : 'Error creando proyecto: ' + msg);
+      setErr(isAuthNull
+        ? 'El servidor no reconoce tu sesión (auth.uid es null). Cierra sesión y vuelve a entrar.'
+        : isRls
+          ? 'Permiso denegado por el servidor. Revisa la consola y cierra/abre sesión.'
+          : 'Error creando proyecto: ' + msg);
       setCreating(false);
       return;
     }

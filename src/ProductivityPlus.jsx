@@ -3129,8 +3129,29 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
       pin: projPin,
       dimensions: DEFAULT_DIMENSIONS,
     };
+    const payload = { name: projName.trim(), description: projDesc.trim(), config, owner_id: ownerId };
     console.info('[createProject] sending insert', { ownerIdSent: ownerId, sessionUserId: session.user.id, sessionEmail: session.user.email });
-    const { data, error } = await supabase.from('projects').insert({ name: projName.trim(), description: projDesc.trim(), config, owner_id: ownerId }).select().single();
+    let { data, error } = await supabase.from('projects').insert(payload).select().single();
+
+    // Recover from stale-JWT 42501: if the client thinks owner_id and
+    // session.user.id match but Postgres still says RLS denied, the
+    // access_token sent on the wire is likely outdated. Force a refresh
+    // and retry once.
+    if (error && (error.code === '42501' || /row-level security/i.test(error.message || ''))) {
+      console.warn('[createProject] 42501 with matching ids → forcing token refresh and retrying once');
+      const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+      if (!refreshErr && refreshed?.session?.user?.id === ownerId) {
+        const retry = await supabase.from('projects').insert(payload).select().single();
+        data = retry.data; error = retry.error;
+      } else if (!refreshErr && refreshed?.session?.user?.id && refreshed.session.user.id !== ownerId) {
+        // After refresh the JWT belongs to a different user → recompute payload.
+        const newOwnerId = refreshed.session.user.id;
+        console.warn('[createProject] refreshed JWT belongs to a different user, re-sending with', newOwnerId);
+        const retry = await supabase.from('projects').insert({ ...payload, owner_id: newOwnerId }).select().single();
+        data = retry.data; error = retry.error;
+      }
+    }
+
     if (error || !data) {
       console.error('[createProject] insert error', {
         code: error?.code,
@@ -3144,7 +3165,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
       const msg = error?.message || 'desconocido';
       const isRls = error?.code === '42501' || /row-level security/i.test(msg) || error?.status === 403;
       setErr(isRls
-        ? `RLS denegó la inserción. Detalles en consola. (code=${error?.code || error?.status || '?'})`
+        ? 'Tu sesión está vencida o desincronizada. Cierra sesión y vuelve a entrar.'
         : 'Error creando proyecto: ' + msg);
       setCreating(false);
       return;

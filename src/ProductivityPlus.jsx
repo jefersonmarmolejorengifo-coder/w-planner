@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { supabase } from './supabaseClient';
 
 const getAuthJsonHeaders = async () => {
@@ -821,7 +821,38 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
 }
 
 // ─── TaskCard ──────────────────────────────────────────────
-function TaskCard({ task, onClick }) {
+// Compact, card-friendly rendering for a custom field value.
+function formatCardCustomField(def, task) {
+  const v = readCustomFieldValue(def, task);
+  if (v === undefined || v === null || v === '') return null;
+  if (def.type === 'multiselect' && Array.isArray(v)) {
+    if (!v.length) return null;
+    return v.join(', ');
+  }
+  if (def.type === 'subitems' && Array.isArray(v)) {
+    if (!v.length) return null;
+    const done = v.filter(i => i.done).length;
+    return `☑ ${done}/${v.length}`;
+  }
+  if (def.type === 'date' && typeof v === 'string') return v;
+  if (def.type === 'textarea') {
+    const s = String(v);
+    return s.length > 60 ? s.slice(0, 60) + '…' : s;
+  }
+  return String(v);
+}
+
+// Wrapper that binds a stable click handler per task so the memoized
+// TaskCard doesn't re-render when the parent recreates its arrow.
+const TaskCardWithClick = memo(function TaskCardWithClick({ task, openEdit, customFieldDefs }) {
+  const onClick = useMemo(() => () => openEdit(task), [openEdit, task]);
+  return <TaskCard task={task} onClick={onClick} customFieldDefs={customFieldDefs} />;
+});
+
+// Memoized: avoids re-rendering every card when an unrelated piece of state
+// changes (kanban with hundreds of cards × dozens of defs would otherwise
+// run formatCardCustomField on every keystroke).
+const TaskCard = memo(function TaskCard({ task, onClick, customFieldDefs = [] }) {
   const sc = STATUS_COLORS[task.status] || "#888";
   const sl = STATUS_LIGHT[task.status] || "#eee";
   const prog = task.type === "Otra" ? null : task.progressPercent;
@@ -880,9 +911,30 @@ function TaskCard({ task, onClick }) {
           ☑ {task.subtasks.filter(s => s.done).length}/{task.subtasks.length} subtareas
         </div>
       )}
+      {(() => {
+        // customFieldDefs is already filtered to "shown" by BoardTab (see
+        // useMemo there). Defensive double-check keeps this safe if the
+        // component is reused elsewhere.
+        const shown = (customFieldDefs || []).filter(d => d.show_on_card && !d.deleted_at);
+        if (!shown.length) return null;
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #f0e8fa' }}>
+            {shown.map(def => {
+              const v = formatCardCustomField(def, task);
+              if (v === null) return null;
+              return (
+                <div key={def.id} style={{ fontSize: 10, color: '#542c9c', display: 'flex', gap: 6, lineHeight: 1.3 }}>
+                  <span style={{ fontWeight: 600, opacity: 0.7, flexShrink: 0 }}>{def.label}:</span>
+                  <span style={{ color: '#2d2d2d', wordBreak: 'break-word' }}>{v}</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
     </div>
   );
-}
+});
 
 // ─── Modal ─────────────────────────────────────────────────
 function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guardar" }) {
@@ -1042,6 +1094,13 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
     return g;
   }, [filtered]);
 
+  // Pre-filter defs marked as visible on summary cards. Stable identity
+  // so React.memo on TaskCard avoids re-rendering on unrelated state changes.
+  const shownTaskFieldDefs = useMemo(
+    () => (taskFieldDefs || []).filter(d => d.show_on_card && !d.deleted_at),
+    [taskFieldDefs]
+  );
+
   const ss = { background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-secondary)", borderRadius: 6, padding: "6px 8px", fontSize: 12, cursor: "pointer", outline: "none", fontFamily: "inherit" };
   const si = { ...ss, color: "var(--color-text-primary)" };
 
@@ -1089,7 +1148,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
               </span>
             </div>
             {(grouped[status] || []).map((task) => (
-              <TaskCard key={task.id} task={task} onClick={() => openEdit(task)} />
+              <TaskCardWithClick key={task.id} task={task} openEdit={openEdit} customFieldDefs={shownTaskFieldDefs} />
             ))}
           </div>
         ))}
@@ -5063,30 +5122,67 @@ export default function App() {
 
   const exportCSV = () => {
     if (tasks.length === 0) { alert("No hay tareas para exportar."); return; }
-    const data = tasks.map((t) => ({
-      "ID": t.id,
-      "Valor de Aporte": t.aporteSnapshot ?? "—",
-      "Fecha de creación": t.createdAt,
-      "Indicador que impacta": t.indicator,
-      "Título": t.title,
-      "Tipo": t.type,
-      "Estado": t.status,
-      "Validación cierre": t.validationClose || "",
-      "Fecha de inicio": t.startDate,
-      "Fecha de fin": t.endDate,
-      "Tiempo estimado (★)": t.estimatedTime,
-      "Dificultad estimada (★)": t.difficulty,
-      "Valor estratégico (★)": t.strategicValue,
-      "Avance condicionado ext.": t.extProgress1,
-      "Avance condicionado int.": t.extProgress2,
-      "Entrega esperada": t.expectedDelivery,
-      "Responsable": t.responsible,
-      "Comentarios": t.comments,
-      "Porcentaje de avance": `${Number(t.progressPercent || 0).toFixed(1)}%`,
-      "Subtareas": t.subtasks.map(s => (s.done ? "✓ " : "○ ") + (s.text || s)).join(" | "),
-      "Tarea dependiente (ID)": t.dependentTask || "",
-    }));
-    const headers = Object.keys(data[0]);
+    // Compute custom-field columns from the active defs so each tenant gets
+    // exactly its schema. Soft-deleted defs are skipped; their values stay
+    // in tasks.custom_fields for audit but aren't exported.
+    // Skip type='auto' defs: their underlying columns (created/updated/closed/
+    // last_modified_by) are already covered by builtin headers, so re-exporting
+    // them would duplicate columns in Excel.
+    const activeDefs = (taskFieldDefs || []).filter(d => !d.deleted_at && d.type !== 'auto');
+    const formatForCsv = (def, t) => {
+      const v = readCustomFieldValue(def, t);
+      if (v === undefined || v === null) return '';
+      if (def.type === 'multiselect') return Array.isArray(v) ? v.join(' | ') : String(v);
+      if (def.type === 'subitems') return Array.isArray(v) ? v.map(i => (i.done ? '✓ ' : '○ ') + (i.text || '')).join(' | ') : '';
+      return String(v);
+    };
+    const data = tasks.map((t) => {
+      const row = {
+        "ID": t.id,
+        "Valor de Aporte": t.aporteSnapshot ?? "—",
+        "Fecha de creación": t.createdAt,
+        "Indicador que impacta": t.indicator,
+        "Título": t.title,
+        "Tipo": t.type,
+        "Estado": t.status,
+        "Validación cierre": t.validationClose || "",
+        "Fecha de inicio": t.startDate,
+        "Fecha de fin": t.endDate,
+        "Tiempo estimado (★)": t.estimatedTime,
+        "Dificultad estimada (★)": t.difficulty,
+        "Valor estratégico (★)": t.strategicValue,
+        "Avance condicionado ext.": t.extProgress1,
+        "Avance condicionado int.": t.extProgress2,
+        "Entrega esperada": t.expectedDelivery,
+        "Responsable": t.responsible,
+        "Comentarios": t.comments,
+        "Porcentaje de avance": `${Number(t.progressPercent || 0).toFixed(1)}%`,
+        "Subtareas": t.subtasks.map(s => (s.done ? "✓ " : "○ ") + (s.text || s)).join(" | "),
+        "Tarea dependiente (ID)": t.dependentTask || "",
+      };
+      // Append one column per active custom field. Label collisions with
+      // builtin headers OR with another custom field get the [key] suffix,
+      // which is guaranteed unique by the DB unique index. Two custom fields
+      // sharing a label is a realistic scenario; collapsing them silently
+      // would lose data in Excel.
+      const used = new Set(Object.keys(row));
+      activeDefs.forEach(def => {
+        let header = def.label || def.key;
+        if (used.has(header)) header = `${header} [${def.key}]`;
+        if (used.has(header)) header = `${header} (campo personalizado) [${def.key}]`;
+        used.add(header);
+        row[header] = formatForCsv(def, t);
+      });
+      return row;
+    });
+    // Union of all keys across rows preserves builtin order, then custom
+    // fields in the order returned by activeDefs. Some rows may be missing
+    // custom keys if their task was created before a def was added — fall
+    // back to empty cells for those.
+    const headers = Array.from(data.reduce((s, row) => {
+      Object.keys(row).forEach(k => s.add(k));
+      return s;
+    }, new Set()));
     const escapeCell = (value) => {
       const text = String(value ?? "");
       return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;

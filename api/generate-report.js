@@ -39,9 +39,34 @@ const normalizeTask = (r) => ({
   difficulty: r.difficulty ?? 5,
   strategicValue: r.strategic_value ?? 5,
   strategic_value: r.strategic_value ?? 5,
+  // Migration 008 additions (graceful when columns are missing).
+  customFields: (r.custom_fields && typeof r.custom_fields === 'object' && !Array.isArray(r.custom_fields)) ? r.custom_fields : {},
+  updatedAt: r.updated_at || null,
+  closedAt: r.closed_at || null,
+  lastModifiedBy: r.last_modified_by || "",
 });
 
-function buildPrompt({ weekStart, weekEnd, tasks }) {
+// Returns a string summary of a task's custom fields for inclusion in the
+// prompt. Skips empty values and auto fields (already part of timestamps).
+function customFieldsToText(task, defs) {
+  if (!Array.isArray(defs) || !defs.length) return "";
+  const parts = [];
+  for (const def of defs) {
+    if (def.type === "auto" || def.deleted_at) continue;
+    const v = task.customFields?.[def.key];
+    if (v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length)) continue;
+    let display;
+    if (def.type === "multiselect" && Array.isArray(v)) display = v.join(", ");
+    else if (def.type === "subitems" && Array.isArray(v)) {
+      const done = v.filter(i => i.done).length;
+      display = `${done}/${v.length} completados`;
+    } else display = String(v);
+    parts.push(`${def.label}: ${display}`);
+  }
+  return parts.join(" | ");
+}
+
+function buildPrompt({ weekStart, weekEnd, tasks, customFieldDefs = [] }) {
 
   const total = tasks.length;
   const porEstado = tasks.reduce((acc, t) => {
@@ -101,9 +126,19 @@ function buildPrompt({ weekStart, weekEnd, tasks }) {
   });
 
   const prog = (t) => t.progressPercent || t.progress_percent || 0;
-  const todosLosTextos = tasks.map(t =>
-    `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${prog(t)}% | Indicador: ${t.indicator || "N/A"} | Entregable: ${t.expectedDelivery || t.expected_delivery || "no definido"} | Comentarios: ${t.comments || "sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + s.text).join(", ") : "ninguna"}`
-  ).join("\n");
+  const todosLosTextos = tasks.map(t => {
+    const customSummary = customFieldsToText(t, customFieldDefs);
+    return `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${prog(t)}% | Indicador: ${t.indicator || "N/A"} | Entregable: ${t.expectedDelivery || t.expected_delivery || "no definido"} | Comentarios: ${t.comments || "sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + s.text).join(", ") : "ninguna"}${customSummary ? " | " + customSummary : ""}`;
+  }).join("\n");
+
+  // Describe the project-specific schema so the model knows which extra
+  // attributes each task carries and can weave them into the narrative.
+  const customSchemaText = (Array.isArray(customFieldDefs) && customFieldDefs.length)
+    ? customFieldDefs
+        .filter(d => !d.deleted_at && d.type !== 'auto')
+        .map(d => `- ${d.label} (${d.type})`)
+        .join("\n")
+    : "";
 
   const detalleResponsables = Object.entries(porResponsable).map(([nombre, d]) => `
 PERSONA: ${nombre}
@@ -158,6 +193,9 @@ ${detalleVencidas}
 
 EN RIESGO:
 ${detalleRiesgo}
+
+CAMPOS PERSONALIZADOS DEL PROYECTO:
+${customSchemaText || "(ninguno configurado)"}
 
 TODAS LAS TAREAS:
 ${todosLosTextos}
@@ -272,18 +310,31 @@ export default async function handler(req) {
     { data: tasksRaw, error: tasksError },
     { data: participants },
     { data: indicators },
+    fieldDefsRes,
   ] = await Promise.all([
     supabase.from("tasks").select("*").eq("project_id", projectId).order("id"),
     supabase.from("participants").select("*").eq("project_id", projectId).order("id"),
     supabase.from("indicators").select("*").eq("project_id", projectId).order("id"),
+    // task_field_defs is added by migration 008. Tolerate its absence so
+    // older environments still get a usable report.
+    supabase.from("task_field_defs").select("*").eq("project_id", projectId).is("deleted_at", null).order("position", { ascending: true }),
   ]);
 
   if (tasksError) {
     return jsonError(`Error leyendo tareas: ${tasksError.message}`, 500, headers);
   }
 
+  let customFieldDefs = [];
+  if (fieldDefsRes?.error) {
+    if (fieldDefsRes.error.code !== "42P01") {
+      console.warn("[generate-report] task_field_defs query failed:", fieldDefsRes.error.message);
+    }
+  } else if (Array.isArray(fieldDefsRes?.data)) {
+    customFieldDefs = fieldDefsRes.data;
+  }
+
   const tasks = (tasksRaw || []).map(normalizeTask);
-  const prompt = buildPrompt({ weekStart, weekEnd, tasks, participants, indicators });
+  const prompt = buildPrompt({ weekStart, weekEnd, tasks, participants, indicators, customFieldDefs });
   if (!process.env.ANTHROPIC_API_KEY) {
     return jsonError("ANTHROPIC_API_KEY no esta configurada", 500, headers);
   }

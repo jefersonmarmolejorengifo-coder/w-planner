@@ -16,6 +16,8 @@ Aplica las migraciones en este orden:
 | 005 | `005_guide_board.sql` | Crea un proyecto demo con datos de ejemplo. |
 | 006 | `006_security_hardening.sql` | Activa RLS, funciones seguras, indices y politicas por proyecto. |
 | 007 | `007_lock_down_rpc_grants.sql` | Revoca permisos publicos/anonimos de RPCs y deja solo `authenticated`. |
+| 008 | `008_custom_fields.sql` | Crea `task_field_defs`, agrega `tasks.custom_fields/updated_at/closed_at/last_modified_by` y el trigger `set_task_auto_fields`. |
+| 009 | `009_create_project_rpc.sql` | Agrega `create_project_secure(name, description, config)` y `whoami_diag()` para crear proyectos server-side y diagnosticar el JWT. |
 
 ## Entidades Principales
 
@@ -63,6 +65,30 @@ Campos importantes:
 - `subtasks`
 - `kr_id`
 - `sprint_id`
+- `custom_fields` JSONB con valores indexados por `task_field_defs.key` (migracion 008).
+- `updated_at` y `closed_at` administrados por el trigger `set_task_auto_fields`.
+- `last_modified_by` lo escribe el cliente al guardar (mismo patron que `task_history.changed_by`).
+
+### `task_field_defs`
+
+Definicion del esquema de campos personalizados de cada proyecto (migracion 008). Permite que el owner del tablero diseñe la estructura de la tarjeta sin tocar codigo.
+
+Campos importantes:
+
+- `project_id`
+- `key` snake_case, unica entre filas no borradas del proyecto.
+- `label` texto visible al usuario.
+- `type` ∈ {`text`, `textarea`, `date`, `select`, `multiselect`, `subitems`, `auto`}.
+- `config` JSONB: opciones de `select`/`multiselect`, `maxLength`, `maxItems`, `source` para `auto`.
+- `position` orden de render.
+- `required`, `show_on_card`, `builtin`.
+- `deleted_at` soft delete: la fila se oculta pero los valores capturados se preservan en `tasks.custom_fields`.
+
+Restricciones:
+
+- `task_field_defs_type_check` valida el tipo permitido.
+- `task_field_defs_key_format` exige snake_case (`^[a-z][a-z0-9_]{0,49}$`).
+- `task_field_defs_key_not_reserved` bloquea colisiones con columnas reales de `tasks`.
 
 ### `participants`
 
@@ -121,6 +147,7 @@ La migracion `006_security_hardening.sql` activa RLS en:
 - `task_history`
 - `notifications`
 - `project_templates`
+- `task_field_defs`
 
 ## Funciones De Autorizacion
 
@@ -169,6 +196,31 @@ Seguridad:
 - Requiere `auth.uid()`.
 - Despues de la migracion 007 solo `authenticated` puede ejecutarla.
 
+### `create_project_secure(p_name TEXT, p_description TEXT, p_config JSONB)`
+
+Crea un proyecto derivando `owner_id` de `auth.uid()` server-side (migracion 009). Es la ruta principal del frontend para la creacion: evita la dependencia del cliente para mandar el `owner_id` correcto y desbloquea casos donde el JWT pierde su `sub` claim.
+
+Efectos:
+
+- Inserta en `projects` con `owner_id = auth.uid()`.
+- Registra al creador en `project_members` (upsert por `project_id,email`).
+- Devuelve la fila completa de `projects`.
+
+Seguridad:
+
+- `SECURITY DEFINER` con `search_path = public`.
+- Rechaza con `28000` si `auth.uid()` es NULL.
+- Solo `authenticated` puede ejecutarla.
+
+### `whoami_diag()`
+
+Devuelve lo que el servidor ve del JWT actual: `uid`, `email`, `role`, mas los claims crudos `jwt_sub`, `jwt_role`, `jwt_email`. Sirve para diagnosticar problemas de sesion ("crea proyecto y RLS lo rechaza") sin tocar logs del cliente.
+
+Seguridad:
+
+- `SECURITY DEFINER`. Solo `authenticated` puede ejecutarla.
+- No expone datos de otros usuarios: cada uno se ve a si mismo.
+
 ## Politicas Relevantes
 
 Resumen de intencion:
@@ -179,6 +231,7 @@ Resumen de intencion:
 - `participants`, `indicators`, `task_types`, `email_config`: escritura restringida al owner.
 - `okrs`, `key_results`, `sprints`, `task_history`, `notifications`: miembros pueden operar dentro del proyecto.
 - `project_templates`: autenticados pueden leer.
+- `task_field_defs`: miembros pueden leer el esquema; solo el owner puede crear/editar/borrar definiciones (soft delete via `deleted_at`).
 
 ## Verificaciones Post-Migracion
 

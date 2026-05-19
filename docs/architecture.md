@@ -95,6 +95,7 @@ Tablas principales:
 - `task_history`
 - `notifications`
 - `project_templates`
+- `task_field_defs`
 
 ### Vercel Functions
 
@@ -190,6 +191,30 @@ API -> sanitiza HTML y envia via Resend
 API -> actualiza last_sent
 ```
 
+### 6. Esquema De Tarjeta Personalizado Por Proyecto
+
+```text
+Owner -> ConfigTab "Estructura de la tarjeta" -> task_field_defs (RLS owner)
+Realtime -> propaga defs a todos los miembros
+Frontend -> CustomFieldsRenderer arma el formulario y la tarjeta
+Frontend -> tasks.custom_fields almacena valores por key
+DB trigger -> set_task_auto_fields mantiene updated_at / closed_at
+Cliente -> setea last_modified_by al guardar
+```
+
+Cada proyecto define su propio conjunto de campos (texto corto/largo, fecha, select, multiselect, sub-items, auto). Los campos "auto" se mapean a columnas reales (`created_at`, `updated_at`, `closed_at`, `last_modified_by`) via `config.source`. Los valores se guardan en `tasks.custom_fields` (JSONB) y se replican por realtime. Borrar una definicion es soft (`deleted_at`) para preservar los valores capturados para auditoria.
+
+### 7. Creacion De Proyecto Via RPC
+
+```text
+Cliente -> supabase.rpc('create_project_secure', { name, description, config })
+RPC -> deriva owner_id = auth.uid() server-side
+RPC -> inserta projects + project_members en una transaccion
+Cliente -> fallback al INSERT directo si la migracion 009 no esta aplicada
+```
+
+Se prefiere el RPC porque PostgREST puede recibir JWTs sin claim `sub` en algunos escenarios edge, lo que llevaria `auth.uid()` a NULL en RLS y rechazaria el INSERT directo. Si el RPC falla con auth nula, el frontend pide al usuario reiniciar sesion. Existe `whoami_diag()` para inspeccionar que ve el servidor del JWT actual.
+
 ## Decisiones Arquitectonicas
 
 ### SPA En Vite
@@ -228,3 +253,4 @@ Una nueva funcionalidad debe cumplir:
 - Mantener APIs idempotentes o con errores claros.
 - Agregar migracion SQL para cambios de esquema.
 - Documentar variables de entorno nuevas.
+- Para nuevos campos por-proyecto, preferir extender `task_field_defs` antes que agregar columnas hardcodeadas a `tasks`.

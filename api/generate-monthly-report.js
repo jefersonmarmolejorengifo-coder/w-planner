@@ -324,8 +324,8 @@ export default async function handler(req) {
     return jsonError(err.message, err.status || 500, headers);
   }
 
-  // Tareas y reportes mensuales anteriores en paralelo.
-  const [{ data: tasks, error: tasksError }, { data: previousReports, error: histError }] = await Promise.all([
+  // Tareas + reportes mensuales anteriores + bitácora del mes en paralelo.
+  const [{ data: tasks, error: tasksError }, { data: previousReports, error: histError }, threadRes] = await Promise.all([
     supabase.from("tasks").select("*").eq("project_id", projectId),
     supabase.from("report_history")
       .select("period_start, period_end, plain_text")
@@ -333,12 +333,39 @@ export default async function handler(req) {
       .eq("report_type", "monthly_team")
       .order("period_end", { ascending: false })
       .limit(2),
+    supabase.from("task_comments")
+      .select("task_id, author_name, text, created_at")
+      .eq("project_id", projectId)
+      .is("deleted_at", null)
+      .gte("created_at", `${monthStart}T00:00:00Z`)
+      .lte("created_at", `${monthEnd}T23:59:59Z`)
+      .order("created_at", { ascending: true }),
   ]);
   if (tasksError) return jsonError(`Error leyendo tareas: ${tasksError.message}`, 500, headers);
   // histError no es crítico (tabla puede no existir aún si no se aplicó la 012).
   if (histError) console.warn("[monthly] No pude leer report_history:", histError.message);
 
-  const analytics = computeTeamAnalytics({ tasks: tasks || [], monthStart, monthEnd });
+  // Inyecta comentarios del thread como contexto adicional en cada tarea.
+  const commentsByTask = {};
+  if (Array.isArray(threadRes?.data)) {
+    for (const c of threadRes.data) {
+      if (!commentsByTask[c.task_id]) commentsByTask[c.task_id] = [];
+      commentsByTask[c.task_id].push(c);
+    }
+  }
+  const tasksWithThread = (tasks || []).map(t => {
+    const thread = commentsByTask[t.id] || [];
+    if (!thread.length) return t;
+    const threadSummary = thread.map(c => `[${c.author_name}] ${c.text.slice(0, 200)}`).join(" | ");
+    return {
+      ...t,
+      comments: t.comments
+        ? `${t.comments}\n--- Bitácora del mes ---\n${threadSummary}`
+        : threadSummary,
+    };
+  });
+
+  const analytics = computeTeamAnalytics({ tasks: tasksWithThread, monthStart, monthEnd });
 
   const fechaInicio = new Date(monthStart);
   const mesNombre = fechaInicio.toLocaleDateString("es-CO", { month: "long" });

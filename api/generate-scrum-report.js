@@ -251,9 +251,27 @@ export default async function handler(req) {
     return jsonError(err.message, err.status || 500, headers);
   }
 
-  const { data: tasks, error: tasksError } = await supabase
-    .from("tasks").select("*").eq("project_id", projectId);
+  const [{ data: tasks, error: tasksError }, threadRes] = await Promise.all([
+    supabase.from("tasks").select("*").eq("project_id", projectId),
+    supabase.from("task_comments")
+      .select("task_id, author_name, text, created_at")
+      .eq("project_id", projectId)
+      .is("deleted_at", null)
+      .gte("created_at", `${weekStart}T00:00:00Z`)
+      .lte("created_at", `${weekEnd}T23:59:59Z`)
+      .order("created_at", { ascending: true }),
+  ]);
   if (tasksError) return jsonError(`Error leyendo tareas: ${tasksError.message}`, 500, headers);
+
+  // Inyecta thread por tarea como comentarios "nuevos esta ventana" para que
+  // el modelo los pondere en la narrativa Scrum.
+  const commentsByTask = {};
+  if (Array.isArray(threadRes?.data)) {
+    for (const c of threadRes.data) {
+      if (!commentsByTask[c.task_id]) commentsByTask[c.task_id] = [];
+      commentsByTask[c.task_id].push(c);
+    }
+  }
 
   // Calcula la ventana previa de igual duración para velocity comparison.
   const startD = new Date(weekStart);
@@ -261,8 +279,24 @@ export default async function handler(req) {
   const dur    = endD - startD;
   const prevStart = new Date(startD.getTime() - dur).toISOString().slice(0, 10);
 
+  // Anota cada tarea con sus comentarios de la ventana para que las métricas
+  // narrativas (comentariosNuevos) lo recojan.
+  const tasksWithThread = (tasks || []).map(t => {
+    const thread = commentsByTask[t.id] || [];
+    if (!thread.length) return t;
+    // Crea un comentario sintético combinado con el thread, manteniendo el
+    // comentario base por si existe.
+    const threadSummary = thread.map(c => `[${c.author_name}] ${c.text.slice(0, 220)}`).join(" | ");
+    return {
+      ...t,
+      comments: t.comments
+        ? `${t.comments}\n--- Bitácora ventana ---\n${threadSummary}`
+        : threadSummary,
+    };
+  });
+
   const metrics = computeScrumMetrics({
-    tasks: tasks || [],
+    tasks: tasksWithThread,
     windowStart: weekStart,
     windowEnd: weekEnd,
     prevWindowStart: prevStart,

@@ -155,7 +155,7 @@ REGLAS DE DISEÑO PARA CORREO:
 - El correo debe verse bien en móvil (usa width 100% con max-width)
 - NO incluyas <script>, <iframe>, <form>, <button>, ni atributos onClick/onLoad — serían bloqueados por el sanitizador.`;
 
-function buildPrompt({ weekStart, weekEnd, tasks, customFieldDefs = [] }) {
+function buildPrompt({ weekStart, weekEnd, tasks, customFieldDefs = [], commentsByTask = {} }) {
 
   const total = tasks.length;
   const porEstado = tasks.reduce((acc, t) => {
@@ -217,7 +217,12 @@ function buildPrompt({ weekStart, weekEnd, tasks, customFieldDefs = [] }) {
   const prog = (t) => t.progressPercent || t.progress_percent || 0;
   const todosLosTextos = tasks.map(t => {
     const customSummary = customFieldsToText(t, customFieldDefs);
-    return `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${prog(t)}% | Indicador: ${t.indicator || "N/A"} | Entregable: ${t.expectedDelivery || t.expected_delivery || "no definido"} | Comentarios: ${t.comments || "sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + s.text).join(", ") : "ninguna"}${customSummary ? " | " + customSummary : ""}`;
+    // Bitácora de avance: comments del thread (migración 013) en la ventana.
+    const thread = commentsByTask[t.id] || [];
+    const threadSummary = thread.length
+      ? " | Bitácora esta ventana: " + thread.slice(-5).map(c => `[${c.author_name}] ${c.text.slice(0, 200)}`).join(" || ")
+      : "";
+    return `#${t.id} | ${t.title} | ${t.responsible || "N/A"} | ${t.status} | ${prog(t)}% | Indicador: ${t.indicator || "N/A"} | Entregable: ${t.expectedDelivery || t.expected_delivery || "no definido"} | Comentarios: ${t.comments || "sin comentarios"} | Subtareas: ${Array.isArray(t.subtasks) ? t.subtasks.map(s => (s.done ? "[✓]" : "[ ]") + s.text).join(", ") : "ninguna"}${customSummary ? " | " + customSummary : ""}${threadSummary}`;
   }).join("\n");
 
   // Describe the project-specific schema so the model knows which extra
@@ -330,6 +335,7 @@ export default async function handler(req) {
     { data: participants },
     { data: indicators },
     fieldDefsRes,
+    threadRes,
   ] = await Promise.all([
     supabase.from("tasks").select("*").eq("project_id", projectId).order("id"),
     supabase.from("participants").select("*").eq("project_id", projectId).order("id"),
@@ -337,6 +343,14 @@ export default async function handler(req) {
     // task_field_defs is added by migration 008. Tolerate its absence so
     // older environments still get a usable report.
     supabase.from("task_field_defs").select("*").eq("project_id", projectId).is("deleted_at", null).order("position", { ascending: true }),
+    // task_comments (migración 013): bitácora de avance. Tolerar ausencia.
+    supabase.from("task_comments")
+      .select("task_id, author_name, text, created_at")
+      .eq("project_id", projectId)
+      .is("deleted_at", null)
+      .gte("created_at", `${weekStart}T00:00:00Z`)
+      .lte("created_at", `${weekEnd}T23:59:59Z`)
+      .order("created_at", { ascending: true }),
   ]);
 
   if (tasksError) {
@@ -352,8 +366,21 @@ export default async function handler(req) {
     customFieldDefs = fieldDefsRes.data;
   }
 
+  // Agrupa el thread por task_id para fácil inyección al prompt.
+  let commentsByTask = {};
+  if (threadRes?.error) {
+    if (threadRes.error.code !== "42P01") {
+      console.warn("[generate-report] task_comments query failed:", threadRes.error.message);
+    }
+  } else if (Array.isArray(threadRes?.data)) {
+    for (const c of threadRes.data) {
+      if (!commentsByTask[c.task_id]) commentsByTask[c.task_id] = [];
+      commentsByTask[c.task_id].push(c);
+    }
+  }
+
   const tasks = (tasksRaw || []).map(normalizeTask);
-  const userPrompt = buildPrompt({ weekStart, weekEnd, tasks, participants, indicators, customFieldDefs });
+  const userPrompt = buildPrompt({ weekStart, weekEnd, tasks, participants, indicators, customFieldDefs, commentsByTask });
   if (!process.env.ANTHROPIC_API_KEY) {
     return jsonError("ANTHROPIC_API_KEY no esta configurada", 500, headers);
   }

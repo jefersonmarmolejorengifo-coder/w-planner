@@ -413,6 +413,208 @@ function CustomFieldsRenderer({ defs, task, onChange, mode = 'edit' }) {
   );
 }
 
+// ─── TaskCommentsThread helpers ────────────────────────────
+// Estos helpers son puros pero acceden a Date.now/Date que React 19 marca
+// como "impuros" si están en el render. Sacarlos del componente evita el
+// warning de react-hooks/purity.
+const commentTimeAgo = (iso) => {
+  const d = new Date(iso);
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60) return "hace un momento";
+  if (sec < 3600) return `hace ${Math.floor(sec / 60)} min`;
+  if (sec < 86400) return `hace ${Math.floor(sec / 3600)} h`;
+  if (sec < 604800) return `hace ${Math.floor(sec / 86400)} d`;
+  return d.toLocaleDateString("es-CO", { day: "numeric", month: "short" });
+};
+const commentInitials = (name) => {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "?";
+};
+const commentColorOf = (name) => {
+  if (!name) return "#9aa";
+  let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${h}, 50%, 55%)`;
+};
+
+// ─── TaskCommentsThread ────────────────────────────────────
+// Bitácora de avance por tarea. Lista cronológica de comentarios cortos
+// con autor + timestamp. Cualquier miembro del proyecto puede comentar.
+// El autor puede editar o borrar el suyo. Realtime via Supabase channel.
+function TaskCommentsThread({ taskId, projectId }) {
+  const [comments, setComments] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [authUser, setAuthUser] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // Obtener auth user actual una sola vez.
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setAuthUser(data?.user || null));
+  }, []);
+
+  // Cargar comentarios + realtime
+  useEffect(() => {
+    if (!taskId) return;
+    let mounted = true;
+    const load = async () => {
+      const { data, error: err } = await supabase
+        .from('task_comments')
+        .select('*')
+        .eq('task_id', taskId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: true });
+      if (!mounted) return;
+      if (err) {
+        // Tabla puede no existir si la migración 013 no se aplicó.
+        if (err.code === '42P01') {
+          setError("Aplica la migración 013 para usar la bitácora.");
+        } else {
+          setError(err.message);
+        }
+        return;
+      }
+      setComments(data || []);
+      setError("");
+    };
+    load();
+
+    const channel = supabase
+      .channel(`task-comments-${taskId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comments', filter: `task_id=eq.${taskId}` }, () => load())
+      .subscribe();
+    return () => {
+      mounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [taskId]);
+
+  const post = async () => {
+    const text = draft.trim();
+    if (!text || !authUser?.id || !projectId) return;
+    setBusy(true);
+    setError("");
+    const { error: err } = await supabase.from('task_comments').insert({
+      task_id: taskId,
+      project_id: projectId,
+      author_user_id: authUser.id,
+      author_name: authUser.user_metadata?.full_name || authUser.email || "Anónimo",
+      text,
+    });
+    setBusy(false);
+    if (err) { setError(err.message); return; }
+    setDraft("");
+  };
+
+  const saveEdit = async (id) => {
+    const text = editDraft.trim();
+    if (!text) return;
+    setBusy(true);
+    const { error: err } = await supabase
+      .from('task_comments')
+      .update({ text })
+      .eq('id', id);
+    setBusy(false);
+    if (err) { setError(err.message); return; }
+    setEditingId(null);
+    setEditDraft("");
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("¿Borrar este comentario?")) return;
+    const { error: err } = await supabase
+      .from('task_comments')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id);
+    if (err) setError(err.message);
+  };
+
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {error && (
+        <div style={{ fontSize: 11, color: "#c0392b", padding: 6, background: "#fde8e8", borderRadius: 6 }}>{error}</div>
+      )}
+
+      {/* Lista de comentarios */}
+      <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, padding: "2px 0" }}>
+        {comments.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#888", textAlign: "center", padding: 12, fontStyle: "italic" }}>
+            Aún no hay comentarios. Sé la primera persona en registrar un avance.
+          </div>
+        ) : comments.map(c => (
+          <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+              background: commentColorOf(c.author_name), color: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 11, fontWeight: 700,
+            }}>{commentInitials(c.author_name)}</div>
+            <div style={{ flex: 1, background: "#fafafa", borderRadius: 8, padding: "8px 10px", border: "1px solid #f0f0f0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#444" }}>{c.author_name}</span>
+                <span style={{ fontSize: 10, color: "#999" }}>
+                  {commentTimeAgo(c.created_at)}
+                  {c.updated_at && c.updated_at !== c.created_at && " · editado"}
+                </span>
+              </div>
+              {editingId === c.id ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)}
+                    style={{ width: "100%", minHeight: 60, border: "1px solid #ddd", borderRadius: 6, padding: 6, fontSize: 13, fontFamily: "inherit" }}
+                    autoFocus />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button disabled={busy} onClick={() => saveEdit(c.id)} style={{ background: "#542c9c", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Guardar</button>
+                    <button onClick={() => { setEditingId(null); setEditDraft(""); }} style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 5, padding: "4px 10px", cursor: "pointer", fontSize: 11 }}>Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: "#222", lineHeight: 1.4, whiteSpace: "pre-wrap" }}>{c.text}</div>
+              )}
+              {authUser?.id === c.author_user_id && editingId !== c.id && (
+                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                  <button onClick={() => { setEditingId(c.id); setEditDraft(c.text); }} style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 10, padding: 0, textDecoration: "underline" }}>Editar</button>
+                  <button onClick={() => remove(c.id)} style={{ background: "none", border: "none", color: "#c0392b", cursor: "pointer", fontSize: 10, padding: 0, textDecoration: "underline" }}>Borrar</button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Nuevo comentario */}
+      <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              post();
+            }
+          }}
+          placeholder="Registra un avance, una duda, un bloqueo... (Enter para enviar, Shift+Enter para nueva línea)"
+          style={{ flex: 1, minHeight: 50, padding: 8, border: "1px solid #ddd", borderRadius: 6, fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
+        />
+        <button
+          onClick={post}
+          disabled={busy || !draft.trim() || !authUser?.id}
+          style={{
+            background: busy || !draft.trim() ? "#ddd" : "linear-gradient(135deg,#542c9c,#6e3ebf)",
+            color: "#fff", border: "none", borderRadius: 6, padding: "10px 14px",
+            cursor: busy || !draft.trim() ? "not-allowed" : "pointer",
+            fontWeight: 600, fontSize: 13, whiteSpace: "nowrap",
+          }}
+        >
+          {busy ? "..." : "Comentar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [], customFieldDefs = [] }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
@@ -751,7 +953,7 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
             </F>
           )}
 
-          <F label="Comentarios">
+          <F label="Descripción y observaciones">
             <textarea
               style={{ ...inp, minHeight: 110, resize: "vertical" }}
               value={task.comments}
@@ -759,6 +961,14 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
               placeholder={"¿Qué quieres lograr?\n¿Quién gana con esto?\nPasos 1. 2. 3.\n¿Cómo sabrás que quedó bien?\n¿Qué te puede frenar?"}
             />
           </F>
+
+          {/* Bitácora de avance: thread cronológico de comentarios cortos por
+              cualquier miembro del proyecto. Se persiste en task_comments. */}
+          {task.id && (
+            <F label="Bitácora de avance">
+              <TaskCommentsThread taskId={task.id} projectId={task.projectId || task.project_id} />
+            </F>
+          )}
 
           {customFieldDefs && customFieldDefs.length > 0 && (
             <CustomFieldsRenderer

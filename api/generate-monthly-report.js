@@ -360,10 +360,10 @@ export default async function handler(req) {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-opus-4-7",
-      // 8000 tokens es suficiente para narrativa mensual y respeta el cap de
-      // 60s del runtime Node de Vercel hobby. Si quieres más texto en
-      // proyectos enormes, sube a 12000 cuando muevas a plan Pro (300s cap).
+      // Sonnet 4.6 ($3/$15) en lugar de Opus 4.7: 3x mas rapido, suficiente
+      // para narrativa analítica. Cabe en el cap de 60s del runtime Node de
+      // Vercel Hobby. Si subes a Vercel Pro (300s) puedes volver a Opus.
+      model: "claude-sonnet-4-6",
       max_tokens: 8000,
       system: [
         {
@@ -388,8 +388,9 @@ export default async function handler(req) {
   const usage = anthropicData?.usage || {};
   const inputTokens  = usage.input_tokens || null;
   const outputTokens = usage.output_tokens || null;
+  // Sonnet 4.6: $3/$15 per MTok
   const costUsd = (inputTokens && outputTokens)
-    ? (inputTokens * 5 + outputTokens * 25) / 1_000_000
+    ? (inputTokens * 3 + outputTokens * 15) / 1_000_000
     : null;
 
   if (!html || !html.toLowerCase().includes("<!doctype html")) {
@@ -399,7 +400,7 @@ export default async function handler(req) {
   return jsonResponse({
     html,
     plain_text: htmlToPlainText(html),
-    model: "claude-opus-4-7",
+    model: "claude-sonnet-4-6",
     tokens_input: inputTokens,
     tokens_output: outputTokens,
     cost_usd: costUsd,

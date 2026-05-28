@@ -4349,16 +4349,21 @@ function SprintsTab({ projectId, sprints, setSprints, tasks }) {
 }
 
 // ─── PresentationTab (Presentación Sprint) ────────────────
-// Vista enfocada en un participante. Muestra todas sus tareas como tarjetas
-// con tarjeta resumen al hover/click: aporte, tiempo de cierre, comentarios,
-// subtareas, indicador, custom fields opt-in. Útil para reuniones de sprint
-// y para que cada persona explique su trabajo al equipo.
+// Vista enfocada en un participante. Por defecto usa el grafo de
+// dependencias (mismo motor que Red de Tareas) para mostrar quién depende
+// de quién y permitir al participante explicar su flujo. Al filtrar por
+// persona, las tareas ajenas se ven en gris suave (sin resaltar pero
+// identificables). Click en un nodo muestra el detalle rico (resumen,
+// entregable, comentarios, subtareas, custom fields opt-in). También
+// ofrece un modo "cuadrícula" para listas grandes.
 function PresentationTab({ tasks, participants, taskFieldDefs, sprints }) {
+  const [mode, setMode] = useState("graph"); // "graph" | "grid"
   const [selectedPersona, setSelectedPersona] = useState("__all__");
   const [selectedSprint, setSelectedSprint] = useState("__all__");
   const [statusFilter, setStatusFilter] = useState("__all__");
   const [hoverTaskId, setHoverTaskId] = useState(null);
   const [pinnedTaskId, setPinnedTaskId] = useState(null);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
 
   const personas = useMemo(() => {
     const fromTasks = new Set(tasks.map(t => t.responsible).filter(Boolean));
@@ -4434,7 +4439,7 @@ function PresentationTab({ tasks, participants, taskFieldDefs, sprints }) {
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20, alignItems: "flex-end" }}>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#666", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Persona</label>
-          <select value={selectedPersona} onChange={e => setSelectedPersona(e.target.value)} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 14, minWidth: 180 }}>
+          <select value={selectedPersona} onChange={e => { setSelectedPersona(e.target.value); setSelectedTaskId(null); }} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 14, minWidth: 180 }}>
             <option value="__all__">Todas las personas</option>
             {personas.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -4453,6 +4458,14 @@ function PresentationTab({ tasks, participants, taskFieldDefs, sprints }) {
             {Object.keys(STATUS_COLORS).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
+        <div style={{ display: "flex", gap: 4, background: "#eef0f5", borderRadius: 8, padding: 4 }}>
+          {[["graph","Grafo"],["grid","Cuadrícula"]].map(([v,l]) => (
+            <button key={v} onClick={() => setMode(v)}
+              style={{ background: mode === v ? "#fff" : "transparent", border: "none", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: mode === v ? 700 : 500, color: mode === v ? "#542c9c" : "#888", boxShadow: mode === v ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
+              {l}
+            </button>
+          ))}
+        </div>
         <div style={{ marginLeft: "auto", fontSize: 13, color: "#666" }}>
           {visibleTasks.length} tarea{visibleTasks.length === 1 ? "" : "s"}
         </div>
@@ -4470,28 +4483,207 @@ function PresentationTab({ tasks, participants, taskFieldDefs, sprints }) {
         </div>
       )}
 
-      {/* Grid de tarjetas */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-        {visibleTasks.length === 0 ? (
-          <div style={{ gridColumn: "1/-1", padding: 40, textAlign: "center", color: "#999", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
-            No hay tareas con esos filtros.
+      {/* Vista principal: grafo o cuadrícula */}
+      {visibleTasks.length === 0 ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#999", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
+          No hay tareas con esos filtros.
+        </div>
+      ) : mode === "graph" ? (
+        <PresentationGraph
+          tasks={tasks}
+          visibleTasks={visibleTasks}
+          focusedPersona={selectedPersona === "__all__" ? null : selectedPersona}
+          onSelect={(id) => setSelectedTaskId(id)}
+          selectedTaskId={selectedTaskId}
+        />
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+          {visibleTasks.map(task => (
+            <PresentationCard
+              key={task.id}
+              task={task}
+              taskFieldDefs={taskFieldDefs}
+              tasks={tasks}
+              colorByStatus={STATUS_COLORS}
+              isActive={hoverTaskId === task.id || pinnedTaskId === task.id}
+              onHover={() => setHoverTaskId(task.id)}
+              onLeave={() => setHoverTaskId(null)}
+              onClick={() => setPinnedTaskId(p => p === task.id ? null : task.id)}
+              pinned={pinnedTaskId === task.id}
+              focusedPersona={selectedPersona === "__all__" ? null : selectedPersona}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Panel lateral con detalle rico cuando se selecciona una tarea en el grafo */}
+      {selectedTaskId && mode === "graph" && (() => {
+        const t = tasks.find(x => String(x.id) === String(selectedTaskId));
+        if (!t) return null;
+        return (
+          <div style={{ position: "fixed", top: 80, right: 20, width: 380, maxHeight: "85vh", overflowY: "auto", background: "#fff", border: "1px solid #ddd", borderRadius: 12, boxShadow: "0 12px 32px rgba(0,0,0,0.15)", zIndex: 50 }}>
+            <button onClick={() => setSelectedTaskId(null)} style={{ position: "absolute", top: 8, right: 8, background: "transparent", border: "none", fontSize: 22, color: "#999", cursor: "pointer", lineHeight: 1 }}>×</button>
+            <div style={{ padding: 0 }}>
+              <PresentationCard
+                task={t}
+                taskFieldDefs={taskFieldDefs}
+                tasks={tasks}
+                colorByStatus={STATUS_COLORS}
+                isActive={true}
+                onHover={() => {}}
+                onLeave={() => {}}
+                onClick={() => {}}
+                pinned={true}
+                focusedPersona={selectedPersona === "__all__" ? null : selectedPersona}
+              />
+            </div>
           </div>
-        ) : visibleTasks.map(task => (
-          <PresentationCard
-            key={task.id}
-            task={task}
-            taskFieldDefs={taskFieldDefs}
-            tasks={tasks}
-            colorByStatus={STATUS_COLORS}
-            isActive={hoverTaskId === task.id || pinnedTaskId === task.id}
-            onHover={() => setHoverTaskId(task.id)}
-            onLeave={() => setHoverTaskId(null)}
-            onClick={() => setPinnedTaskId(p => p === task.id ? null : task.id)}
-            pinned={pinnedTaskId === task.id}
-            focusedPersona={selectedPersona === "__all__" ? null : selectedPersona}
-          />
+        );
+      })()}
+    </div>
+  );
+}
+
+// ─── PresentationGraph ─────────────────────────────────────
+// Renderiza las tareas como nodos SVG en niveles segun sus dependencias.
+// Las tareas del participante focal aparecen con color de estado; las ajenas
+// (mismo grafo pero distinto responsable) en gris suave, todavia visibles.
+function PresentationGraph({ tasks, visibleTasks, focusedPersona, onSelect, selectedTaskId }) {
+  // Para que la red sea util incluso al filtrar por persona, expandimos el
+  // conjunto visible: incluimos las tareas focales + cualquier tarea ligada a
+  // ellas (origen o destino de dependencia). Las no-focales se pintaran en gris.
+  const focalIds = useMemo(() => new Set(visibleTasks.map(t => String(t.id))), [visibleTasks]);
+
+  const linkedNonFocal = useMemo(() => {
+    const extra = new Set();
+    visibleTasks.forEach(t => {
+      parseDeps(t.dependent_task || t.dependentTask).forEach(id => {
+        if (!focalIds.has(id)) extra.add(id);
+      });
+      tasks.forEach(other => {
+        if (parseDeps(other.dependent_task || other.dependentTask).includes(String(t.id))) {
+          if (!focalIds.has(String(other.id))) extra.add(String(other.id));
+        }
+      });
+    });
+    return [...extra].map(id => tasks.find(t => String(t.id) === id)).filter(Boolean);
+  }, [tasks, visibleTasks, focalIds]);
+
+  const allInGraph = useMemo(() => {
+    const combined = [...visibleTasks];
+    linkedNonFocal.forEach(t => { if (!combined.find(v => v.id === t.id)) combined.push(t); });
+    // Normaliza camelCase a snake_case que computeDepLayout usa internamente.
+    return combined.map(t => ({
+      ...t,
+      dependentTask: t.dependentTask ?? t.dependent_task ?? "",
+    }));
+  }, [visibleTasks, linkedNonFocal]);
+
+  const { positions, svgW, svgH, byLevel } = useMemo(() => computeDepLayout(allInGraph), [allInGraph]);
+
+  const edges = useMemo(() => {
+    const result = [];
+    allInGraph.forEach(t => {
+      parseDeps(t.dependentTask).forEach(depId => {
+        if (positions[depId]) result.push({ t, depId });
+      });
+    });
+    return result;
+  }, [allInGraph, positions]);
+
+  const shortName = (name) => {
+    if (!name) return "";
+    const parts = name.trim().split(" ");
+    return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[1][0]}.`;
+  };
+
+  return (
+    <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "70vh", border: "1px solid #e8e0f4", borderRadius: 14, background: "#fafafe" }}>
+      <svg width={svgW} height={svgH} style={{ display: "block" }}>
+        <defs>
+          <marker id="pres-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#542c9c" opacity="0.6" />
+          </marker>
+          <marker id="pres-arrow-muted" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#bbb" opacity="0.65" />
+          </marker>
+        </defs>
+
+        {/* Encabezados de nivel */}
+        {Object.keys(byLevel).map(lvl => (
+          <text key={lvl}
+            x={Number(lvl) * (NODE_W + NODE_GAP_X) + 24 + NODE_W / 2} y={12}
+            textAnchor="middle"
+            style={{ fontSize: 10, fill: "#aaa", fontFamily: "inherit", letterSpacing: 2 }}>
+            {Number(lvl) === 0 ? "Nivel 0 · Origen" : `Nivel ${lvl}`}
+          </text>
         ))}
-      </div>
+
+        {/* Aristas */}
+        {edges.map(({ t, depId }) => {
+          const src = positions[depId];
+          const dst = positions[String(t.id)];
+          if (!src || !dst) return null;
+          // La arista es "focal" sólo si AMBOS extremos pertenecen al focal set
+          // (sin filtro de persona, todos son focales).
+          const tFocal = !focusedPersona || focalIds.has(String(t.id));
+          const depFocal = !focusedPersona || focalIds.has(depId);
+          const isMuted = !!focusedPersona && !(tFocal && depFocal);
+          const x1 = src.x + NODE_W, y1 = src.y + NODE_H / 2;
+          const x2 = dst.x,          y2 = dst.y + NODE_H / 2;
+          const cx = (x1 + x2) / 2;
+          return (
+            <path key={`pe-${t.id}-${depId}`}
+              d={`M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`}
+              fill="none"
+              stroke={isMuted ? "#cfcfcf" : "#542c9c"}
+              strokeWidth={isMuted ? 1 : 1.5}
+              strokeOpacity={isMuted ? 0.55 : 0.5}
+              strokeDasharray={isMuted ? "5,4" : "none"}
+              markerEnd={isMuted ? "url(#pres-arrow-muted)" : "url(#pres-arrow)"} />
+          );
+        })}
+
+        {/* Nodos */}
+        {allInGraph.map(t => {
+          const pos = positions[String(t.id)];
+          if (!pos) return null;
+          const isFocal = !focusedPersona || focalIds.has(String(t.id));
+          const sc = isFocal ? (STATUS_COLORS[t.status] || "#888") : "#b8b8b8";
+          const sl = isFocal ? (STATUS_LIGHT[t.status] || "#f4f4f4") : "#f0f0f0";
+          const isSel = String(selectedTaskId) === String(t.id);
+          const name = shortName(t.responsible);
+          return (
+            <g key={t.id} style={{ cursor: "pointer" }} onClick={() => onSelect(isSel ? null : String(t.id))}>
+              <rect x={pos.x} y={pos.y} width={NODE_W} height={NODE_H} rx={8}
+                fill={sl}
+                stroke={isSel ? sc : isFocal ? "rgba(84,44,156,0.15)" : "#c8c8c8"}
+                strokeWidth={isSel ? 2.5 : 1}
+                strokeDasharray={isFocal ? "none" : "5,3"}
+                style={{ filter: isSel ? `drop-shadow(0 4px 12px ${sc}66)` : "none", transition: "all 0.2s", opacity: isFocal ? 1 : 0.78 }} />
+              <rect x={pos.x} y={pos.y} width={4} height={NODE_H} rx="2 0 0 2" fill={sc} />
+              <text x={pos.x + 14} y={pos.y + 14} style={{ fontSize: 9, fill: isFocal ? "#aaa" : "#bbb", fontFamily: "inherit" }}>
+                #{t.id} · {t.type || "—"}
+              </text>
+              <foreignObject x={pos.x + 14} y={pos.y + 18} width={NODE_W - 20} height={32}>
+                <div xmlns="http://www.w3.org/1999/xhtml"
+                  style={{ fontSize: 11, fontWeight: isFocal ? 700 : 600, color: isFocal ? "#2d2d2d" : "#888", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                  {t.title || "(Sin título)"}
+                </div>
+              </foreignObject>
+              <text x={pos.x + 14} y={pos.y + 62} style={{ fontSize: 10, fill: sc, fontWeight: 700, fontFamily: "inherit" }}>
+                {t.status || ""}
+              </text>
+              {name && (
+                <text x={pos.x + NODE_W - 8} y={pos.y + 62} textAnchor="end"
+                  style={{ fontSize: 10, fill: isFocal ? "#149cac" : "#aaa", fontWeight: 600, fontFamily: "inherit" }}>
+                  {name}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }

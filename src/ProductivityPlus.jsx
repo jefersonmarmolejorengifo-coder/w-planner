@@ -413,6 +413,172 @@ function CustomFieldsRenderer({ defs, task, onChange, mode = 'edit' }) {
   );
 }
 
+// ─── TaskSuperLinksEditor ──────────────────────────────────
+// Permite linkear una tarea a una o varias super-tareas con peso. Persiste
+// inmediatamente en task_super_links (toggle = insert/delete; cambio de
+// peso = update). Pensado para vivir dentro del modal de TaskForm.
+function TaskSuperLinksEditor({ taskId, projectId }) {
+  const [superTasks, setSuperTasks] = useState([]);
+  const [links, setLinks] = useState({}); // super_task_id -> weight
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!projectId || !taskId) return;
+      const [stRes, lkRes] = await Promise.all([
+        supabase.from("super_tasks")
+          .select("id, title, color, icon, target_aporte")
+          .eq("project_id", projectId)
+          .is("deleted_at", null)
+          .order("position", { ascending: true }),
+        supabase.from("task_super_links")
+          .select("super_task_id, weight")
+          .eq("task_id", taskId),
+      ]);
+      if (cancelled) return;
+      if (stRes.error) {
+        if (stRes.error.code === "42P01") {
+          setError("Aplica la migración 014 para enlazar a super-tareas.");
+        } else {
+          setError(stRes.error.message);
+        }
+        setLoading(false);
+        return;
+      }
+      setError("");
+      setSuperTasks(stRes.data || []);
+      const lmap = {};
+      (lkRes.data || []).forEach(l => { lmap[l.super_task_id] = parseFloat(l.weight); });
+      setLinks(lmap);
+      setLoading(false);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [taskId, projectId]);
+
+  const toggleLink = async (superId) => {
+    if (links[superId] !== undefined) {
+      // Quitar
+      setBusy(true);
+      const { error: err } = await supabase
+        .from("task_super_links")
+        .delete()
+        .eq("task_id", taskId)
+        .eq("super_task_id", superId);
+      setBusy(false);
+      if (err) { setError(err.message); return; }
+      setLinks(prev => {
+        const next = { ...prev };
+        delete next[superId];
+        return next;
+      });
+    } else {
+      // Agregar con peso 1.0 por defecto
+      setBusy(true);
+      const { error: err } = await supabase
+        .from("task_super_links")
+        .insert({ task_id: taskId, super_task_id: superId, weight: 1.0 });
+      setBusy(false);
+      if (err) { setError(err.message); return; }
+      setLinks(prev => ({ ...prev, [superId]: 1.0 }));
+    }
+  };
+
+  const updateWeight = async (superId, w) => {
+    const next = Math.max(0.1, Math.min(5, Number(w) || 1));
+    setLinks(prev => ({ ...prev, [superId]: next }));
+    // Debounce simple: actualiza el server tras 400ms sin más cambios.
+    if (updateWeight._timers) {
+      clearTimeout(updateWeight._timers[superId]);
+    } else {
+      updateWeight._timers = {};
+    }
+    updateWeight._timers[superId] = setTimeout(async () => {
+      const { error: err } = await supabase
+        .from("task_super_links")
+        .update({ weight: next })
+        .eq("task_id", taskId)
+        .eq("super_task_id", superId);
+      if (err) setError(err.message);
+    }, 400);
+  };
+
+  if (loading) {
+    return <div style={{ fontSize: 12, color: "#888", padding: 8 }}>Cargando super-tareas…</div>;
+  }
+  if (error) {
+    return <div style={{ fontSize: 12, color: "#c0392b", padding: 8, background: "#fde8e8", borderRadius: 6 }}>{error}</div>;
+  }
+  if (superTasks.length === 0) {
+    return (
+      <div style={{ fontSize: 12, color: "#999", padding: 10, background: "#fafafa", border: "1px dashed #e0e0e0", borderRadius: 6, fontStyle: "italic" }}>
+        Aún no hay super-tareas en este proyecto. Crea una desde la pestaña "Super-tareas".
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 11, color: "#666", marginBottom: 2 }}>
+        Marca las super-tareas a las que esta tarea aporta. El peso multiplica el aporte cuando se cierre (1.0 = aporte completo, 0.5 = mitad, etc.).
+      </div>
+      {superTasks.map(st => {
+        const selected = links[st.id] !== undefined;
+        const weight = links[st.id] ?? 1.0;
+        return (
+          <div key={st.id} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "8px 10px",
+            background: selected ? `${st.color}10` : "#fafafa",
+            border: `1px solid ${selected ? st.color + "55" : "#f0f0f0"}`,
+            borderRadius: 8,
+            transition: "all 150ms",
+          }}>
+            <input
+              type="checkbox"
+              checked={selected}
+              disabled={busy}
+              onChange={() => toggleLink(st.id)}
+              style={{ cursor: "pointer" }}
+            />
+            <span style={{ fontSize: 18 }}>{st.icon || "🎯"}</span>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: selected ? 600 : 400, color: selected ? "#222" : "#555" }}>
+              {st.title}
+              <span style={{ color: "#999", fontWeight: 400, fontSize: 11, marginLeft: 6 }}>
+                · target {st.target_aporte}
+              </span>
+            </span>
+            {selected && (
+              <>
+                <label style={{ fontSize: 10, color: "#666" }}>peso</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="5"
+                  value={weight}
+                  onChange={(e) => updateWeight(st.id, e.target.value)}
+                  style={{
+                    width: 64,
+                    padding: "4px 6px",
+                    border: `1px solid ${st.color}55`,
+                    borderRadius: 5,
+                    fontSize: 12,
+                    textAlign: "center",
+                  }}
+                />
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── TaskCommentsThread helpers ────────────────────────────
 // Estos helpers son puros pero acceden a Date.now/Date que React 19 marca
 // como "impuros" si están en el render. Sacarlos del componente evita el
@@ -615,7 +781,7 @@ function TaskCommentsThread({ taskId, projectId }) {
   );
 }
 
-function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [], customFieldDefs = [] }) {
+function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [], customFieldDefs = [], projectId }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
   const isSuperUser = currentUser?.isSuperUser;
@@ -950,6 +1116,14 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
                   <option key={kr.id} value={kr.id}>{kr.title}</option>
                 ))}
               </select>
+            </F>
+          )}
+
+          {/* Enlace a super-tareas: una tarea puede alimentar varias super-tareas
+              con pesos distintos. Se persiste inmediatamente en task_super_links. */}
+          {task.id && projectId && (
+            <F label="Super-tareas que alimenta">
+              <TaskSuperLinksEditor taskId={task.id} projectId={projectId} />
             </F>
           )}
 
@@ -1376,7 +1550,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}
         >
-          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} customFieldDefs={taskFieldDefs} />
+          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} customFieldDefs={taskFieldDefs} projectId={projectId} />
         </Modal>
       )}
     </div>

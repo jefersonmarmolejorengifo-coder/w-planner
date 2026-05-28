@@ -371,7 +371,9 @@ export default async function handler(req) {
     },
     body: JSON.stringify({
       model: "claude-opus-4-7",
-      max_tokens: 8000,
+      // 16000 tokens = ~12000 palabras de salida; suficiente para proyectos
+      // con 100+ tareas sin que Opus deje el HTML cortado a la mitad.
+      max_tokens: 16000,
       stream: true,
       system: [
         {
@@ -399,6 +401,7 @@ export default async function handler(req) {
     async start(controller) {
       let buffer = "";
       let upstreamError = null;
+      let stopReason = null;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -414,8 +417,9 @@ export default async function handler(req) {
               const evt = JSON.parse(data);
               if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
                 controller.enqueue(encoder.encode(evt.delta.text));
+              } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
+                stopReason = evt.delta.stop_reason;
               } else if (evt.type === "error") {
-                // Anthropic envía un evento 'error' antes de cortar el stream.
                 upstreamError = new Error(evt.error?.message || "Anthropic stream error");
               }
             } catch {
@@ -427,16 +431,28 @@ export default async function handler(req) {
         upstreamError = err;
       }
       if (upstreamError) {
-        // Falla el stream: el cliente verá un fetch error en lugar de un HTML
-        // a medio camino que pase como reporte válido.
         controller.error(upstreamError);
         return;
+      }
+      if (stopReason === "max_tokens") {
+        // El modelo se quedó sin tokens y el HTML llegará truncado. Avisamos al
+        // cliente con un marker HTML que el frontend puede detectar.
+        controller.enqueue(encoder.encode(
+          "\n<!-- WPLANNER_TRUNCATED: el reporte alcanzó el límite de max_tokens. " +
+          "Sube max_tokens en api/generate-report.js o reduce el alcance del proyecto. -->\n"
+        ));
       }
       controller.close();
     },
   });
 
   return new Response(htmlStream, {
-    headers: { ...headers, "Content-Type": "text/html; charset=utf-8" },
+    headers: {
+      ...headers,
+      "Content-Type": "text/html; charset=utf-8",
+      // Header informativo (el cliente puede mirar resp.headers para saberlo
+      // antes de procesar el body).
+      "X-Wplanner-Model": "claude-opus-4-7",
+    },
   });
 }

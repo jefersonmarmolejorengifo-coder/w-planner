@@ -1,11 +1,82 @@
+import sanitizeHtml from "sanitize-html";
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAILS = 10;
 const MAX_HTML_BYTES = 300_000;
 
-const DISALLOWED_TAG_RE = /<\/?\s*(script|iframe|object|embed|form|input|button|meta|link|base|img)\b/i;
-const EVENT_HANDLER_RE = /\son[a-z0-9_-]+\s*=/i;
-const DANGEROUS_URL_RE = /\b(?:href|src|xlink:href)\s*=\s*(['"]?)\s*(?:javascript|data|vbscript):/i;
-const CSS_URL_RE = /url\s*\(/i;
+// Permite el subset que un correo HTML compatible con Gmail/Outlook necesita:
+// estructura básica, tablas, estilos inline, divs/spans con style.
+const SANITIZE_OPTIONS = {
+  allowedTags: [
+    "html", "head", "body", "title", "meta",
+    "div", "span", "p", "br", "hr",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li",
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th",
+    "strong", "b", "em", "i", "u", "small", "sub", "sup",
+    "a", "blockquote", "pre", "code",
+    "style",
+  ],
+  allowedAttributes: {
+    "*": ["style", "class", "id", "align", "width", "height", "bgcolor", "valign", "border", "cellpadding", "cellspacing", "colspan", "rowspan"],
+    a: ["href", "title", "target", "rel"],
+    meta: ["charset", "name", "content", "http-equiv"],
+  },
+  allowedSchemes: ["http", "https", "mailto"],
+  allowedSchemesByTag: { a: ["http", "https", "mailto"] },
+  allowProtocolRelative: false,
+  // Permite que sanitize-html mantenga atributos style con contenido CSS seguro.
+  allowedStyles: {
+    "*": {
+      // Casi todo lo común para HTML email queda permitido.
+      color: [/^[#a-z0-9(),.\s%-]+$/i],
+      "background": [/^[#a-z0-9(),.\s%-]+$/i],
+      "background-color": [/^[#a-z0-9(),.\s%-]+$/i],
+      "background-image": [/^(linear|radial)-gradient\(.+\)$/i],
+      "font-family": [/^[\w\s,'"-]+$/],
+      "font-size": [/^\d+(\.\d+)?(px|em|rem|%|pt)?$/],
+      "font-weight": [/^(bold|normal|lighter|bolder|[1-9]00)$/],
+      "font-style": [/^(italic|normal|oblique)$/],
+      "text-align": [/^(left|right|center|justify)$/],
+      "text-decoration": [/^[\w\s-]+$/],
+      "line-height": [/^[\d.]+(px|em|%)?$/],
+      "letter-spacing": [/^-?\d+(\.\d+)?(px|em)$/],
+      "padding": [/^[\d.\s%pxem-]+$/],
+      "padding-top": [/^[\d.\s%pxem-]+$/],
+      "padding-right": [/^[\d.\s%pxem-]+$/],
+      "padding-bottom": [/^[\d.\s%pxem-]+$/],
+      "padding-left": [/^[\d.\s%pxem-]+$/],
+      "margin": [/^[\d.\s%pxem-]+$/],
+      "margin-top": [/^[\d.\s%pxem-]+$/],
+      "margin-right": [/^[\d.\s%pxem-]+$/],
+      "margin-bottom": [/^[\d.\s%pxem-]+$/],
+      "margin-left": [/^[\d.\s%pxem-]+$/],
+      "border": [/^[\w\s#(),.%-]+$/],
+      "border-top": [/^[\w\s#(),.%-]+$/],
+      "border-right": [/^[\w\s#(),.%-]+$/],
+      "border-bottom": [/^[\w\s#(),.%-]+$/],
+      "border-left": [/^[\w\s#(),.%-]+$/],
+      "border-radius": [/^[\d.\s%pxem-]+$/],
+      "border-color": [/^[#a-z0-9(),.\s%-]+$/i],
+      "border-style": [/^(solid|dashed|dotted|double|none)$/],
+      "border-width": [/^[\d.\s%pxem-]+$/],
+      "width": [/^[\d.\s%pxem-]+$/],
+      "max-width": [/^[\d.\s%pxem-]+$/],
+      "min-width": [/^[\d.\s%pxem-]+$/],
+      "height": [/^[\d.\s%pxem-]+$/],
+      "max-height": [/^[\d.\s%pxem-]+$/],
+      "display": [/^(block|inline|inline-block|none|table|table-row|table-cell)$/],
+      "vertical-align": [/^(top|middle|bottom|baseline|sub|super)$/],
+      "text-transform": [/^(uppercase|lowercase|capitalize|none)$/],
+      "white-space": [/^(normal|nowrap|pre|pre-wrap|pre-line)$/],
+      "overflow": [/^(hidden|visible|scroll|auto)$/],
+      "opacity": [/^[\d.]+$/],
+    },
+  },
+  // Bloquea url() en CSS (data:/javascript: dentro de url()).
+  parser: { lowerCaseAttributeNames: true },
+  disallowedTagsMode: "discard",
+};
 
 const configError = (message) => {
   const err = new Error(message);
@@ -45,9 +116,15 @@ export const normalizeRecipients = (emails) => {
   return recipients;
 };
 
+// Sanitiza el HTML del reporte usando sanitize-html con allowlist explícita.
+// Reemplaza el sanitizador regex anterior, frágil ante HTML malformado.
 export const sanitizeReportHtml = (html) => {
   const value = String(html || "");
-  if (Buffer.byteLength(value, "utf8") > MAX_HTML_BYTES) {
+
+  const byteLength = typeof Buffer !== "undefined"
+    ? Buffer.byteLength(value, "utf8")
+    : new TextEncoder().encode(value).byteLength;
+  if (byteLength > MAX_HTML_BYTES) {
     const err = new Error("El reporte supera el tamano permitido");
     err.status = 413;
     throw err;
@@ -57,15 +134,20 @@ export const sanitizeReportHtml = (html) => {
     err.status = 400;
     throw err;
   }
-  if (
-    DISALLOWED_TAG_RE.test(value) ||
-    EVENT_HANDLER_RE.test(value) ||
-    DANGEROUS_URL_RE.test(value) ||
-    CSS_URL_RE.test(value)
-  ) {
-    const err = new Error("El HTML del reporte contiene contenido no permitido");
-    err.status = 400;
+
+  // sanitize-html elimina tags/atributos/CSS no permitidos sin romper el resto.
+  const sanitized = sanitizeHtml(value, SANITIZE_OPTIONS);
+
+  // Re-validar tamaño post-sanitización (debería bajar, no subir).
+  const cleanLength = typeof Buffer !== "undefined"
+    ? Buffer.byteLength(sanitized, "utf8")
+    : new TextEncoder().encode(sanitized).byteLength;
+  if (cleanLength > MAX_HTML_BYTES) {
+    const err = new Error("El reporte sanitizado sigue siendo demasiado grande");
+    err.status = 413;
     throw err;
   }
-  return value;
+
+  // Preserva el <!doctype> porque sanitize-html lo descarta.
+  return `<!DOCTYPE html>\n${sanitized}`;
 };

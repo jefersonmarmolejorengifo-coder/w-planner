@@ -752,7 +752,12 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
           )}
 
           <F label="Comentarios">
-            <textarea style={{ ...inp, minHeight: 72, resize: "vertical" }} value={task.comments} onChange={(e) => upd("comments", e.target.value)} />
+            <textarea
+              style={{ ...inp, minHeight: 110, resize: "vertical" }}
+              value={task.comments}
+              onChange={(e) => upd("comments", e.target.value)}
+              placeholder={"¿Qué quieres lograr?\n¿Quién gana con esto?\nPasos 1. 2. 3.\n¿Cómo sabrás que quedó bien?\n¿Qué te puede frenar?"}
+            />
           </F>
 
           {customFieldDefs && customFieldDefs.length > 0 && (
@@ -2198,7 +2203,29 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         try { const e = await genRes.json(); errMsg = e.error || errMsg; } catch { /* keep generic server error */ }
         throw new Error(errMsg);
       }
-      const html = await genRes.text();
+
+      // Aprovecha el streaming SSE: muestra progreso en bytes mientras llega
+      // el HTML, en vez de esperar el body completo.
+      let html = "";
+      if (genRes.body && typeof genRes.body.getReader === "function") {
+        const reader = genRes.body.getReader();
+        const decoder = new TextDecoder();
+        let chunks = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          html += decoder.decode(value, { stream: true });
+          chunks++;
+          if (chunks % 5 === 0) {
+            const kb = (html.length / 1024).toFixed(1);
+            setReportMsg(`Generando reporte con IA... ${kb} KB recibidos`);
+          }
+        }
+        html += decoder.decode();
+      } else {
+        // Fallback navegadores sin streaming.
+        html = await genRes.text();
+      }
 
       setReportMsg("Reporte generado. Enviando correos...");
 

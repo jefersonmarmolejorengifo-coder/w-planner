@@ -129,6 +129,32 @@ export default async function handler(req, res) {
 
   try {
     const supabase = createSupabase(null, { admin: true });
+
+    // Keep-alive: mantiene a Supabase Free despierto. Cada hora se chequea;
+    // sólo escribe cuando han pasado >=6 días. Tabla creada en migración 010.
+    try {
+      const { data: ka } = await supabase
+        .from("_keepalive")
+        .select("pinged_at")
+        .eq("id", 1)
+        .maybeSingle();
+      const daysSince = ka?.pinged_at
+        ? (Date.now() - new Date(ka.pinged_at).getTime()) / 86_400_000
+        : 999;
+      if (daysSince >= 6) {
+        const chars = [".", ",", "*", "·", "~", ":"];
+        const ch = chars[Math.floor(Math.random() * chars.length)];
+        await supabase
+          .from("_keepalive")
+          .update({ ch, pinged_at: new Date().toISOString() })
+          .eq("id", 1);
+        console.log("[cron] keepalive ping:", ch);
+      }
+    } catch (kaErr) {
+      // No bloquees el cron principal si la tabla aún no existe (pre-010).
+      console.warn("[cron] keepalive skipped:", kaErr?.message);
+    }
+
     const { data: configs, error } = await supabase
       .from("email_config")
       .select("*")

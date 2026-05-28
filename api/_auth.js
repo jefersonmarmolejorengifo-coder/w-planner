@@ -1,6 +1,23 @@
 import { createClient } from "@supabase/supabase-js";
+import { jwtVerify, createRemoteJWKSet } from "jose";
 
 const DEFAULT_APP_ORIGIN = "https://productivity-plus.vercel.app";
+
+let _jwksCache;
+const getJwks = () => {
+  const url = getSupabaseUrl();
+  if (!url) throw new Error("Supabase URL is not configured");
+  if (!_jwksCache || _jwksCache.url !== url) {
+    _jwksCache = {
+      url,
+      jwks: createRemoteJWKSet(new URL(`${url}/auth/v1/.well-known/jwks.json`), {
+        cacheMaxAge: 10 * 60 * 1000,
+        cooldownDuration: 30 * 1000,
+      }),
+    };
+  }
+  return _jwksCache.jwks;
+};
 
 const splitOrigins = (value = "") =>
   value
@@ -84,6 +101,9 @@ export const createSupabase = (token, { admin = false } = {}) => {
   });
 };
 
+// Verifica el JWT contra la JWKS pública de Supabase (firma criptográfica).
+// No depende de auth.sessions; sobrevive logins múltiples y rotaciones de la
+// tabla de sesiones que rompen `auth.getUser(token)` server-side.
 export const getAuthenticatedUser = async (token) => {
   if (!token) {
     const err = new Error("Authorization bearer token is required");
@@ -91,14 +111,37 @@ export const getAuthenticatedUser = async (token) => {
     throw err;
   }
 
-  const supabase = createSupabase(token);
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) {
-    const err = new Error(error?.message || "Invalid or expired session");
+  const supabaseUrl = getSupabaseUrl();
+  if (!supabaseUrl) {
+    const err = new Error("Supabase URL is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, getJwks(), {
+      issuer: `${supabaseUrl}/auth/v1`,
+      audience: "authenticated",
+      clockTolerance: 30,
+    });
+    if (!payload.sub) {
+      const err = new Error("Token sin claim 'sub'");
+      err.status = 401;
+      throw err;
+    }
+    return {
+      id: payload.sub,
+      email: payload.email || null,
+      role: payload.role || "authenticated",
+      aud: payload.aud,
+      app_metadata: payload.app_metadata || {},
+      user_metadata: payload.user_metadata || {},
+    };
+  } catch (cause) {
+    const err = new Error(cause?.message || "Sesión inválida o expirada");
     err.status = 401;
     throw err;
   }
-  return data.user;
 };
 
 export const assertProjectAccess = async (supabase, user, projectId, { ownerOnly = false } = {}) => {

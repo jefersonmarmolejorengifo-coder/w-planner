@@ -364,7 +364,9 @@ export default async function handler(req) {
       // para narrativa analítica. Cabe en el cap de 60s del runtime Node de
       // Vercel Hobby. Si subes a Vercel Pro (300s) puedes volver a Opus.
       model: "claude-sonnet-4-6",
-      max_tokens: 8000,
+      // 4000 tokens = ~3000 palabras, suficiente para narrativa ejecutiva
+      // mensual. Cabe en 30-40s en el runtime Node Hobby (cap 60s).
+      max_tokens: 4000,
       system: [
         {
           type: "text",

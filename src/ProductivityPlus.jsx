@@ -4366,28 +4366,40 @@ function PresentationTab({ tasks, participants, taskFieldDefs, sprints }) {
     return [...new Set([...fromParticipants, ...fromTasks])].sort();
   }, [tasks, participants]);
 
+  // Resolver nombre de sprint de una tarea: prioriza sprint_id contra la tabla,
+  // luego custom_fields.sprint, luego null.
+  const sprintNameOfTask = (t) => {
+    if (t.sprint_id || t.sprintId) {
+      const id = t.sprint_id || t.sprintId;
+      const s = (sprints || []).find(s => String(s.id) === String(id));
+      if (s?.name) return s.name;
+    }
+    const cf = t.custom_fields || t.customFields || {};
+    if (cf.sprint) return String(cf.sprint);
+    return null;
+  };
+
   const visibleTasks = useMemo(() => {
     return tasks.filter(t => {
       if (selectedPersona !== "__all__" && t.responsible !== selectedPersona) return false;
       if (statusFilter !== "__all__" && t.status !== statusFilter) return false;
       if (selectedSprint !== "__all__") {
-        const cf = t.custom_fields || t.customFields || {};
-        const sprintLabel = cf.sprint || "";
-        if (sprintLabel !== selectedSprint) return false;
+        if (sprintNameOfTask(t) !== selectedSprint) return false;
       }
       return true;
     });
-  }, [tasks, selectedPersona, statusFilter, selectedSprint]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, selectedPersona, statusFilter, selectedSprint, sprints]);
 
-  // Sprints disponibles: extraídos del custom field "sprint" o de la tabla sprints.
+  // Sprints disponibles: tabla sprints + custom field sprint.
   const sprintOptions = useMemo(() => {
-    const fromCustom = new Set();
+    const found = new Set();
+    (sprints || []).forEach(s => { if (s.name) found.add(s.name); });
     tasks.forEach(t => {
       const cf = t.custom_fields || t.customFields || {};
-      if (cf.sprint) fromCustom.add(String(cf.sprint));
+      if (cf.sprint) found.add(String(cf.sprint));
     });
-    const fromTable = (sprints || []).map(s => s.name).filter(Boolean);
-    return [...new Set([...fromTable, ...fromCustom])].sort();
+    return [...found].sort();
   }, [tasks, sprints]);
 
   const STATUS_COLORS = {
@@ -4513,18 +4525,32 @@ function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive,
   const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
   const subtasksDone = subtasks.filter(s => s.done).length;
 
-  // Dependencia y dependientes (a quién obstaculizo / quién me obstaculiza)
-  const dependsOn = task.dependent_task || task.dependentTask;
-  const blockingThis = dependsOn ? tasks.find(t => String(t.id) === String(dependsOn)) : null;
+  // Dependencias (CSV "12,34" → IDs múltiples). A quién obstaculizo y quién me obstaculiza.
+  const myDeps = parseDeps(task.dependent_task || task.dependentTask);
+  const blockingMe = myDeps
+    .map(id => tasks.find(t => String(t.id) === id))
+    .filter(Boolean);
   const blockedByThis = tasks.filter(t =>
-    String(t.dependent_task || t.dependentTask || "") === String(task.id)
+    parseDeps(t.dependent_task || t.dependentTask).includes(String(task.id))
   );
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Tarea ${task.id}: ${task.title}. Estado ${status}. Progreso ${progress}%`}
+      aria-pressed={pinned}
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
+      onFocus={onHover}
+      onBlur={onLeave}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       style={{
         position: "relative",
         background: "#fff",
@@ -4535,7 +4561,9 @@ function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive,
         transition: "all 200ms ease",
         boxShadow: isActive ? `0 8px 24px rgba(0,0,0,0.15), 0 0 0 2px ${statusColor}33` : "0 1px 3px rgba(0,0,0,0.05)",
         transform: isActive ? "translateY(-2px)" : "none",
+        outline: "none",
       }}
+      onKeyUp={(e) => { if (e.key === "Escape") onLeave(); }}
     >
       {pinned && (
         <div style={{ position: "absolute", top: 8, right: 8, fontSize: 10, color: statusColor, fontWeight: 700 }}>📌 FIJADA</div>
@@ -4623,11 +4651,11 @@ function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive,
           </div>
 
           {/* Dependencias */}
-          {(blockingThis || blockedByThis.length > 0) && (
+          {(blockingMe.length > 0 || blockedByThis.length > 0) && (
             <div style={{ marginBottom: 10, padding: 8, background: "#fff8f0", borderLeft: "3px solid #ef7218", borderRadius: 4 }}>
               <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Enlaces de tareas</div>
-              {blockingThis && (
-                <div style={{ fontSize: 12 }}>⬅️ Me obstaculiza: <b>#{blockingThis.id}</b> {blockingThis.title}</div>
+              {blockingMe.length > 0 && (
+                <div style={{ fontSize: 12 }}>⬅️ Me obstaculiza{blockingMe.length > 1 ? "n" : ""}: {blockingMe.map(b => `#${b.id} ${b.title}`).join(" · ")}</div>
               )}
               {blockedByThis.length > 0 && (
                 <div style={{ fontSize: 12, marginTop: 2 }}>
@@ -5408,8 +5436,15 @@ export default function App() {
       position: typeof payload.position === 'number' ? payload.position : taskFieldDefs.length,
       required: !!payload.required,
       show_on_card: !!payload.show_on_card,
+      show_in_presentation: !!payload.show_in_presentation,
     };
-    const { data, error } = await supabase.from('task_field_defs').insert(insertPayload).select().single();
+    let { data, error } = await supabase.from('task_field_defs').insert(insertPayload).select().single();
+    // Graceful: si la migración 011 aún no se aplicó, reintenta sin la columna nueva.
+    if (error && /show_in_presentation/i.test(error.message || '')) {
+      const fallback = { ...insertPayload };
+      delete fallback.show_in_presentation;
+      ({ data, error } = await supabase.from('task_field_defs').insert(fallback).select().single());
+    }
     if (!error && data) {
       setTaskFieldDefs(prev => {
         if (prev.find(d => d.id === data.id)) return prev;
@@ -5425,13 +5460,25 @@ export default function App() {
     // Never let the client move a def to another project or undelete via update.
     delete safePatch.project_id;
     delete safePatch.id;
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('task_field_defs')
       .update(safePatch)
       .eq('id', id)
       .eq('project_id', projectId)
       .select()
       .single();
+    // Graceful: si la migración 011 aún no se aplicó, reintenta sin la columna nueva.
+    if (error && /show_in_presentation/i.test(error.message || '')) {
+      const fallback = { ...safePatch };
+      delete fallback.show_in_presentation;
+      ({ data, error } = await supabase
+        .from('task_field_defs')
+        .update(fallback)
+        .eq('id', id)
+        .eq('project_id', projectId)
+        .select()
+        .single());
+    }
     if (!error && data) {
       setTaskFieldDefs(prev => prev.map(d => d.id === id ? data : d).sort((a, b) => (a.position - b.position) || (a.id - b.id)));
     }

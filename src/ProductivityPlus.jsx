@@ -1801,7 +1801,7 @@ function slugifyKey(label) {
 
 function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
   const [showNew, setShowNew] = useState(false);
-  const [draft, setDraft] = useState({ label: '', type: 'text', required: false, show_on_card: false, options: '', source: 'created_at' });
+  const [draft, setDraft] = useState({ label: '', type: 'text', required: false, show_on_card: false, show_in_presentation: false, options: '', source: 'created_at' });
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1850,6 +1850,7 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
       key, label, type: draft.type,
       required: !!draft.required,
       show_on_card: !!draft.show_on_card,
+      show_in_presentation: !!draft.show_in_presentation,
       config,
     });
     setBusy(false);
@@ -1857,7 +1858,7 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
       setError(err.message || 'Error al guardar el campo.');
       return;
     }
-    setDraft({ label: '', type: 'text', required: false, show_on_card: false, options: '', source: 'created_at' });
+    setDraft({ label: '', type: 'text', required: false, show_on_card: false, show_in_presentation: false, options: '', source: 'created_at' });
     setShowNew(false);
   };
 
@@ -1867,6 +1868,7 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
       label: def.label,
       required: !!def.required,
       show_on_card: !!def.show_on_card,
+      show_in_presentation: !!def.show_in_presentation,
       options: (def.config?.options || []).join('\n'),
       source: def.config?.source || 'created_at',
       maxLength: def.config?.maxLength || '',
@@ -1885,6 +1887,7 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
       label,
       required: !!editDraft.required,
       show_on_card: !!editDraft.show_on_card,
+      show_in_presentation: !!editDraft.show_in_presentation,
       config: buildConfigFromDraft({ ...editDraft, type: def.type }),
     };
     setBusy(true);
@@ -1978,6 +1981,10 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
                     <input type="checkbox" checked={editDraft.show_on_card} onChange={(e) => setEditDraft(d => ({ ...d, show_on_card: e.target.checked }))} />
                     Mostrar en tarjeta resumida
                   </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#525252' }}>
+                    <input type="checkbox" checked={!!editDraft.show_in_presentation} onChange={(e) => setEditDraft(d => ({ ...d, show_in_presentation: e.target.checked }))} />
+                    Mostrar en Presentación
+                  </label>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button disabled={busy} onClick={() => handleSaveEdit(def)} style={{ background: 'linear-gradient(135deg, #ec6c04, #f07d1e)', border: 'none', color: '#fff', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
@@ -1997,6 +2004,7 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
                     <span>· clave: <code style={{ fontSize: 11 }}>{def.key}</code></span>
                     {def.required && <span style={{ color: '#c0392b' }}>· requerido</span>}
                     {def.show_on_card && <span style={{ color: '#149cac' }}>· en tarjeta</span>}
+                    {def.show_in_presentation && <span style={{ color: '#ef7218' }}>· en presentación</span>}
                     {def.type === 'auto' && def.config?.source && <span>· origen: {AUTO_FIELD_SOURCE_LABELS[def.config.source] || def.config.source}</span>}
                   </div>
                 </div>
@@ -2051,6 +2059,10 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#525252' }}>
               <input type="checkbox" checked={draft.show_on_card} onChange={(e) => setDraft(d => ({ ...d, show_on_card: e.target.checked }))} />
               Mostrar en tarjeta resumida
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#525252' }}>
+              <input type="checkbox" checked={!!draft.show_in_presentation} onChange={(e) => setDraft(d => ({ ...d, show_in_presentation: e.target.checked }))} />
+              Mostrar en Presentación
             </label>
           </div>
 
@@ -4336,6 +4348,331 @@ function SprintsTab({ projectId, sprints, setSprints, tasks }) {
   );
 }
 
+// ─── PresentationTab (Presentación Sprint) ────────────────
+// Vista enfocada en un participante. Muestra todas sus tareas como tarjetas
+// con tarjeta resumen al hover/click: aporte, tiempo de cierre, comentarios,
+// subtareas, indicador, custom fields opt-in. Útil para reuniones de sprint
+// y para que cada persona explique su trabajo al equipo.
+function PresentationTab({ tasks, participants, taskFieldDefs, sprints }) {
+  const [selectedPersona, setSelectedPersona] = useState("__all__");
+  const [selectedSprint, setSelectedSprint] = useState("__all__");
+  const [statusFilter, setStatusFilter] = useState("__all__");
+  const [hoverTaskId, setHoverTaskId] = useState(null);
+  const [pinnedTaskId, setPinnedTaskId] = useState(null);
+
+  const personas = useMemo(() => {
+    const fromTasks = new Set(tasks.map(t => t.responsible).filter(Boolean));
+    const fromParticipants = participants.map(p => p.name);
+    return [...new Set([...fromParticipants, ...fromTasks])].sort();
+  }, [tasks, participants]);
+
+  const visibleTasks = useMemo(() => {
+    return tasks.filter(t => {
+      if (selectedPersona !== "__all__" && t.responsible !== selectedPersona) return false;
+      if (statusFilter !== "__all__" && t.status !== statusFilter) return false;
+      if (selectedSprint !== "__all__") {
+        const cf = t.custom_fields || t.customFields || {};
+        const sprintLabel = cf.sprint || "";
+        if (sprintLabel !== selectedSprint) return false;
+      }
+      return true;
+    });
+  }, [tasks, selectedPersona, statusFilter, selectedSprint]);
+
+  // Sprints disponibles: extraídos del custom field "sprint" o de la tabla sprints.
+  const sprintOptions = useMemo(() => {
+    const fromCustom = new Set();
+    tasks.forEach(t => {
+      const cf = t.custom_fields || t.customFields || {};
+      if (cf.sprint) fromCustom.add(String(cf.sprint));
+    });
+    const fromTable = (sprints || []).map(s => s.name).filter(Boolean);
+    return [...new Set([...fromTable, ...fromCustom])].sort();
+  }, [tasks, sprints]);
+
+  const STATUS_COLORS = {
+    "Sin iniciar": "#7f8c8d",
+    "En proceso": "#0aa0ab",
+    "Bloqueada": "#e74c3c",
+    "En pausa": "#f39c12",
+    "Cancelada": "#95a5a6",
+    "Finalizada": "#27ae60",
+    "No programada": "#95a5a6",
+  };
+
+  // Métricas resumen del participante seleccionado
+  const personaStats = useMemo(() => {
+    const tasksOf = selectedPersona === "__all__" ? visibleTasks : visibleTasks.filter(t => t.responsible === selectedPersona);
+    const finalizadas = tasksOf.filter(t => t.status === "Finalizada").length;
+    const bloqueadas = tasksOf.filter(t => t.status === "Bloqueada").length;
+    const enProceso = tasksOf.filter(t => t.status === "En proceso").length;
+    const aporteTotal = tasksOf.reduce((s, t) => s + (parseFloat(t.aporte_snapshot || t.aporteSnapshot) || 0), 0);
+    const avgProgress = tasksOf.length ? Math.round(tasksOf.reduce((s,t) => s + (parseFloat(t.progress_percent || t.progressPercent) || 0), 0) / tasksOf.length) : 0;
+    return { total: tasksOf.length, finalizadas, bloqueadas, enProceso, aporteTotal, avgProgress };
+  }, [visibleTasks, selectedPersona]);
+
+  return (
+    <div style={{ padding: 20, fontFamily: "system-ui, sans-serif" }}>
+      {/* Encabezado y filtros */}
+      <div style={{ background: "linear-gradient(135deg, #0aa0ab 0%, #ef7218 100%)", borderRadius: 12, padding: 24, marginBottom: 20, color: "#fff" }}>
+        <h2 style={{ margin: "0 0 8px 0", fontSize: 24, fontWeight: 700 }}>Presentación Sprint</h2>
+        <p style={{ margin: 0, opacity: 0.9, fontSize: 14 }}>Vista enfocada por persona: pasa el cursor o haz clic en una tarjeta para ver su resumen.</p>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20, alignItems: "flex-end" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#666", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Persona</label>
+          <select value={selectedPersona} onChange={e => setSelectedPersona(e.target.value)} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 14, minWidth: 180 }}>
+            <option value="__all__">Todas las personas</option>
+            {personas.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#666", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Sprint</label>
+          <select value={selectedSprint} onChange={e => setSelectedSprint(e.target.value)} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 14, minWidth: 140 }}>
+            <option value="__all__">Todos los sprints</option>
+            {sprintOptions.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#666", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Estado</label>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 14, minWidth: 140 }}>
+            <option value="__all__">Todos los estados</option>
+            {Object.keys(STATUS_COLORS).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div style={{ marginLeft: "auto", fontSize: 13, color: "#666" }}>
+          {visibleTasks.length} tarea{visibleTasks.length === 1 ? "" : "s"}
+        </div>
+      </div>
+
+      {/* Resumen de la persona */}
+      {selectedPersona !== "__all__" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
+          <StatCard label="Tareas" value={personaStats.total} color="#0aa0ab" />
+          <StatCard label="Finalizadas" value={personaStats.finalizadas} color="#27ae60" />
+          <StatCard label="En proceso" value={personaStats.enProceso} color="#ef7218" />
+          <StatCard label="Bloqueadas" value={personaStats.bloqueadas} color="#e74c3c" />
+          <StatCard label="Aporte total" value={personaStats.aporteTotal.toFixed(1)} color="#ef7218" />
+          <StatCard label="Progreso prom." value={`${personaStats.avgProgress}%`} color="#0aa0ab" />
+        </div>
+      )}
+
+      {/* Grid de tarjetas */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+        {visibleTasks.length === 0 ? (
+          <div style={{ gridColumn: "1/-1", padding: 40, textAlign: "center", color: "#999", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
+            No hay tareas con esos filtros.
+          </div>
+        ) : visibleTasks.map(task => (
+          <PresentationCard
+            key={task.id}
+            task={task}
+            taskFieldDefs={taskFieldDefs}
+            tasks={tasks}
+            colorByStatus={STATUS_COLORS}
+            isActive={hoverTaskId === task.id || pinnedTaskId === task.id}
+            onHover={() => setHoverTaskId(task.id)}
+            onLeave={() => setHoverTaskId(null)}
+            onClick={() => setPinnedTaskId(p => p === task.id ? null : task.id)}
+            pinned={pinnedTaskId === task.id}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, color }) {
+  return (
+    <div style={{ padding: 16, background: "#fafafa", borderTop: `3px solid ${color}`, borderRadius: 8, textAlign: "center" }}>
+      <div style={{ fontSize: 28, fontWeight: 700, color }}>{value}</div>
+      <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 4 }}>{label}</div>
+    </div>
+  );
+}
+
+function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive, onHover, onLeave, onClick, pinned }) {
+  const status = task.status || "Sin iniciar";
+  const statusColor = colorByStatus[status] || "#888";
+  const progress = parseFloat(task.progress_percent || task.progressPercent) || 0;
+  const aporte = parseFloat(task.aporte_snapshot || task.aporteSnapshot) || 0;
+
+  // Tiempo de cierre real cuando aplique
+  const closedAt = task.closed_at || task.closedAt;
+  const createdAt = task.inserted_at || task.insertedAt || task.created_at_colombia;
+  const diasCierre = (closedAt && createdAt)
+    ? Math.max(1, Math.round((new Date(closedAt) - new Date(createdAt)) / 86400000))
+    : null;
+
+  const customFields = task.custom_fields || task.customFields || {};
+  const visibleCustomFields = (taskFieldDefs || []).filter(d =>
+    !d.deleted_at && d.type !== "auto" && d.show_in_presentation
+  );
+
+  const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+  const subtasksDone = subtasks.filter(s => s.done).length;
+
+  // Dependencia y dependientes (a quién obstaculizo / quién me obstaculiza)
+  const dependsOn = task.dependent_task || task.dependentTask;
+  const blockingThis = dependsOn ? tasks.find(t => String(t.id) === String(dependsOn)) : null;
+  const blockedByThis = tasks.filter(t =>
+    String(t.dependent_task || t.dependentTask || "") === String(task.id)
+  );
+
+  return (
+    <div
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+      onClick={onClick}
+      style={{
+        position: "relative",
+        background: "#fff",
+        border: `1px solid ${isActive ? statusColor : "#e0e0e0"}`,
+        borderRadius: 10,
+        padding: 14,
+        cursor: "pointer",
+        transition: "all 200ms ease",
+        boxShadow: isActive ? `0 8px 24px rgba(0,0,0,0.15), 0 0 0 2px ${statusColor}33` : "0 1px 3px rgba(0,0,0,0.05)",
+        transform: isActive ? "translateY(-2px)" : "none",
+      }}
+    >
+      {pinned && (
+        <div style={{ position: "absolute", top: 8, right: 8, fontSize: 10, color: statusColor, fontWeight: 700 }}>📌 FIJADA</div>
+      )}
+
+      {/* Cabecera */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ background: statusColor, color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 10, fontWeight: 600 }}>
+          {status}
+        </span>
+        <span style={{ fontSize: 11, color: "#999" }}>#{task.id}</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#888" }}>{progress}%</span>
+      </div>
+
+      {/* Título */}
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#222", marginBottom: 6, lineHeight: 1.3 }}>
+        {task.title || "Sin título"}
+      </div>
+
+      {/* Responsable + indicador */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, fontSize: 11, color: "#666", marginBottom: 8 }}>
+        {task.responsible && <span>👤 {task.responsible}</span>}
+        {task.indicator && <span>🎯 {task.indicator}</span>}
+        {aporte > 0 && <span>⚡ Aporte {aporte.toFixed(1)}</span>}
+      </div>
+
+      {/* Barra de progreso */}
+      <div style={{ height: 4, background: "#f0f0f0", borderRadius: 2, overflow: "hidden", marginBottom: isActive ? 12 : 0 }}>
+        <div style={{ width: `${progress}%`, height: "100%", background: statusColor, transition: "width 300ms" }} />
+      </div>
+
+      {/* Panel desplegado al hover/click */}
+      {isActive && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0f0f0", fontSize: 12, color: "#555", lineHeight: 1.5 }}>
+          {task.expected_delivery && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Entregable</div>
+              <div>{task.expected_delivery || task.expectedDelivery}</div>
+            </div>
+          )}
+
+          {task.comments && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Comentarios y observaciones</div>
+              <div style={{ background: "#f9f9f9", padding: 8, borderRadius: 6, marginTop: 4, whiteSpace: "pre-wrap" }}>{task.comments}</div>
+            </div>
+          )}
+
+          {subtasks.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>Subtareas ({subtasksDone}/{subtasks.length})</div>
+              <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
+                {subtasks.map((s, i) => (
+                  <li key={i} style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? "#999" : "#444" }}>{s.text}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+            {(task.start_date || task.startDate) && (
+              <div>
+                <div style={{ fontSize: 10, color: "#888" }}>Inicio</div>
+                <div>{task.start_date || task.startDate}</div>
+              </div>
+            )}
+            {(task.end_date || task.endDate) && (
+              <div>
+                <div style={{ fontSize: 10, color: "#888" }}>Fin</div>
+                <div>{task.end_date || task.endDate}</div>
+              </div>
+            )}
+            {diasCierre !== null && (
+              <div>
+                <div style={{ fontSize: 10, color: "#888" }}>Tiempo de cierre</div>
+                <div>{diasCierre} día{diasCierre === 1 ? "" : "s"}</div>
+              </div>
+            )}
+            {task.type && (
+              <div>
+                <div style={{ fontSize: 10, color: "#888" }}>Tipo</div>
+                <div>{task.type}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Dependencias */}
+          {(blockingThis || blockedByThis.length > 0) && (
+            <div style={{ marginBottom: 10, padding: 8, background: "#fff8f0", borderLeft: "3px solid #ef7218", borderRadius: 4 }}>
+              <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Enlaces de tareas</div>
+              {blockingThis && (
+                <div style={{ fontSize: 12 }}>⬅️ Me obstaculiza: <b>#{blockingThis.id}</b> {blockingThis.title}</div>
+              )}
+              {blockedByThis.length > 0 && (
+                <div style={{ fontSize: 12, marginTop: 2 }}>
+                  ➡️ Obstaculizo a: {blockedByThis.map(b => `#${b.id}`).join(", ")}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Custom fields opt-in */}
+          {visibleCustomFields.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Campos personalizados</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {visibleCustomFields.map(def => {
+                  const v = customFields[def.key];
+                  if (v === undefined || v === null || v === "") return null;
+                  let display = v;
+                  if (def.type === "multiselect" && Array.isArray(v)) display = v.join(", ");
+                  else if (def.type === "subitems" && Array.isArray(v)) {
+                    const done = v.filter(i => i.done).length;
+                    display = `${done}/${v.length}`;
+                  } else if (typeof v === "object") display = JSON.stringify(v);
+                  return (
+                    <div key={def.key}>
+                      <div style={{ fontSize: 10, color: "#888" }}>{def.label}</div>
+                      <div style={{ fontSize: 12 }}>{String(display)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {visibleCustomFields.length === 0 && (taskFieldDefs || []).some(d => !d.deleted_at && d.type !== "auto") && (
+            <div style={{ fontSize: 10, color: "#bbb", fontStyle: "italic", textAlign: "center", marginTop: 4 }}>
+              Ningún campo personalizado marcado para mostrar aquí. Actívalo desde Configuración → Campos personalizados.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── FocusTab (Mi Día) ─────────────────────────────────────
 function FocusTab({ tasks, activeUser, updateTask, dimensions }) {
   const today = new Date().toISOString().split('T')[0];
@@ -5255,6 +5592,7 @@ export default function App() {
     { id: "okrs", label: "OKRs" },
     { id: "sprints", label: "Sprints" },
     { id: "focus", label: "Mi Día" },
+    { id: "presentation", label: "Presentación" },
     { id: "config", label: "Configuración" },
   ];
 
@@ -5542,6 +5880,14 @@ export default function App() {
         )}
         {activeTab === "focus" && (
           <FocusTab tasks={tasks} activeUser={activeUser} updateTask={updateTask} dimensions={dimensions} />
+        )}
+        {activeTab === "presentation" && (
+          <PresentationTab
+            tasks={tasks}
+            participants={participants}
+            taskFieldDefs={taskFieldDefs}
+            sprints={sprints}
+          />
         )}
         {activeTab === "config" && (() => {
           const isOwner = project?.owner_id === authUser?.id;

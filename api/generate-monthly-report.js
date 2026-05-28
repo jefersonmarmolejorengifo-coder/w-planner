@@ -8,7 +8,9 @@ import {
   jsonResponse,
 } from "./_auth.js";
 
-export const config = { runtime: "edge" };
+// Node runtime: el reporte mensual con Opus 4.7 + 100+ tareas + 2 reportes
+// previos puede tardar 30-60s, que excede el cap de 25s del Edge runtime.
+export const config = { runtime: "nodejs", maxDuration: 60 };
 
 function jsonError(msg, status, headers) {
   return jsonResponse({ error: msg }, status, headers);
@@ -78,7 +80,8 @@ function computeTeamAnalytics({ tasks, monthStart, monthEnd }) {
       p.indicadoresPorPersona[ind] = (p.indicadoresPorPersona[ind] || 0) + 1;
 
       if (t.comments && t.comments.trim()) {
-        p.comentariosMes.push(`#${t.id}: ${t.comments.trim().slice(0, 300)}`);
+        // Trunca a 180 chars: el modelo necesita una muestra, no el comentario completo.
+        p.comentariosMes.push(`#${t.id}: ${t.comments.trim().slice(0, 180)}`);
       }
 
       if (Array.isArray(t.subtasks)) {
@@ -358,7 +361,10 @@ export default async function handler(req) {
     },
     body: JSON.stringify({
       model: "claude-opus-4-7",
-      max_tokens: 16000,
+      // 8000 tokens es suficiente para narrativa mensual y respeta el cap de
+      // 60s del runtime Node de Vercel hobby. Si quieres más texto en
+      // proyectos enormes, sube a 12000 cuando muevas a plan Pro (300s cap).
+      max_tokens: 8000,
       system: [
         {
           type: "text",

@@ -4488,6 +4488,7 @@ function PresentationTab({ tasks, participants, taskFieldDefs, sprints }) {
             onLeave={() => setHoverTaskId(null)}
             onClick={() => setPinnedTaskId(p => p === task.id ? null : task.id)}
             pinned={pinnedTaskId === task.id}
+            focusedPersona={selectedPersona === "__all__" ? null : selectedPersona}
           />
         ))}
       </div>
@@ -4504,7 +4505,7 @@ function StatCard({ label, value, color }) {
   );
 }
 
-function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive, onHover, onLeave, onClick, pinned }) {
+function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive, onHover, onLeave, onClick, pinned, focusedPersona }) {
   const status = task.status || "Sin iniciar";
   const statusColor = colorByStatus[status] || "#888";
   const progress = parseFloat(task.progress_percent || task.progressPercent) || 0;
@@ -4650,16 +4651,27 @@ function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive,
             )}
           </div>
 
-          {/* Dependencias */}
+          {/* Dependencias visualizadas como chips, estilo Red de tareas. */}
           {(blockingMe.length > 0 || blockedByThis.length > 0) && (
-            <div style={{ marginBottom: 10, padding: 8, background: "#fff8f0", borderLeft: "3px solid #ef7218", borderRadius: 4 }}>
-              <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>Enlaces de tareas</div>
+            <div style={{ marginBottom: 10, padding: 10, background: "#fff8f0", borderLeft: "3px solid #ef7218", borderRadius: 4 }}>
+              <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, marginBottom: 8 }}>
+                Enlaces de tareas
+                {focusedPersona && <span style={{ color: "#bbb", fontWeight: 400, textTransform: "none", letterSpacing: 0, marginLeft: 6 }}>· solo {focusedPersona} en color</span>}
+              </div>
               {blockingMe.length > 0 && (
-                <div style={{ fontSize: 12 }}>⬅️ Me obstaculiza{blockingMe.length > 1 ? "n" : ""}: {blockingMe.map(b => `#${b.id} ${b.title}`).join(" · ")}</div>
+                <div style={{ marginBottom: blockedByThis.length > 0 ? 8 : 0 }}>
+                  <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>⬅️ Esta tarea depende de:</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {blockingMe.map(b => <LinkedTaskChip key={b.id} task={b} colorByStatus={colorByStatus} focusedPersona={focusedPersona} />)}
+                  </div>
+                </div>
               )}
               {blockedByThis.length > 0 && (
-                <div style={{ fontSize: 12, marginTop: 2 }}>
-                  ➡️ Obstaculizo a: {blockedByThis.map(b => `#${b.id}`).join(", ")}
+                <div>
+                  <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>➡️ De esta tarea dependen:</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {blockedByThis.map(b => <LinkedTaskChip key={b.id} task={b} colorByStatus={colorByStatus} focusedPersona={focusedPersona} />)}
+                  </div>
                 </div>
               )}
             </div>
@@ -4696,6 +4708,48 @@ function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, isActive,
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LinkedTaskChip ────────────────────────────────────────
+// Pastilla para una tarea enlazada (dependencia o dependiente) en la vista
+// de Presentación. Se colorea por estado y se vuelve gris cuando el usuario
+// filtra por una persona específica y la tarea pertenece a otro responsable.
+function LinkedTaskChip({ task, colorByStatus, focusedPersona }) {
+  const status = task.status || "Sin iniciar";
+  const isOtherPerson = focusedPersona && task.responsible !== focusedPersona;
+  const statusColor = colorByStatus[status] || "#888";
+
+  // Cuando hay foco en una persona y la tarea no le pertenece, se aplana visualmente.
+  const bg = isOtherPerson ? "#f0f0f0" : "#ffffff";
+  const border = isOtherPerson ? "1px solid #d0d0d0" : `1px solid ${statusColor}55`;
+  const textColor = isOtherPerson ? "#999" : "#333";
+  const chipColor = isOtherPerson ? "#bbb" : statusColor;
+
+  return (
+    <div
+      title={`#${task.id} ${task.title} — Resp: ${task.responsible || "N/A"}${isOtherPerson ? " (otra persona)" : ""}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        background: bg,
+        border,
+        borderRadius: 14,
+        padding: "3px 9px",
+        fontSize: 11,
+        color: textColor,
+        maxWidth: 220,
+        cursor: "default",
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: chipColor, flexShrink: 0 }} />
+      <span style={{ fontWeight: 600 }}>#{task.id}</span>
+      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{task.title}</span>
+      {task.responsible && (
+        <span style={{ color: isOtherPerson ? "#bbb" : "#999", fontStyle: "italic", marginLeft: 2 }}>· {task.responsible.split(" ")[0]}</span>
       )}
     </div>
   );

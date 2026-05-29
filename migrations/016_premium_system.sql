@@ -113,7 +113,7 @@ AS $$
       COALESCE(SUM(CASE WHEN ia_enabled THEN 1 ELSE 0 END), 0)::int AS ia_curr,
       COUNT(*)::int AS total_curr
     FROM public.projects
-    WHERE owner_id = p_user_id AND COALESCE(deleted_at, NULL) IS NULL
+    WHERE owner_id = p_user_id
   )
   SELECT
     up.tier,

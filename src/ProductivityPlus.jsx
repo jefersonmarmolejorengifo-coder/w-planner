@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { supabase } from './supabaseClient';
+import Onboarding from './Onboarding';
 
 const getAuthJsonHeaders = async () => {
   const { data: { session } } = await supabase.auth.getSession();
@@ -7658,6 +7659,7 @@ export default function App() {
   const [nextId, setNextId] = useState(1);
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [forceTour, setForceTour] = useState(false);
   const [dimensions, setDimensions] = useState(DEFAULT_DIMENSIONS);
   const [showIntro, setShowIntro] = useState(true);
   const [authUser, setAuthUser] = useState(null);
@@ -8642,9 +8644,14 @@ export default function App() {
           </div>
         )}
         {authUser && (
-          <button onClick={() => supabase.auth.signOut()} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.4)", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontSize:10, fontWeight:500 }}>
-            Salir
-          </button>
+          <>
+            <button onClick={() => setForceTour(true)} title="Volver a ver el tour guiado" style={{ background:"rgba(20,156,172,0.15)", border:"1px solid rgba(20,156,172,0.4)", color:"#4dd8e8", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontSize:10, fontWeight:600 }}>
+              🎓 Tour
+            </button>
+            <button onClick={() => supabase.auth.signOut()} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.4)", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontSize:10, fontWeight:500 }}>
+              Salir
+            </button>
+          </>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           {/* Notifications bell */}
@@ -8691,6 +8698,7 @@ export default function App() {
         {TABS.map((tab) => (
           <button
             key={tab.id}
+            data-tour={`tab-${tab.id}`}
             onClick={() => setActiveTab(tab.id)}
             style={{
               background: "none", border: "none",
@@ -8786,6 +8794,17 @@ export default function App() {
       </div>
     </div>
       </div>
+
+      {/* Onboarding: modal de bienvenida en primer login + tour spotlight.
+          Estado persistido en public.user_onboarding (migración 024). */}
+      <Onboarding
+        supabase={supabase}
+        authUser={authUser}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        forceOpen={forceTour}
+        onForceHandled={() => setForceTour(false)}
+      />
     </>
   );
 }

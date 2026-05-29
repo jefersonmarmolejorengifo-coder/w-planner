@@ -304,6 +304,49 @@ export default async function handler(req, res) {
       console.warn("[cron] keepalive skipped:", kaErr?.message);
     }
 
+    // ── Abrir retros de sprints cerrados o con end_date+3d ──
+    // Cada hora chequea sprints elegibles y dispara /api/open-retro.
+    try {
+      const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+        .toISOString().slice(0, 10);
+
+      // Sprints elegibles: status='closed' OR end_date <= cutoff,
+      // sin período de retro abierto todavía.
+      const { data: candidates } = await supabase
+        .from("sprints")
+        .select("id, project_id, name, end_date, status")
+        .or(`status.eq.closed,end_date.lte.${cutoff}`);
+
+      for (const sp of candidates || []) {
+        const { data: existing } = await supabase
+          .from("sprint_retro_periods")
+          .select("id")
+          .eq("sprint_id", sp.id)
+          .maybeSingle();
+        if (existing) continue;
+
+        // Solo si el proyecto tiene la feature 'team_pulse'.
+        const { data: feat } = await supabase.rpc("project_has_feature", {
+          p_project_id: sp.project_id, p_feature: "team_pulse",
+        });
+        if (feat !== true) continue;
+
+        const trigger = sp.status === "closed" ? "sprint_closed" : "end_date_passed";
+        try {
+          await fetch(`${getBaseUrl()}/api/open-retro`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Cron-Secret": process.env.CRON_SECRET },
+            body: JSON.stringify({ sprintId: sp.id, trigger }),
+          });
+          console.log(`[cron] Retro abierta para sprint ${sp.id} (${trigger})`);
+        } catch (e) {
+          console.warn(`[cron] No pude abrir retro sprint ${sp.id}:`, e?.message);
+        }
+      }
+    } catch (retroErr) {
+      console.warn("[cron] retros skipped:", retroErr?.message);
+    }
+
     const { source, configs } = await loadConfigs(supabase);
     if (!configs.length) {
       return res.status(200).json({ skipped: true, reason: "No report configs found", source });

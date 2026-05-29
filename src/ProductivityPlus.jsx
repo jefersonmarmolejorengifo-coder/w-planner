@@ -7031,6 +7031,351 @@ function ChatBubble({ role, content }) {
   );
 }
 
+// ─── PendingRetrosBanner ───────────────────────────────────
+// Bloqueo blando: si hay sprints cerrados con retro pendiente para este
+// usuario, aparece un banner en Mi Día. Click → modal para responder.
+function PendingRetrosBanner() {
+  const [pending, setPending] = useState([]);
+  const [formPeriodId, setFormPeriodId] = useState(null);
+  const [formSprintName, setFormSprintName] = useState("");
+  const [formProjectId, setFormProjectId] = useState(null);
+
+  const load = async () => {
+    const { data } = await supabase.rpc("sprint_retro_pending_for_user");
+    setPending(data || []);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => { if (!cancelled) await load(); })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (pending.length === 0) return null;
+
+  return (
+    <>
+      <div style={{ background: "linear-gradient(135deg,#f5a623,#ef7218)", color: "#fff", padding: 14, borderRadius: 10, marginBottom: 14, display: "flex", alignItems: "center", gap: 12, boxShadow: "0 4px 14px rgba(245,166,35,0.3)" }}>
+        <div style={{ fontSize: 22 }}>📋</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>
+            Tienes {pending.length} retro{pending.length === 1 ? "" : "s"} de sprint pendiente{pending.length === 1 ? "" : "s"}
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.92, marginTop: 2 }}>
+            Tu opinión ayuda al equipo a mejorar. Toma menos de 5 minutos.
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            setFormPeriodId(pending[0].period_id);
+            setFormSprintName(pending[0].sprint_name);
+            setFormProjectId(pending[0].project_id);
+          }}
+          style={{ background: "#fff", color: "#ef7218", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+          Responder ahora
+        </button>
+      </div>
+      {formPeriodId && (
+        <SprintRetroForm
+          periodId={formPeriodId}
+          sprintName={formSprintName}
+          projectId={formProjectId}
+          onClose={() => setFormPeriodId(null)}
+          onSubmitted={() => { setFormPeriodId(null); load(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── SprintRetroForm (modal) ───────────────────────────────
+const RETRO_EMOJIS = [
+  { e: "🔥", label: "Acelerado, en flujo" },
+  { e: "💪", label: "Fuerte, listo" },
+  { e: "😄", label: "Motivado" },
+  { e: "😍", label: "Encantado" },
+  { e: "🌟", label: "Reconocido" },
+  { e: "🤝", label: "En equipo" },
+  { e: "😐", label: "Neutral" },
+  { e: "🥱", label: "Aburrido / repetitivo" },
+  { e: "😟", label: "Preocupado" },
+  { e: "😅", label: "Apenas alcancé" },
+  { e: "😴", label: "Agotado" },
+  { e: "😡", label: "Frustrado" },
+];
+
+function SprintRetroForm({ periodId, sprintName, projectId, onClose, onSubmitted }) {
+  const [emoji, setEmoji] = useState(null);
+  const [liked, setLiked] = useState("");
+  const [disliked, setDisliked] = useState("");
+  const [peerStrategic, setPeerStrategic] = useState("");
+  const [peerGiveMore, setPeerGiveMore] = useState("");
+  const [peerHadItTough, setPeerHadItTough] = useState("");
+  const [participants, setParticipants] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (cancelled || !projectId) return;
+      const { data } = await supabase.from("participants").select("name").eq("project_id", projectId);
+      if (!cancelled) setParticipants((data || []).map(p => p.name).sort());
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const submit = async () => {
+    if (!emoji) { setError("Elige un emoji"); return; }
+    if (!liked.trim()) { setError("Describe brevemente qué te gustó"); return; }
+    if (!disliked.trim()) { setError("Describe brevemente qué no te gustó"); return; }
+    setBusy(true); setError("");
+    try {
+      const headers = await getAuthJsonHeaders();
+      const res = await fetch("/api/submit-retro", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          periodId, emoji, liked, disliked,
+          peerStrategic: peerStrategic || null,
+          peerCouldGiveMore: peerGiveMore || null,
+          peerHadItTough: peerHadItTough || null,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      onSubmitted();
+    } catch (err) {
+      setError(err.message);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 12, padding: 22, maxWidth: 640, width: "100%", maxHeight: "92vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <h3 style={{ margin: 0, color: "#542c9c", fontSize: 18 }}>Retro · {sprintName}</h3>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#888" }}>×</button>
+        </div>
+
+        {/* Emoji selector */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 8 }}>¿Cómo te sentiste al cerrar este sprint?</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {RETRO_EMOJIS.map(({ e, label }) => (
+              <button key={e} title={label}
+                onClick={() => setEmoji(e)}
+                style={{
+                  background: emoji === e ? "#542c9c22" : "#fafafa",
+                  border: `2px solid ${emoji === e ? "#542c9c" : "#e0e0e0"}`,
+                  borderRadius: 10, padding: "8px 10px", cursor: "pointer",
+                  fontSize: 22, lineHeight: 1,
+                }}>
+                {e}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Liked */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#27ae60", marginBottom: 6 }}>✨ Lo que me gustó del sprint (1 párrafo max)</div>
+          <textarea value={liked} onChange={e => setLiked(e.target.value)} maxLength={2000}
+            placeholder="Cuéntame qué fluyó, qué disfrutaste, qué te sumó..."
+            style={{ width: "100%", minHeight: 70, padding: 10, border: "1px solid #ddd", borderRadius: 6, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", resize: "vertical" }}/>
+          <div style={{ fontSize: 10, color: "#bbb", textAlign: "right" }}>{liked.length}/2000</div>
+        </div>
+
+        {/* Disliked */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#e74c3c", marginBottom: 6 }}>⚠ Lo que no me gustó (1 párrafo max)</div>
+          <textarea value={disliked} onChange={e => setDisliked(e.target.value)} maxLength={2000}
+            placeholder="Qué te frenó, qué te frustró, qué cambiarías..."
+            style={{ width: "100%", minHeight: 70, padding: 10, border: "1px solid #ddd", borderRadius: 6, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", resize: "vertical" }}/>
+          <div style={{ fontSize: 10, color: "#bbb", textAlign: "right" }}>{disliked.length}/2000</div>
+        </div>
+
+        {/* Peer signals */}
+        <div style={{ background: "#fafafa", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 8, fontStyle: "italic" }}>
+            Las siguientes señalizaciones son <b>anónimas</b> para el resto del equipo. El PO solo ve conteos agregados.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#27ae60", marginBottom: 4 }}>🌟 Quien aportó más estratégicamente</div>
+              <select value={peerStrategic} onChange={e => setPeerStrategic(e.target.value)}
+                style={{ width: "100%", padding: 7, border: "1px solid #ddd", borderRadius: 5, fontSize: 12 }}>
+                <option value="">(opcional)</option>
+                {participants.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#ef7218", marginBottom: 4 }}>⚡ Quien podría dar más</div>
+              <select value={peerGiveMore} onChange={e => setPeerGiveMore(e.target.value)}
+                style={{ width: "100%", padding: 7, border: "1px solid #ddd", borderRadius: 5, fontSize: 12 }}>
+                <option value="">(opcional)</option>
+                {participants.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#c0392b", marginBottom: 4 }}>💔 Quien la pasó difícil</div>
+              <select value={peerHadItTough} onChange={e => setPeerHadItTough(e.target.value)}
+                style={{ width: "100%", padding: 7, border: "1px solid #ddd", borderRadius: 5, fontSize: 12 }}>
+                <option value="">(opcional)</option>
+                {participants.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {error && <div style={{ background: "#fde8e8", color: "#c0392b", padding: 10, borderRadius: 6, fontSize: 12, marginBottom: 10 }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onClose} disabled={busy} style={{ background: "#fff", border: "1px solid #ddd", color: "#555", borderRadius: 6, padding: "8px 16px", cursor: "pointer", fontSize: 13 }}>Cerrar</button>
+          <button onClick={submit} disabled={busy} style={{ background: busy ? "#ddd" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 6, padding: "8px 18px", cursor: busy ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700 }}>
+            {busy ? "Enviando..." : "Enviar retro"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── TeamPulseTab ──────────────────────────────────────────
+// Vista del owner: pulso del equipo sprint a sprint. Emojis dominantes,
+// guerreros reconocidos, oportunidades, quienes la pasaron difícil, y un
+// resumen textual agregado de lo que el equipo dijo. Anónimo en conteos.
+function TeamPulseTab({ projectId, isOwner }) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (cancelled || !projectId) return;
+      // Verifica feature
+      const { data: feat } = await supabase.rpc("project_has_feature", { p_project_id: projectId, p_feature: "team_pulse" });
+      if (cancelled) return;
+      if (feat !== true) {
+        setError("Esta feature requiere plan Pro Solo o superior con IA activa en el proyecto.");
+        setLoading(false);
+        return;
+      }
+      const { data: pulse, error: pErr } = await supabase.rpc("team_pulse_for_project", { p_project_id: projectId });
+      if (cancelled) return;
+      if (pErr) setError(pErr.message);
+      else setData(pulse || []);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#888" }}>Cargando pulso del equipo…</div>;
+  if (error) {
+    return (
+      <div style={{ padding: 40, textAlign: "center", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
+        <div style={{ fontSize: 56, marginBottom: 14 }}>🌡</div>
+        <h3 style={{ margin: "0 0 8px 0", color: "#542c9c" }}>Pulso del equipo</h3>
+        <p style={{ color: "#666", fontSize: 13, maxWidth: 500, margin: "0 auto" }}>{error}</p>
+      </div>
+    );
+  }
+  if (!isOwner) {
+    return <div style={{ padding: 40, textAlign: "center", color: "#888" }}>Esta vista es solo para el owner del proyecto.</div>;
+  }
+
+  return (
+    <div style={{ padding: 4 }}>
+      <div style={{ background: "linear-gradient(135deg,#542c9c,#0aa0ab)", borderRadius: 12, padding: 20, marginBottom: 18, color: "#fff" }}>
+        <h2 style={{ margin: "0 0 4px 0", fontSize: 22, fontWeight: 700 }}>🌡 Pulso del equipo</h2>
+        <p style={{ margin: 0, opacity: 0.92, fontSize: 13 }}>
+          Sentimiento sprint a sprint según lo que el propio equipo te cuenta. Las señalizaciones son anónimas: solo ves conteos agregados.
+        </p>
+      </div>
+
+      {data.length === 0 ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#888", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
+          <div style={{ fontSize: 40, marginBottom: 10 }}>📋</div>
+          <div style={{ fontSize: 14, color: "#555" }}>Aún no hay retrospectivas registradas.</div>
+          <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>
+            Cuando cierres un sprint o pasen 3 días desde su end_date, se abrirá la retro automáticamente y los participantes recibirán un correo.
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {data.map(p => <SprintPulseCard key={p.period_id} pulse={p} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SprintPulseCard({ pulse }) {
+  const emojis = Object.entries(pulse.emoji_breakdown || {}).sort((a,b) => b[1] - a[1]);
+  const warriors = Object.entries(pulse.strategic_warriors || {}).sort((a,b) => b[1] - a[1]);
+  const giveMore = Object.entries(pulse.could_give_more || {}).sort((a,b) => b[1] - a[1]);
+  const tough = Object.entries(pulse.had_it_tough || {}).sort((a,b) => b[1] - a[1]);
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, padding: 18, border: "1px solid #e0e0e0", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#333" }}>{pulse.sprint_name}</div>
+          <div style={{ fontSize: 11, color: "#888" }}>
+            {pulse.start_date} → {pulse.end_date} · {pulse.total_respondents} respondieron · estado: {pulse.period_status}
+          </div>
+        </div>
+        {emojis.length > 0 && (
+          <div style={{ background: "#f5f5f7", padding: "6px 12px", borderRadius: 8, fontSize: 18 }}>
+            {emojis.map(([e, c]) => <span key={e} title={`${c} votos`}>{e}<sub style={{ fontSize: 9, color: "#888", marginLeft: 1, marginRight: 5 }}>{c}</sub></span>)}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
+        <PulseList title="🌟 Guerreros estratégicos" color="#27ae60" items={warriors} />
+        <PulseList title="⚡ Podrían dar más" color="#ef7218" items={giveMore} />
+        <PulseList title="💔 La pasaron difícil" color="#c0392b" items={tough} />
+      </div>
+
+      {(pulse.liked_aggregate || pulse.disliked_aggregate) && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "#542c9c", fontWeight: 600 }}>Ver respuestas textuales del equipo</summary>
+          {pulse.liked_aggregate && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#27ae60", marginBottom: 4 }}>✨ Lo que les gustó:</div>
+              <div style={{ background: "#f8fdf9", padding: 10, borderRadius: 6, fontSize: 12, color: "#333", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{pulse.liked_aggregate}</div>
+            </div>
+          )}
+          {pulse.disliked_aggregate && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#e74c3c", marginBottom: 4 }}>⚠ Lo que no les gustó:</div>
+              <div style={{ background: "#fdf8f8", padding: 10, borderRadius: 6, fontSize: 12, color: "#333", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{pulse.disliked_aggregate}</div>
+            </div>
+          )}
+        </details>
+      )}
+    </div>
+  );
+}
+
+function PulseList({ title, color, items }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 700, color, marginBottom: 6 }}>{title}</div>
+      {items.length === 0 ? (
+        <div style={{ fontSize: 11, color: "#bbb", fontStyle: "italic" }}>(sin votos)</div>
+      ) : items.slice(0, 5).map(([name, c]) => (
+        <div key={name} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", fontSize: 12, color: "#444" }}>
+          <span style={{ background: color, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{c}</span>
+          <span>{name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── FocusTab (Mi Día) ─────────────────────────────────────
 function FocusTab({ tasks, activeUser, updateTask, dimensions }) {
   const today = new Date().toISOString().split('T')[0];
@@ -7055,6 +7400,9 @@ function FocusTab({ tasks, activeUser, updateTask, dimensions }) {
 
   return (
     <div>
+      {/* Banner de retros pendientes (bloqueo blando) */}
+      <PendingRetrosBanner />
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#542c9c' }}>
           Mi Día {activeUser && <span style={{ fontWeight: 400, fontSize: 14, color: '#888' }}>· {activeUser.name}</span>}
@@ -7973,6 +8321,7 @@ export default function App() {
     { id: "presentation", label: "Presentación" },
     { id: "evolution", label: "Evolutivo 💎" },
     { id: "chat", label: "Chat IA 🏢" },
+    { id: "pulse", label: "Pulso del equipo 🌡" },
     { id: "config", label: "Configuración" },
   ];
 
@@ -8284,6 +8633,9 @@ export default function App() {
         )}
         {activeTab === "chat" && (
           <ChatEnterpriseTab projectId={projectId} isOwner={project?.owner_id === authUser?.id} />
+        )}
+        {activeTab === "pulse" && (
+          <TeamPulseTab projectId={projectId} isOwner={project?.owner_id === authUser?.id} sprints={sprints} participants={participants} />
         )}
         {activeTab === "config" && (() => {
           const isOwner = project?.owner_id === authUser?.id;

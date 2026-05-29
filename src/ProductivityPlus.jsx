@@ -2187,9 +2187,9 @@ function DimensionEditor({ dimensions, setDimensions }) {
   );
 }
 
-function ConfigSection({ title, children }) {
+function ConfigSection({ title, children, tourId }) {
   return (
-    <div style={{ background: "#ffffff", border: "none", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)" }}>
+    <div data-tour={tourId} style={{ background: "#ffffff", border: "none", borderRadius: 14, padding: 20, boxShadow: "0 2px 16px rgba(84,44,156,0.07)" }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#542c9c", marginBottom: 14 }}>{title}</div>
       {children}
     </div>
@@ -2926,7 +2926,7 @@ function ReportsConfigSection({ projectId }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div data-tour="config-reports" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ fontSize: 17, fontWeight: 700, color: "#333", display: "flex", alignItems: "center", gap: 8 }}>
         📬 Reportes IA por correo
       </div>
@@ -3314,7 +3314,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
       {/* ── Proyecto ───────────────────────── */}
       {project && (
-        <ConfigSection title="🏗️ Proyecto">
+        <ConfigSection title="🏗️ Proyecto" tourId="config-project">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#f9f8fd", borderRadius: 8, border: "1px solid rgba(84,44,156,0.12)" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#542c9c", flex: 1 }}>{project.name}</span>
@@ -3364,7 +3364,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
       )}
 
       {/* ── Cambio de clave ─────────────────── */}
-      <ConfigSection title="🔐 Clave de configuración">
+      <ConfigSection title="🔐 Clave de configuración" tourId="config-pin">
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <input
             type="password" value={newPin} onChange={e => setNewPin(e.target.value)}
@@ -3382,7 +3382,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         </div>
       </ConfigSection>
 
-      <ConfigSection title="👥 Participantes">
+      <ConfigSection title="👥 Participantes" tourId="config-people">
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input style={si} value={newP} onChange={(e) => setNewP(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addP()} placeholder="Nombre del participante..." />
           <button onClick={addP} style={addBtn}>Agregar</button>
@@ -3420,7 +3420,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         )}
       </ConfigSection>
 
-      <ConfigSection title="📊 Indicadores clave">
+      <ConfigSection title="📊 Indicadores clave" tourId="config-indicators">
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input style={si} value={newI} onChange={(e) => setNewI(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addI()} placeholder="Nombre del indicador..." />
           <button onClick={addI} style={addBtn}>Agregar</button>
@@ -3440,7 +3440,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         )}
       </ConfigSection>
 
-      <ConfigSection title="🧩 Tipos de tarea">
+      <ConfigSection title="🧩 Tipos de tarea" tourId="config-types">
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input style={si} value={newType} onChange={(e) => setNewType(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addType()} placeholder="Nombre del tipo..." />
           <button onClick={addType} style={addBtn}>Agregar</button>
@@ -3460,14 +3460,14 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         )}
       </ConfigSection>
 
-      <ConfigSection title="⚖️ Dimensiones de Valor de Aporte">
+      <ConfigSection title="⚖️ Dimensiones de Valor de Aporte" tourId="config-calculator">
         <div style={{ fontSize: 12, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>
           Define las dimensiones que se evalúan en cada tarea y su peso relativo en el cálculo de aporte. Puedes renombrar, ajustar pesos y agregar o quitar dimensiones personalizadas.
         </div>
         <DimensionEditor dimensions={dimensions} setDimensions={setDimensions} />
       </ConfigSection>
 
-      <ConfigSection title="🧩 Estructura de la tarjeta (campos personalizados)">
+      <ConfigSection title="🧩 Estructura de la tarjeta (campos personalizados)" tourId="config-fields">
         <div style={{ fontSize: 12, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>
           Agrega los campos que se mostrarán en cada tarjeta de tarea: texto, fechas, listas de opciones, sub-ítems o campos automáticos (fecha de creación, última modificación, etc.). Los campos básicos del sistema (ID, título, estado, etc.) y la calculadora de aporte se mantienen siempre.
         </div>

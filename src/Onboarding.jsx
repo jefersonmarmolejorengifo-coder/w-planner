@@ -180,10 +180,18 @@ const TOUR_SCRIPTS = {
 };
 
 // ─── Componente principal ───────────────────────────────────
-export default function Onboarding({ supabase, authUser, activeTab, setActiveTab, forceOpen, onForceHandled }) {
+// enabled=false pausa el modal y el tour. Útil mientras la pantalla
+// de "Elegir proyecto" está visible (los tabs no son interactivos aún)
+// o durante el spinner de carga.
+export default function Onboarding({ supabase, authUser, activeTab, setActiveTab, forceOpen, onForceHandled, enabled = true }) {
   const [state, setState] = useState(null);
-  const [showWelcome, setShowWelcome] = useState(false);
-  const [showTour, setShowTour] = useState(false);
+  const [shouldShowWelcome, setShouldShowWelcome] = useState(false);
+  const [shouldShowTour, setShouldShowTour] = useState(false);
+
+  // Solo renderiza cuando enabled. Mientras esté pausado el componente queda
+  // dormido y reanuda en el mismo paso cuando enabled vuelve a true.
+  const showWelcome = enabled && shouldShowWelcome;
+  const showTour = enabled && shouldShowTour;
 
   // Carga estado al montar.
   useEffect(() => {
@@ -193,13 +201,13 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
       const { data } = await supabase.from("user_onboarding").select("*").eq("user_id", authUser.id).maybeSingle();
       if (cancelled) return;
       if (!data) {
-        setShowWelcome(true);
+        setShouldShowWelcome(true);
         setState({ role: null, current_step: 0, completed_at: null, skipped: false });
       } else {
         setState(data);
         if (!data.completed_at && !data.skipped) {
-          if (!data.role) setShowWelcome(true);
-          else setShowTour(true);
+          if (!data.role) setShouldShowWelcome(true);
+          else setShouldShowTour(true);
         }
       }
     })();
@@ -209,8 +217,8 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
   // Soporte para "Volver a ver tour" desde menú externo.
   useEffect(() => {
     if (!forceOpen) return;
-    if (!state?.role) setShowWelcome(true);
-    else { setShowTour(true); patch({ current_step: 0, completed_at: null, skipped: false }); }
+    if (!state?.role) setShouldShowWelcome(true);
+    else { setShouldShowTour(true); patch({ current_step: 0, completed_at: null, skipped: false }); }
     onForceHandled?.();
   }, [forceOpen]);
 
@@ -222,19 +230,19 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
 
   const selectRole = async (role) => {
     await patch({ role, current_step: 0, started_at: new Date().toISOString(), completed_at: null, skipped: false });
-    setShowWelcome(false);
-    setShowTour(true);
+    setShouldShowWelcome(false);
+    setShouldShowTour(true);
   };
 
   const skipOnboarding = async () => {
     await patch({ skipped: true });
-    setShowWelcome(false);
-    setShowTour(false);
+    setShouldShowWelcome(false);
+    setShouldShowTour(false);
   };
 
   const finishTour = async () => {
     await patch({ completed_at: new Date().toISOString(), skipped: false });
-    setShowTour(false);
+    setShouldShowTour(false);
   };
 
   const setStep = async (n) => {

@@ -8796,7 +8796,9 @@ export default function App() {
       </div>
 
       {/* Onboarding: modal de bienvenida en primer login + tour spotlight.
-          Estado persistido en public.user_onboarding (migración 024). */}
+          Estado persistido en public.user_onboarding (migración 024).
+          enabled=false mientras el landing de proyecto o el spinner están
+          activos: los tabs del fondo no son visibles ni interactivos. */}
       <Onboarding
         supabase={supabase}
         authUser={authUser}
@@ -8804,6 +8806,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         forceOpen={forceTour}
         onForceHandled={() => setForceTour(false)}
+        enabled={!showProjectLanding && !loading && !!projectId}
       />
     </>
   );

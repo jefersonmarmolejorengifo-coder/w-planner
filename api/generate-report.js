@@ -399,10 +399,12 @@ export default async function handler(req) {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-opus-4-7",
-      // 16000 tokens = ~12000 palabras de salida; suficiente para proyectos
-      // con 100+ tareas sin que Opus deje el HTML cortado a la mitad.
-      max_tokens: 16000,
+      // Weekly report usa Sonnet 4.6: el reporte es estructurado (métricas +
+      // resumen por persona + recomendaciones), un caso donde Sonnet rinde
+      // casi igual que Opus a 40% del costo. El evolutivo bimensual sí se
+      // queda en Opus porque ahí sí pesa la profundidad de análisis.
+      model: "claude-sonnet-4-6",
+      max_tokens: 12000,
       stream: true,
       system: [
         {

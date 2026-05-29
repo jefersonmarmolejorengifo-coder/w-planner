@@ -6930,6 +6930,12 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
   const [streaming, setStreaming] = useState(false);
   const [draftAssistant, setDraftAssistant] = useState("");
   const [error, setError] = useState("");
+  const [quota, setQuota] = useState(null);  // {quota, used, remaining}
+
+  const refreshQuota = async () => {
+    const { data } = await supabase.rpc("project_chat_quota_remaining", { p_project_id: projectId });
+    if (data) setQuota(data);
+  };
 
   // Verifica feature y carga sesión activa.
   useEffect(() => {
@@ -6958,6 +6964,7 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
             .order("created_at", { ascending: true });
           if (!cancelled) setHistory(msgs || []);
         }
+        await refreshQuota();
       }
     })();
     return () => { cancelled = true; };
@@ -6980,6 +6987,12 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
+        // 429 = cuota mensual agotada: muestra el detalle y refresca contador.
+        if (res.status === 429) {
+          await refreshQuota();
+          const renewLabel = e.renews_on ? new Date(e.renews_on).toLocaleDateString("es-CO", { day: "numeric", month: "long" }) : "el 1 del próximo mes";
+          throw new Error(`Cuota mensual del chat alcanzada (${e.used}/${e.quota}). Se renueva el ${renewLabel}.`);
+        }
         throw new Error(e.error || `HTTP ${res.status}`);
       }
       const sIdHeader = res.headers.get("X-Wplanner-Session");
@@ -6998,6 +7011,7 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
       assistant += decoder.decode();
       setHistory(h => [...h, { role: "assistant", content: assistant, created_at: new Date().toISOString() }]);
       setDraftAssistant("");
+      refreshQuota();  // descuenta el mensaje recién enviado en el contador
     } catch (err) {
       setError(err.message);
       setHistory(h => h.slice(0, -1)); // descarta el user msg si falló
@@ -7057,25 +7071,42 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
 
         {/* Input */}
         {isOwner ? (
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-              disabled={streaming}
-              placeholder="Pregunta sobre tu equipo... (Enter para enviar, Shift+Enter para nueva línea)"
-              style={{ flex: 1, minHeight: 60, maxHeight: 200, padding: 10, border: "1px solid #ddd", borderRadius: 8, fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
-            />
-            <button onClick={send} disabled={!input.trim() || streaming}
-              style={{
-                background: !input.trim() || streaming ? "#ddd" : "linear-gradient(135deg, #542c9c, #6e3ebf)",
-                color: "#fff", border: "none", borderRadius: 8, padding: "12px 18px",
-                cursor: !input.trim() || streaming ? "not-allowed" : "pointer",
-                fontSize: 13, fontWeight: 700,
-              }}>
-              {streaming ? "..." : "Enviar"}
-            </button>
-          </div>
+          <>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                disabled={streaming || (quota && quota.remaining <= 0)}
+                placeholder={quota && quota.remaining <= 0
+                  ? "Cuota mensual alcanzada — se renueva el 1 del próximo mes"
+                  : "Pregunta sobre tu equipo... (Enter para enviar, Shift+Enter para nueva línea)"}
+                style={{ flex: 1, minHeight: 60, maxHeight: 200, padding: 10, border: "1px solid #ddd", borderRadius: 8, fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
+              />
+              <button onClick={send} disabled={!input.trim() || streaming || (quota && quota.remaining <= 0)}
+                style={{
+                  background: !input.trim() || streaming || (quota && quota.remaining <= 0) ? "#ddd" : "linear-gradient(135deg, #542c9c, #6e3ebf)",
+                  color: "#fff", border: "none", borderRadius: 8, padding: "12px 18px",
+                  cursor: !input.trim() || streaming || (quota && quota.remaining <= 0) ? "not-allowed" : "pointer",
+                  fontSize: 13, fontWeight: 700,
+                }}>
+                {streaming ? "..." : "Enviar"}
+              </button>
+            </div>
+            {quota && quota.quota > 0 && (() => {
+              const pct = Math.min(100, (quota.used / quota.quota) * 100);
+              const lowColor = quota.remaining <= 10 ? "#c0392b" : quota.remaining <= 30 ? "#ec6c04" : "#542c9c";
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "#888", marginTop: 4 }}>
+                  <span><b style={{ color: lowColor }}>{quota.used}</b> / {quota.quota} mensajes este mes</span>
+                  <div style={{ flex: 1, height: 4, background: "#f0e8ff", borderRadius: 2, overflow: "hidden", maxWidth: 200 }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: lowColor, transition: "width 0.3s" }} />
+                  </div>
+                  {quota.remaining <= 10 && <span style={{ color: lowColor, fontWeight: 600 }}>Te quedan {quota.remaining}</span>}
+                </div>
+              );
+            })()}
+          </>
         ) : (
           <div style={{ fontSize: 12, color: "#888", padding: 10, background: "#fafafa", borderRadius: 6, textAlign: "center" }}>
             Solo el owner del proyecto puede chatear con la IA.

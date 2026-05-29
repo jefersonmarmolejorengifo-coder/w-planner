@@ -122,6 +122,17 @@ export default async function handler(req) {
     if (canChat !== true) {
       return jsonError("Tu plan no incluye chat. Requiere Enterprise.", 402, headers);
     }
+
+    // Cuota mensual: bloquea cuando se agotan los 100 mensajes/mes/proyecto.
+    const { data: quotaInfo } = await supabase.rpc("project_chat_quota_remaining", { p_project_id: Number(projectId) });
+    if (quotaInfo && Number(quotaInfo.remaining) <= 0) {
+      return jsonResponse({
+        error: "Cuota mensual del chat alcanzada",
+        quota: quotaInfo.quota,
+        used: quotaInfo.used,
+        renews_on: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().slice(0, 10),
+      }, 429, headers);
+    }
   } catch (err) {
     return jsonError(err.message, err.status || 500, headers);
   }
@@ -177,18 +188,22 @@ export default async function handler(req) {
     return jsonError("ANTHROPIC_API_KEY no esta configurada", 500, headers);
   }
 
-  // Construye mensajes para Sonnet 4.6.
+  // Mensajes = historial + turno actual. El contexto va al system con
+  // cache_control para que después del primer turno se cobre como cache_read
+  // (10% del input) en lugar de input fresco (100%). Esto baja el costo del
+  // chat ~80% en sesiones de varios turnos.
   const messages = [];
-  // El primer turno necesita el contexto. Para turnos posteriores, lo
-  // re-inyectamos cada vez (con prompt caching es eficiente).
-  messages.push({
-    role: "user",
-    content: `<contexto>\n${context}\n</contexto>\n\n${(history || []).filter(m => m.role === "user").length === 0 ? "Inicia la sesión saludando al PO con un mensaje breve mencionando que ya cargaste los datos del equipo y estás listo." : "Continúa la conversación."}`,
-  });
   for (const m of (history || [])) {
     messages.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content });
   }
   messages.push({ role: "user", content: String(userMessage).trim() });
+
+  const isFirstTurn = !(history || []).some(m => m.role === "assistant");
+  const contextSystemBlock = `<contexto>\n${context}\n</contexto>\n\n${
+    isFirstTurn
+      ? "Al responder el primer mensaje del PO, sustituye el saludo formal por una bienvenida breve mencionando que ya cargaste los datos del equipo."
+      : "Continúa la conversación con base en el contexto cargado."
+  }`;
 
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -201,7 +216,10 @@ export default async function handler(req) {
       model: "claude-sonnet-4-6",
       max_tokens: 2000,
       stream: true,
-      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+      system: [
+        { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        { type: "text", text: contextSystemBlock, cache_control: { type: "ephemeral" } },
+      ],
       messages,
     }),
   });
@@ -219,6 +237,8 @@ export default async function handler(req) {
   let fullAssistant = "";
   let inputTokens = null;
   let outputTokens = null;
+  let cacheCreateTokens = 0;  // tokens escritos a cache (1.25x base input)
+  let cacheReadTokens = 0;    // tokens leídos de cache (0.10x base input)
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -242,6 +262,8 @@ export default async function handler(req) {
                 controller.enqueue(encoder.encode(piece));
               } else if (evt.type === "message_start" && evt.message?.usage) {
                 inputTokens = evt.message.usage.input_tokens;
+                cacheCreateTokens = evt.message.usage.cache_creation_input_tokens || 0;
+                cacheReadTokens = evt.message.usage.cache_read_input_tokens || 0;
               } else if (evt.type === "message_delta") {
                 if (evt.usage?.output_tokens) outputTokens = evt.usage.output_tokens;
               }
@@ -253,10 +275,11 @@ export default async function handler(req) {
         return;
       }
 
-      // Persiste el mensaje del assistant.
+      // Persiste el mensaje del assistant con costo desglosado.
+      // Sonnet 4.6 pricing por 1M tokens: input $3, cache_write $3.75, cache_read $0.30, output $15.
       if (admin && fullAssistant.length > 0) {
-        const cost = (inputTokens && outputTokens)
-          ? (inputTokens * 3 + outputTokens * 15) / 1_000_000
+        const cost = (inputTokens != null && outputTokens != null)
+          ? (inputTokens * 3 + cacheCreateTokens * 3.75 + cacheReadTokens * 0.30 + outputTokens * 15) / 1_000_000
           : null;
         try {
           await admin.from("chat_messages").insert({

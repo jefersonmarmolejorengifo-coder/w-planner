@@ -1,5 +1,6 @@
 import {
   assertProjectAccess,
+  assertProjectCanUseIa,
   corsHeaders,
   createSupabase,
   getAuthenticatedUser,
@@ -319,6 +320,7 @@ export default async function handler(req) {
       const user = await getAuthenticatedUser(token);
       supabase = createSupabase(token);
       await assertProjectAccess(supabase, user, projectId, { ownerOnly: true });
+      await assertProjectCanUseIa(supabase, projectId);
     }
   } catch (err) {
     return jsonError(err.message, err.status || 500, headers);

@@ -204,3 +204,27 @@ export const handleApiError = (err, res) => {
   const status = err.status || 500;
   return res.status(status).json({ error: err.message || "Error interno" });
 };
+
+// Verifica si el proyecto tiene IA habilitada Y su owner tiene premium activo.
+// Lanza si no — los endpoints IA llaman esto antes de gastar tokens del LLM.
+// Usa la RPC user_can_use_ia_on_project (migración 016). Si la RPC no existe,
+// deja pasar (tolera entornos sin la migración aplicada todavía).
+export const assertProjectCanUseIa = async (supabase, projectId) => {
+  const { data, error } = await supabase.rpc("user_can_use_ia_on_project", {
+    p_project_id: Number(projectId),
+  });
+  if (error) {
+    if (error.code === "42883") {
+      // función no existe (migración 016 no aplicada). No bloqueamos.
+      return;
+    }
+    const err = new Error(`No pude verificar premium: ${error.message}`);
+    err.status = 500;
+    throw err;
+  }
+  if (data !== true) {
+    const err = new Error("Este proyecto no tiene IA habilitada o la suscripción del owner no está activa. Activa el plan Pro o habilita IA en Configuración.");
+    err.status = 402; // Payment Required
+    throw err;
+  }
+};

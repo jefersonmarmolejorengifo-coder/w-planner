@@ -305,8 +305,10 @@ export default async function handler(req) {
   const fechaGen = new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const userPrompt = buildScrumUserPrompt(metrics, fechaGen);
 
-  if (!process.env.GEMINI_API_KEY) {
-    return jsonError("GEMINI_API_KEY no esta configurada en el servidor. Crea una en https://aistudio.google.com/apikey y agregala a Vercel.", 503, headers);
+  // Acepta cualquiera de los dos nombres por convención.
+  const googleKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!googleKey) {
+    return jsonError("GEMINI_API_KEY o GOOGLE_API_KEY no esta configurada. Crea una en https://aistudio.google.com/apikey y agregala a Vercel.", 503, headers);
   }
 
   // Gemini Flash via REST. Bajo costo, rápido, suficiente para narrativa
@@ -320,7 +322,7 @@ export default async function handler(req) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": process.env.GEMINI_API_KEY,
+        "x-goog-api-key": googleKey,
       },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: userPrompt }] }],

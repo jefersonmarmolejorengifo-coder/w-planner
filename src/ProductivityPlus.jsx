@@ -1097,27 +1097,74 @@ function TaskForm({ task, setTask, participants, indicators, taskTypes, currentU
             })()}
           </F>
 
-          {sprints.filter(s => s.status !== 'closed').length > 0 && (
-            <F label="Sprint" half>
-              <select style={inp} value={task.sprintId || ""} onChange={e => upd("sprintId", e.target.value ? Number(e.target.value) : null)}>
-                <option value="">— Sin sprint —</option>
-                {sprints.filter(s => s.status !== 'closed').map(s => (
-                  <option key={s.id} value={s.id}>[{s.status === 'active' ? '▶' : '◐'}] {s.name}</option>
-                ))}
-              </select>
-            </F>
-          )}
+          {/* Dropdown de Sprint y OKR filtrado por la fecha de creación de la
+              tarjeta: aparecen primero los que la contienen, los fuera de
+              rango bajan con un aviso. Estos campos son default (no removibles). */}
+          {(() => {
+            // Normaliza la fecha de la tarjeta a YYYY-MM-DD para comparar con
+            // start_date/end_date que vienen como DATE de Postgres.
+            const taskDateISO = (() => {
+              const s = String(task.createdAt || '');
+              const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);          // es-CO "20/05/2026"
+              if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+              const i = s.match(/(\d{4})-(\d{2})-(\d{2})/);            // ISO
+              if (i) return `${i[1]}-${i[2]}-${i[3]}`;
+              const d = new Date();                                    // fallback hoy
+              return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            })();
+            const inRange = (start, end) => !!start && !!end && taskDateISO >= String(start) && taskDateISO <= String(end);
 
-          {keyResults.length > 0 && (
-            <F label="Resultado clave (OKR)" half>
-              <select style={inp} value={task.krId || ""} onChange={e => upd("krId", e.target.value ? Number(e.target.value) : null)}>
-                <option value="">— Sin KR —</option>
-                {keyResults.map(kr => (
-                  <option key={kr.id} value={kr.id}>{kr.title}</option>
-                ))}
-              </select>
-            </F>
-          )}
+            const activeSprints = sprints.filter(s => s.status !== 'closed');
+            const sortedSprints = [...activeSprints].sort((a, b) => {
+              const ai = inRange(a.start_date, a.end_date) ? 0 : 1;
+              const bi = inRange(b.start_date, b.end_date) ? 0 : 1;
+              if (ai !== bi) return ai - bi;
+              return String(a.start_date || '').localeCompare(String(b.start_date || ''));
+            });
+            const sortedKRs = [...keyResults].sort((a, b) => {
+              const ai = inRange(a.okr_start_date, a.okr_end_date) ? 0 : 1;
+              const bi = inRange(b.okr_start_date, b.okr_end_date) ? 0 : 1;
+              if (ai !== bi) return ai - bi;
+              return String(a.okr_start_date || '').localeCompare(String(b.okr_start_date || ''));
+            });
+
+            return (
+              <>
+                {activeSprints.length > 0 && (
+                  <F label="Sprint" half>
+                    <select style={inp} value={task.sprintId || ""} onChange={e => upd("sprintId", e.target.value ? Number(e.target.value) : null)}>
+                      <option value="">— Sin sprint —</option>
+                      {sortedSprints.map(s => {
+                        const ok = inRange(s.start_date, s.end_date);
+                        const status = s.status === 'active' ? '▶' : '◐';
+                        return (
+                          <option key={s.id} value={s.id}>
+                            [{status}] {s.name}{!ok ? '  ⚠ fuera de rango' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </F>
+                )}
+
+                {keyResults.length > 0 && (
+                  <F label="Resultado clave (OKR)" half>
+                    <select style={inp} value={task.krId || ""} onChange={e => upd("krId", e.target.value ? Number(e.target.value) : null)}>
+                      <option value="">— Sin KR —</option>
+                      {sortedKRs.map(kr => {
+                        const ok = inRange(kr.okr_start_date, kr.okr_end_date);
+                        return (
+                          <option key={kr.id} value={kr.id}>
+                            {kr.title}{!ok ? '  ⚠ fuera de rango' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </F>
+                )}
+              </>
+            );
+          })()}
 
           {/* Enlace a super-tareas: una tarea puede alimentar varias super-tareas
               con pesos distintos. Se persiste inmediatamente en task_super_links. */}
@@ -4967,24 +5014,32 @@ function DependenciesTab({ tasks, onEditTask, sprints = [] }) {
 
 // ─── OKRsTab ───────────────────────────────────────────────
 function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks }) {
+  // Default: hoy → +90 días (un trimestre aprox). El usuario puede ajustar.
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const in90ISO = () => { const d = new Date(); d.setDate(d.getDate() + 90); return d.toISOString().slice(0, 10); };
+  const blankForm = () => ({ title: '', description: '', start_date: todayISO(), end_date: in90ISO() });
+
   const [creating, setCreating] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ title: '', description: '', quarter: Math.ceil((new Date().getMonth() + 1) / 3), year: new Date().getFullYear() });
+  const [form, setForm] = useState(blankForm());
   const [addingKrFor, setAddingKrFor] = useState(null);
   const [krForm, setKrForm] = useState({ title: '', target_value: 100, unit: '%' });
 
   const btn = (v) => ({ border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12, padding: '6px 14px', transition: 'all 0.2s', background: v === 'primary' ? 'linear-gradient(135deg,#542c9c,#6e3ebf)' : v === 'danger' ? 'linear-gradient(135deg,#c0392b,#e74c3c)' : '#f4f4f4', color: (v === 'primary' || v === 'danger') ? '#fff' : '#666' });
   const si = { background: '#fafafa', border: '1.5px solid #e0e0e0', borderRadius: 8, color: '#2d2d2d', padding: '8px 12px', fontSize: 13, width: '100%', boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' };
 
-  const resetForm = () => { setForm({ title: '', description: '', quarter: Math.ceil((new Date().getMonth() + 1) / 3), year: new Date().getFullYear() }); setCreating(false); setEditId(null); };
+  const resetForm = () => { setForm(blankForm()); setCreating(false); setEditId(null); };
 
   const saveOkr = async () => {
     if (!form.title.trim()) return;
+    if (!form.start_date || !form.end_date) { alert('Define fecha de inicio y fin'); return; }
+    if (form.end_date < form.start_date) { alert('La fecha fin debe ser mayor o igual a la fecha inicio'); return; }
+    const payload = { title: form.title, description: form.description, start_date: form.start_date, end_date: form.end_date };
     if (editId) {
-      await supabase.from('okrs').update({ title: form.title, description: form.description, quarter: form.quarter, year: form.year }).eq('id', editId).eq('project_id', projectId);
-      setOkrs(prev => prev.map(o => o.id === editId ? { ...o, ...form } : o));
+      await supabase.from('okrs').update(payload).eq('id', editId).eq('project_id', projectId);
+      setOkrs(prev => prev.map(o => o.id === editId ? { ...o, ...payload } : o));
     } else {
-      const { data } = await supabase.from('okrs').insert({ ...form, project_id: projectId, status: 'active' }).select().single();
+      const { data } = await supabase.from('okrs').insert({ ...payload, project_id: projectId, status: 'active' }).select().single();
       if (data) setOkrs(prev => [...prev, data]);
     }
     resetForm();
@@ -5028,15 +5083,29 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
     return Number(kr.target_value) > 0 ? (Number(kr.current_value) / Number(kr.target_value)) * 100 : 0;
   };
 
+  // Agrupa por año del start_date; los más recientes primero.
   const grouped = {};
-  okrs.forEach(o => { const k = `${o.year}-Q${o.quarter}`; if (!grouped[k]) grouped[k] = []; grouped[k].push(o); });
+  okrs.forEach(o => {
+    const y = o.start_date ? new Date(o.start_date).getFullYear() : new Date().getFullYear();
+    if (!grouped[y]) grouped[y] = [];
+    grouped[y].push(o);
+  });
+  Object.values(grouped).forEach(arr => arr.sort((a, b) => (b.start_date || '').localeCompare(a.start_date || '')));
   const periods = Object.keys(grouped).sort().reverse();
+
+  const fmtRange = (start, end) => {
+    if (!start || !end) return '';
+    const s = new Date(start), e = new Date(end);
+    const f = (d) => d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+    const sameYear = s.getFullYear() === e.getFullYear();
+    return sameYear ? `${f(s)} – ${f(e)} ${e.getFullYear()}` : `${f(s)} ${s.getFullYear()} – ${f(e)} ${e.getFullYear()}`;
+  };
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#542c9c' }}>OKRs · Objetivos y Resultados Clave</div>
-        <button onClick={() => { setCreating(true); setEditId(null); setForm({ title: '', description: '', quarter: Math.ceil((new Date().getMonth() + 1) / 3), year: new Date().getFullYear() }); }} style={{ ...btn('primary'), marginLeft: 'auto' }}>+ Nuevo objetivo</button>
+        <button onClick={() => { setCreating(true); setEditId(null); setForm(blankForm()); }} style={{ ...btn('primary'), marginLeft: 'auto' }}>+ Nuevo objetivo</button>
       </div>
 
       {(creating || editId) && (
@@ -5045,10 +5114,14 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
             <div style={{ gridColumn: 'span 2' }}><input style={si} placeholder="Título del objetivo *" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} autoFocus /></div>
             <div style={{ gridColumn: 'span 2' }}><input style={si} placeholder="Descripción (opcional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
-            <select style={si} value={form.quarter} onChange={e => setForm(f => ({ ...f, quarter: Number(e.target.value) }))}>
-              {[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}
-            </select>
-            <input type="number" style={si} min={2020} max={2099} value={form.year} onChange={e => setForm(f => ({ ...f, year: Number(e.target.value) }))} />
+            <div>
+              <div style={{ fontSize: 10, color: '#888', marginBottom: 4, fontWeight: 600 }}>FECHA INICIO *</div>
+              <input type="date" style={si} value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: '#888', marginBottom: 4, fontWeight: 600 }}>FECHA FIN *</div>
+              <input type="date" style={si} value={form.end_date} min={form.start_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))} />
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={saveOkr} style={btn('primary')}>Guardar</button>
@@ -5065,7 +5138,7 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
 
       {periods.map(period => (
         <div key={period} style={{ marginBottom: 24 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>{period.replace('-', ' · ')}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>{period}</div>
           {grouped[period].map(okr => {
             const krs = keyResults.filter(kr => kr.okr_id === okr.id);
             const avgPct = krs.length ? krs.reduce((s, kr) => s + getKrPct(kr), 0) / krs.length : 0;
@@ -5074,9 +5147,10 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
               <div key={okr.id} style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 2px 14px rgba(84,44,156,0.07)', marginBottom: 12, borderLeft: `4px solid ${isActive ? '#542c9c' : '#ccc'}` }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 15, fontWeight: 700, color: '#2d2d2d' }}>{okr.title}</span>
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: isActive ? '#e8f8ee' : '#f4f4f4', color: isActive ? '#27ae60' : '#969696', textTransform: 'uppercase' }}>{isActive ? 'Activo' : 'Cerrado'}</span>
+                      <span style={{ fontSize: 11, color: '#542c9c', background: '#f0e8ff', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>{fmtRange(okr.start_date, okr.end_date)}</span>
                     </div>
                     {okr.description && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{okr.description}</div>}
                     {krs.length > 0 && (
@@ -5089,7 +5163,7 @@ function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks })
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                    <button onClick={() => { setEditId(okr.id); setCreating(false); setForm({ title: okr.title, description: okr.description || '', quarter: okr.quarter, year: okr.year }); }} style={{ ...btn(), padding: '6px 10px' }}>✏️</button>
+                    <button onClick={() => { setEditId(okr.id); setCreating(false); setForm({ title: okr.title, description: okr.description || '', start_date: okr.start_date || todayISO(), end_date: okr.end_date || in90ISO() }); }} style={{ ...btn(), padding: '6px 10px' }}>✏️</button>
                     <button onClick={() => toggleStatus(okr)} style={{ ...btn(), fontSize: 11 }}>{isActive ? '🔒 Cerrar' : '🔓 Reabrir'}</button>
                     <button onClick={() => deleteOkr(okr.id)} style={{ ...btn('danger'), padding: '6px 10px' }}>🗑️</button>
                   </div>
@@ -7598,7 +7672,7 @@ export default function App() {
         q('indicators').order('id'),
         pid ? supabase.from('task_types').select('*').eq('project_id', pid).order('name', { ascending: true }) : supabase.from('task_types').select('*').order('name', { ascending: true }),
         q('app_config'),
-        pid ? supabase.from('okrs').select('*').eq('project_id', pid).order('year').order('quarter') : Promise.resolve({ data: [] }),
+        pid ? supabase.from('okrs').select('*').eq('project_id', pid).order('start_date', { ascending: false }) : Promise.resolve({ data: [] }),
         pid ? supabase.from('sprints').select('*').eq('project_id', pid).order('created_at') : Promise.resolve({ data: [] }),
         pid
           ? supabase.from('task_field_defs').select('*').eq('project_id', pid).is('deleted_at', null).order('position', { ascending: true }).order('id', { ascending: true })
@@ -7621,7 +7695,18 @@ export default function App() {
         if (okrsData.length) {
           const okrIds = okrsData.map(o => o.id);
           const { data: krsData } = await supabase.from('key_results').select('*').in('okr_id', okrIds).order('id');
-          if (krsData) setKeyResults(krsData);
+          if (krsData) {
+            // Enriquece cada KR con las fechas de su OKR padre para que los
+            // formularios puedan filtrar por rango sin pedir okrs como prop.
+            const okrById = Object.fromEntries(okrsData.map(o => [o.id, o]));
+            const enriched = krsData.map(kr => ({
+              ...kr,
+              okr_start_date: okrById[kr.okr_id]?.start_date || null,
+              okr_end_date: okrById[kr.okr_id]?.end_date || null,
+              okr_status: okrById[kr.okr_id]?.status || null,
+            }));
+            setKeyResults(enriched);
+          }
         }
       }
       if (sprintsData) setSprints(sprintsData);

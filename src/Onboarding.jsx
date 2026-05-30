@@ -293,44 +293,57 @@ const TOUR_SCRIPTS = {
 
 // ─── Componente principal ───────────────────────────────────
 // enabled=false pausa el modal y el tour. Útil mientras la pantalla
-// de "Elegir proyecto" está visible (los tabs no son interactivos aún)
-// o durante el spinner de carga.
-export default function Onboarding({ supabase, authUser, activeTab, setActiveTab, forceOpen, onForceHandled, enabled = true }) {
+// de "Elegir proyecto" está visible o durante el spinner de carga.
+//
+// El rol se lee de project_members.role (vía RPC my_role_in_project) para
+// el projectId actual. Owner=PO por defecto; los invitados llegan como
+// 'participant'. Cambios de rol los hace el owner desde Configuración
+// (esto resetea el progreso del tour vía set_project_member_role).
+//
+// Estado del tour (current_step, completed_at) sigue siendo global por
+// usuario en user_onboarding — switch entre proyectos con roles distintos
+// NO replaya el tour automáticamente; el usuario lo lanza con "🎓 Tour".
+export default function Onboarding({ supabase, authUser, activeTab, setActiveTab, forceOpen, onForceHandled, enabled = true, projectId }) {
   const [state, setState] = useState(null);
-  const [shouldShowWelcome, setShouldShowWelcome] = useState(false);
+  const [role, setRole] = useState(null);  // de project_members
   const [shouldShowTour, setShouldShowTour] = useState(false);
 
-  // Solo renderiza cuando enabled. Mientras esté pausado el componente queda
-  // dormido y reanuda en el mismo paso cuando enabled vuelve a true.
-  const showWelcome = enabled && shouldShowWelcome;
-  const showTour = enabled && shouldShowTour;
+  const showTour = enabled && shouldShowTour && !!role && !!TOUR_SCRIPTS[role];
 
-  // Carga estado al montar.
+  // Carga estado global (current_step, completed_at) + role del proyecto actual.
   useEffect(() => {
-    if (!authUser?.id || !supabase) return;
+    if (!authUser?.id || !supabase || !projectId) return;
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.from("user_onboarding").select("*").eq("user_id", authUser.id).maybeSingle();
+      const [{ data: onboardData }, { data: roleData }] = await Promise.all([
+        supabase.from("user_onboarding").select("*").eq("user_id", authUser.id).maybeSingle(),
+        supabase.rpc("my_role_in_project", { p_project_id: projectId }),
+      ]);
       if (cancelled) return;
-      if (!data) {
-        setShouldShowWelcome(true);
-        setState({ role: null, current_step: 0, completed_at: null, skipped: false });
+
+      const r = (typeof roleData === "string") ? roleData : null;
+      setRole(r);
+
+      if (!onboardData) {
+        setState({ current_step: 0, completed_at: null, skipped: false });
+        if (r && TOUR_SCRIPTS[r]) setShouldShowTour(true);
       } else {
-        setState(data);
-        if (!data.completed_at && !data.skipped) {
-          if (!data.role) setShouldShowWelcome(true);
-          else setShouldShowTour(true);
+        setState(onboardData);
+        if (!onboardData.completed_at && !onboardData.skipped && r && TOUR_SCRIPTS[r]) {
+          setShouldShowTour(true);
         }
       }
     })();
     return () => { cancelled = true; };
-  }, [authUser?.id]);
+  }, [authUser?.id, projectId]);
 
-  // Soporte para "Volver a ver tour" desde menú externo.
+  // Soporte para "Volver a ver tour" desde el botón externo.
   useEffect(() => {
     if (!forceOpen) return;
-    if (!state?.role) setShouldShowWelcome(true);
-    else { setShouldShowTour(true); patch({ current_step: 0, completed_at: null, skipped: false }); }
+    if (role && TOUR_SCRIPTS[role]) {
+      patch({ current_step: 0, completed_at: null, skipped: false });
+      setShouldShowTour(true);
+    }
     onForceHandled?.();
   }, [forceOpen]);
 
@@ -340,15 +353,8 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
     await supabase.from("user_onboarding").upsert({ user_id: authUser.id, ...changes }, { onConflict: "user_id" });
   };
 
-  const selectRole = async (role) => {
-    await patch({ role, current_step: 0, started_at: new Date().toISOString(), completed_at: null, skipped: false });
-    setShouldShowWelcome(false);
-    setShouldShowTour(true);
-  };
-
   const skipOnboarding = async () => {
     await patch({ skipped: true });
-    setShouldShowWelcome(false);
     setShouldShowTour(false);
   };
 
@@ -365,25 +371,19 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
 
   return (
     <>
-      {showWelcome && (
-        <WelcomeModal
-          onSelect={selectRole}
-          onSkip={skipOnboarding}
-        />
-      )}
-      {showTour && state?.role && TOUR_SCRIPTS[state.role] && (
+      {showTour && (
         <TourOverlay
-          role={state.role}
-          script={TOUR_SCRIPTS[state.role]}
-          step={state.current_step ?? 0}
+          role={role}
+          script={TOUR_SCRIPTS[role]}
+          step={state?.current_step ?? 0}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           onNext={() => {
-            const next = (state.current_step ?? 0) + 1;
-            if (next >= TOUR_SCRIPTS[state.role].length) finishTour();
+            const next = (state?.current_step ?? 0) + 1;
+            if (next >= TOUR_SCRIPTS[role].length) finishTour();
             else setStep(next);
           }}
-          onBack={() => setStep((state.current_step ?? 0) - 1)}
+          onBack={() => setStep((state?.current_step ?? 0) - 1)}
           onSkip={skipOnboarding}
         />
       )}
@@ -392,64 +392,6 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
 }
 
 // ─── Welcome modal ────────────────────────────────────────────
-function WelcomeModal({ onSelect, onSkip }) {
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(13,13,26,0.85)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 100000, backdropFilter: "blur(4px)",
-      animation: "wpFadeIn 0.25s ease",
-    }}>
-      <style>{`
-        @keyframes wpFadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes wpSlideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes wpPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.4); } 50% { box-shadow: 0 0 0 8px rgba(255,255,255,0); } }
-      `}</style>
-      <div style={{
-        background: "#fff", borderRadius: 20, padding: 36, maxWidth: 720, width: "92%",
-        boxShadow: "0 24px 80px rgba(0,0,0,0.4)", animation: "wpSlideUp 0.4s ease",
-      }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 56, marginBottom: 10 }}>👋</div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: "#1e1e3a" }}>Bienvenida/o a Productivity-Plus</h2>
-          <p style={{ margin: "10px 0 0", color: "#666", fontSize: 15, lineHeight: 1.5 }}>
-            Antes de arrancar, cuéntame qué rol cumples — para mostrarte solo lo que importa para ti.
-          </p>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
-          {Object.entries(ROLES).map(([key, r]) => (
-            <button key={key} onClick={() => onSelect(key)} style={{
-              background: r.gradient, color: "#fff", border: "none", borderRadius: 16,
-              padding: "26px 18px", cursor: "pointer", textAlign: "center",
-              transition: "all 0.2s", fontFamily: "inherit",
-            }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 12px 30px rgba(0,0,0,0.25)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
-            >
-              <div style={{ fontSize: 48, marginBottom: 8 }}>{r.emoji}</div>
-              <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 6 }}>{r.label}</div>
-              <div style={{ fontSize: 12, opacity: 0.9, lineHeight: 1.4 }}>{r.pitch}</div>
-            </button>
-          ))}
-        </div>
-
-        <div style={{ textAlign: "center", marginTop: 22 }}>
-          <button onClick={onSkip} style={{
-            background: "none", border: "none", color: "#888", fontSize: 12,
-            cursor: "pointer", textDecoration: "underline", fontFamily: "inherit",
-          }}>
-            Quizás más tarde
-          </button>
-          <div style={{ fontSize: 10, color: "#bbb", marginTop: 4 }}>
-            Puedes volver a ver el tour desde el menú de usuario.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Tour overlay con spotlight ─────────────────────────────
 function TourOverlay({ role, script, step, activeTab, setActiveTab, onNext, onBack, onSkip }) {
   const current = script[step];
@@ -523,6 +465,10 @@ function TourOverlay({ role, script, step, activeTab, setActiveTab, onNext, onBa
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 99998, pointerEvents: "none" }}>
+      <style>{`
+        @keyframes wpSlideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes wpPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.4); } 50% { box-shadow: 0 0 0 8px rgba(255,255,255,0); } }
+      `}</style>
       {/* Backdrop con 4 paneles cubriendo todo menos el target */}
       {rect ? (
         <>

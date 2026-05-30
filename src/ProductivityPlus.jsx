@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { supabase } from './supabaseClient';
 import Onboarding from './Onboarding';
+import NameCaptureModal from './NameCaptureModal';
+import RoleAssignmentSection from './RoleAssignmentSection';
 
 const getAuthJsonHeaders = async () => {
   const { data: { session } } = await supabase.auth.getSession();
@@ -3361,6 +3363,13 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
             </div>
           </div>
         </ConfigSection>
+      )}
+
+      {/* ── Roles del equipo (Fase A onboarding) ────────────
+          Asignación de PO / SM / Participante a los miembros del proyecto.
+          Solo el owner ve esta sección. */}
+      {project?.id && (
+        <RoleAssignmentSection supabase={supabase} projectId={project.id} />
       )}
 
       {/* ── Cambio de clave ─────────────────── */}
@@ -8795,6 +8804,18 @@ export default function App() {
     </div>
       </div>
 
+      {/* Captura del nombre completo al primer login global. Si el usuario
+          ya tiene full_name en user_metadata, no aparece. Se monta arriba
+          de todo (z-index 100001) para bloquear el resto de la app. */}
+      <NameCaptureModal
+        supabase={supabase}
+        authUser={authUser}
+        onComplete={async () => {
+          const { data } = await supabase.auth.getUser();
+          if (data?.user) setAuthUser(data.user);
+        }}
+      />
+
       {/* Onboarding: modal de bienvenida en primer login + tour spotlight.
           Estado persistido en public.user_onboarding (migración 024).
           enabled=false mientras el landing de proyecto o el spinner están
@@ -8807,6 +8828,7 @@ export default function App() {
         forceOpen={forceTour}
         onForceHandled={() => setForceTour(false)}
         enabled={!showProjectLanding && !loading && !!projectId}
+        projectId={projectId}
       />
     </>
   );

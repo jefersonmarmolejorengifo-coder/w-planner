@@ -3408,39 +3408,69 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
       </ConfigSection>
 
       <ConfigSection title="👥 Participantes" tourId="config-people">
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <input style={si} value={newP} onChange={(e) => setNewP(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addP()} placeholder="Nombre del participante..." />
-          <button onClick={addP} style={addBtn}>Agregar</button>
+        {/* Fase D: la lista de participantes se alimenta automáticamente de
+            los miembros invitados (project_members) cuando entran y registran
+            su nombre. Los ficticios del seed quedan marcados como LEGACY.
+            No hay 'agregar a mano' — se invita por email desde la sección
+            🏗️ Proyecto y el participante se crea solo al registrarse. */}
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 14, lineHeight: 1.5, padding: "10px 12px", background: "#faf8ff", borderRadius: 8, border: "1px solid #efe6ff" }}>
+          Esta lista se alimenta automáticamente: cuando invitas a alguien por correo (sección <b>🏗️ Proyecto</b>) y se registra, aparece aquí con su nombre real. Los ficticios del proyecto demo o de seeds antiguos quedan marcados como <b>LEGACY</b> y siguen siendo asignables, pero no son cuentas reales.
         </div>
         {participants.length === 0 ? (
-          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", textAlign: "center" }}>No hay participantes aún.</p>
+          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", textAlign: "center", padding: 14, fontStyle: "italic" }}>
+            Aún no hay participantes. Invita a tu equipo por correo en la sección <b>🏗️ Proyecto</b>.
+          </p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {participants.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#fafafa", borderRadius: 8, border: "1px solid rgba(84,44,156,0.08)" }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: "50%",
-                  background: p.isSuperUser ? "linear-gradient(135deg, #ec6c04, #f07d1e)" : "linear-gradient(135deg, #542c9c, #6e3ebf)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 13, fontWeight: 700, color: "#ffffff",
-                }}>
-                  {p.name.slice(0, 2).toUpperCase()}
+            {(() => {
+              const real = participants.filter(p => !p.isLegacy);
+              const legacy = participants.filter(p => p.isLegacy);
+              const Row = (p) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#fafafa", borderRadius: 8, border: "1px solid rgba(84,44,156,0.08)", opacity: p.isLegacy ? 0.85 : 1 }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: "50%",
+                    background: p.isLegacy ? "linear-gradient(135deg, #999, #bbb)"
+                              : p.isSuperUser ? "linear-gradient(135deg, #ec6c04, #f07d1e)"
+                              : "linear-gradient(135deg, #542c9c, #6e3ebf)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 13, fontWeight: 700, color: "#ffffff",
+                  }}>
+                    {p.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  <span style={{ flex: 1, fontSize: 13, color: "var(--color-text-primary)" }}>{p.name}</span>
+                  {p.isLegacy && (
+                    <span title="Participante ficticio sin cuenta real — sigue siendo asignable" style={{ fontSize: 9, background: "#e8e8e8", color: "#666", padding: "2px 8px", borderRadius: 8, fontWeight: 700 }}>
+                      LEGACY
+                    </span>
+                  )}
+                  {p.isSuperUser && !p.isLegacy && (
+                    <span style={{ fontSize: 10, background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#ffffff", padding: "2px 8px", borderRadius: 8, fontWeight: 700 }}>
+                      SUPER
+                    </span>
+                  )}
+                  {!p.isLegacy && (
+                    <button
+                      onClick={() => toggleSuper(p.id)}
+                      style={{ background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-secondary)", color: "var(--color-text-secondary)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", fontSize: 11 }}
+                    >
+                      {p.isSuperUser ? "Quitar super" : "Hacer super"}
+                    </button>
+                  )}
+                  <button onClick={() => removeP(p.id)} title={p.isLegacy ? "Quitar este participante ficticio" : "Quitar (las tareas mantienen su valor histórico)"} style={{ background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 13 }}>✕</button>
                 </div>
-                <span style={{ flex: 1, fontSize: 13, color: "var(--color-text-primary)" }}>{p.name}</span>
-                {p.isSuperUser && (
-                  <span style={{ fontSize: 10, background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#ffffff", padding: "2px 8px", borderRadius: 8, fontWeight: 700 }}>
-                    SUPER
-                  </span>
-                )}
-                <button
-                  onClick={() => p.name !== "Jeferson Marmolejo" && toggleSuper(p.id)}
-                  style={{ background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-secondary)", color: "var(--color-text-secondary)", borderRadius: 6, padding: "3px 9px", cursor: p.name === "Jeferson Marmolejo" ? "not-allowed" : "pointer", fontSize: 11 }}
-                >
-                  {p.name === "Jeferson Marmolejo" ? "Super fijo" : p.isSuperUser ? "Quitar super" : "Hacer super"}
-                </button>
-                <button onClick={() => removeP(p.id)} style={{ background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 13 }}>✕</button>
-              </div>
-            ))}
+              );
+              return (
+                <>
+                  {real.length > 0 && real.map(Row)}
+                  {legacy.length > 0 && (
+                    <>
+                      {real.length > 0 && <div style={{ fontSize: 10, fontWeight: 700, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 12, marginBottom: 4 }}>Ficticios (legacy)</div>}
+                      {legacy.map(Row)}
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </ConfigSection>
@@ -7685,6 +7715,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(null);
   const [forceTour, setForceTour] = useState(false);
+  // myRole: rol del usuario en el proyecto actual (po / scrum_master / participant).
+  // null mientras carga o si no es miembro. Usado para gating de tabs en Fase B.
+  const [myRole, setMyRole] = useState(null);
   const [dimensions, setDimensions] = useState(DEFAULT_DIMENSIONS);
   const [showIntro, setShowIntro] = useState(true);
   const [authUser, setAuthUser] = useState(null);
@@ -7706,6 +7739,20 @@ export default function App() {
   // missing). Used to gracefully degrade taskToDb / addTaskFieldDef.
   const [hasCustomFieldsSchema, setHasCustomFieldsSchema] = useState(true);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
+
+  // Carga el rol del usuario para el proyecto activo (Fase B onboarding).
+  // Se dispara cuando cambia projectId o authUser. El owner ignora myRole y
+  // ve todo igual; pero igual lo cargamos para usarlo desde el Onboarding.
+  useEffect(() => {
+    if (!projectId || !authUser?.id) { setMyRole(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("my_role_in_project", { p_project_id: projectId });
+      if (!cancelled) setMyRole(typeof data === "string" ? data : null);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, authUser?.id]);
+
   const [dismissedNotifs, setDismissedNotifs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('pp_dismissed_notifs') || '[]'); } catch { return []; }
   });
@@ -7738,7 +7785,7 @@ export default function App() {
       ]);
 
       if (tasksData) setTasks(tasksData.map(dbToTask));
-      if (partsData) setParticipants(partsData.map(p => ({ id: p.id, name: p.name, isSuperUser: p.is_super_user })));
+      if (partsData) setParticipants(partsData.map(p => ({ id: p.id, name: p.name, isSuperUser: p.is_super_user, isLegacy: p.is_legacy === true, authUserId: p.auth_user_id || null })));
       if (indsData) setIndicators(indsData);
       if (typesData) setTaskTypes(typesData.map(t => ({ id: t.id, name: t.name })));
       if (configData) {
@@ -8452,21 +8499,37 @@ export default function App() {
     localStorage.setItem('pp_dismissed_notifs', JSON.stringify(next));
   };
 
-  const TABS = [
-    { id: "board", label: "Tablero" },
-    { id: "gantt", label: "Gantt" },
-    { id: "metrics", label: "Métricas" },
-    { id: "deps", label: "Red de Tareas" },
-    { id: "okrs", label: "OKRs" },
-    { id: "sprints", label: "Sprints" },
-    { id: "supertasks", label: "Super-tareas" },
-    { id: "focus", label: "Mi Día" },
-    { id: "presentation", label: "Presentación" },
-    { id: "evolution", label: "Evolutivo 💎" },
-    { id: "chat", label: "Chat IA 🏢" },
-    { id: "pulse", label: "Pulso del equipo 🌡" },
-    { id: "config", label: "Configuración" },
+  // Tabs visibles por rol (Fase B del onboarding). Owner ve TODO (es el
+  // dueño del proyecto, incluida Configuración). Los demás roles solo ven
+  // las pestañas que tienen sentido para su trabajo. Si el rol asignado no
+  // está en allowedRoles, esa tab no se renderiza.
+  const TABS_ALL = [
+    { id: "board",        label: "Tablero",              allowedRoles: ["po","scrum_master","participant"] },
+    { id: "gantt",        label: "Gantt",                allowedRoles: ["participant"] },
+    { id: "metrics",      label: "Métricas",             allowedRoles: ["po"] },
+    { id: "deps",         label: "Red de Tareas",        allowedRoles: ["po","scrum_master","participant"] },
+    { id: "okrs",         label: "OKRs",                 allowedRoles: ["po","scrum_master"] },
+    { id: "sprints",      label: "Sprints",              allowedRoles: ["scrum_master"] },
+    { id: "supertasks",   label: "Super-tareas",         allowedRoles: ["po","scrum_master","participant"] },
+    { id: "focus",        label: "Mi Día",               allowedRoles: ["po","scrum_master","participant"] },
+    { id: "presentation", label: "Presentación",         allowedRoles: ["po","scrum_master"] },
+    { id: "evolution",    label: "Evolutivo 💎",         allowedRoles: ["po"] },
+    { id: "chat",         label: "Chat IA 🏢",            allowedRoles: ["po"] },
+    { id: "pulse",        label: "Pulso del equipo 🌡",  allowedRoles: ["po","scrum_master"] },
+    { id: "config",       label: "Configuración",        allowedRoles: [] },  // solo owner
   ];
+
+  const isOwnerOfProject = project?.owner_id && authUser?.id && project.owner_id === authUser.id;
+  // Mientras myRole no haya cargado para un no-owner, defaultea a 'participant'
+  // (más restrictivo) para evitar parpadeos de tabs que el usuario no debería ver.
+  const effectiveRole = isOwnerOfProject ? 'po' : (myRole || 'participant');
+  const TABS = TABS_ALL.filter(t => isOwnerOfProject || t.allowedRoles.includes(effectiveRole));
+
+  // Si la tab activa dejó de ser visible (cambió el rol o el owner), salta a la primera disponible.
+  useEffect(() => {
+    if (!TABS.length) return;
+    if (!TABS.find(t => t.id === activeTab)) setActiveTab(TABS[0].id);
+  }, [TABS.length, activeTab]);
 
   return (
     <>

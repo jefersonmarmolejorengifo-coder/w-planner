@@ -2999,27 +2999,42 @@ function ReportCard({ def, row, onUpdateLocal, onSave, onSend, msg }) {
           Cuándo se envía
         </div>
         {def.key === "scrum" && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 13 }}>
-            <span>Días:</span>
-            {["monday","tuesday","wednesday","thursday","friday","saturday","sunday"].map(d => (
-              <label key={d} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <input type="checkbox"
-                  checked={(schedule.days || []).includes(d)}
-                  onChange={(e) => {
-                    const days = new Set(schedule.days || []);
-                    if (e.target.checked) days.add(d); else days.delete(d);
-                    updateSchedule({ days: [...days] });
-                  }}
-                />
-                {DAY_NAMES_ES[d].slice(0, 3)}
-              </label>
-            ))}
-            <span style={{ marginLeft: 12 }}>Hora:</span>
-            <select value={schedule.hour ?? 8} onChange={(e) => updateSchedule({ hour: Number(e.target.value) })}
-              style={{ padding: "4px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 13 }}>
-              {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
-            </select>
-          </div>
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 13 }}>
+              <span>Días:</span>
+              {["monday","tuesday","wednesday","thursday","friday","saturday","sunday"].map(d => {
+                const selected = (schedule.days || []).includes(d);
+                const atMax = (schedule.days || []).length >= 2 && !selected;
+                return (
+                  <label key={d} style={{ display: "flex", alignItems: "center", gap: 4, opacity: atMax ? 0.4 : 1, cursor: atMax ? "not-allowed" : "pointer" }} title={atMax ? "Máximo 2 días por semana" : ""}>
+                    <input type="checkbox"
+                      checked={selected}
+                      disabled={atMax}
+                      onChange={(e) => {
+                        const days = new Set(schedule.days || []);
+                        if (e.target.checked) {
+                          if (days.size >= 2) return;  // bloqueo defensivo
+                          days.add(d);
+                        } else {
+                          days.delete(d);
+                        }
+                        updateSchedule({ days: [...days] });
+                      }}
+                    />
+                    {DAY_NAMES_ES[d].slice(0, 3)}
+                  </label>
+                );
+              })}
+              <span style={{ marginLeft: 12 }}>Hora:</span>
+              <select value={schedule.hour ?? 8} onChange={(e) => updateSchedule({ hour: Number(e.target.value) })}
+                style={{ padding: "4px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 13 }}>
+                {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
+              </select>
+            </div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 6, fontStyle: "italic" }}>
+              Máximo 2 días por semana. Si ya tienes 2, desmarca uno para cambiar.
+            </div>
+          </>
         )}
         {def.key === "weekly_po" && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 13 }}>
@@ -3078,16 +3093,17 @@ function ReportCard({ def, row, onUpdateLocal, onSave, onSend, msg }) {
         )}
       </div>
 
-      {/* Botones */}
+      {/* Botones — los reportes solo salen en las fechas configuradas; no
+          hay envío manual. Esto evita disparos accidentales y mantiene la
+          regularidad que el equipo espera. */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button onClick={onSave}
           style={{ background: "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
           Guardar configuración
         </button>
-        <button onClick={onSend}
-          style={{ background: `linear-gradient(135deg,${def.color},${def.color}cc)`, color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
-          🤖 Generar y enviar ahora
-        </button>
+        <span style={{ fontSize: 11, color: "#999", fontStyle: "italic" }}>
+          🗓 Solo se envía automáticamente en las fechas configuradas
+        </span>
         {msg && (
           <span style={{ fontSize: 12, color: msg.startsWith("Error") ? "#c0392b" : "#27ae60", marginLeft: 8 }}>{msg}</span>
         )}

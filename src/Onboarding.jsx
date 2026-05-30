@@ -115,8 +115,14 @@ const TOUR_SCRIPTS = {
       tab: "config",
       target: '[data-tour="config-calculator"]',
       emoji: "⚖️",
-      title: "Calculadora de Aporte (clave)",
-      body: "El corazón del sistema: define los pesos de las 4 dimensiones (Dificultad, Impacto, Estratégico, Urgencia). El aporte de cada tarea = suma ponderada. Cambiar pesos recalcula TODO. Mantén estable después de configurar — el equipo necesita previsibilidad.",
+      title: "Calculadora de Aporte (define qué se valora)",
+      body: [
+        { label: "Qué es", text: "La fórmula que convierte cada tarea en un número único (su Valor de Aporte). Trae 3 dimensiones por defecto (Tiempo, Dificultad, Impacto Estratégico) pero puedes AGREGAR las que tu proyecto necesite (complejidad técnica, riesgo, dependencias externas, alineación con OKR…) o QUITAR las que no apliquen. La calculadora se adapta al proyecto, no al revés." },
+        { label: "Cómo funciona", text: "Cada dimensión tiene un peso 1-100, idealmente sumando 100 entre todas. Cada tarea recibe un valor 1-10 por dimensión. Aporte = suma(valor × peso) / 100. Ejemplo: Tiempo=30, Dificultad=30, Estratégico=40 (pesos). Tarea con valores 7/8/10 = (7×30 + 8×30 + 10×40)/100 = 8.5 puntos. Tarea trivial 3/2/4 = 3.1 puntos. Ese diferencial es lo que tu equipo verá en el board y los reportes." },
+        { label: "Qué pasa con las tareas viejas cuando cambias pesos", text: "Esto es lo importante: cada tarea guarda su aporte CALCULADO al momento de crearla o editarla (un snapshot). Cambiar pesos NO recalcula las tareas existentes — quedan congeladas con la fórmula vieja. Resultado: después de un cambio coexisten dos reglas en el mismo proyecto y la comparativa entre sprints se vuelve ruido (peras vs manzanas). Si necesitas la nueva fórmula también en lo viejo, debes re-editar cada tarea manualmente. Por eso conviene definir bien al inicio." },
+        { label: "Errores comunes", text: "1) Subir 'urgencia' al 50 porque 'siempre hay urgencias' — todo se vuelve urgente y nada destaca. 2) Crear 10 dimensiones — el equipo no las llena bien, dejan valor default 5 y la calculadora se vuelve ruido. 3) Cambiar pesos cuando un participante se queja de no aparecer arriba: estás corrigiendo el síntoma, no la causa." },
+        { label: "Tip pro (SM)", text: "Como SM tu rol con la calculadora es CUSTODIO, no reformador. Ayuda al PO a definirla al kick-off, defiéndela cuando alguien quiera cambiarla a mitad de sprint, y úsala en retro para identificar tareas mal estimadas (valor real vs valor declarado). Si DE VERDAD necesitas medir algo nuevo, AGREGAR una dimensión nueva rompe menos que reajustar pesos viejos." },
+      ],
     },
     {
       tab: "config",
@@ -225,8 +231,14 @@ const TOUR_SCRIPTS = {
       tab: "config",
       target: '[data-tour="config-calculator"]',
       emoji: "⚖️",
-      title: "Calculadora de Aporte (no la toques sin razón)",
-      body: "El motor secreto: cuatro dimensiones (Dificultad, Impacto, Estratégico, Urgencia) con pesos 1-10. El aporte de cada tarea = suma ponderada. CAMBIAR PESOS RECALCULA TODO el histórico. Define el balance al inicio del proyecto y déjalo quieto — la previsibilidad del equipo depende de eso.",
+      title: "Calculadora de Aporte (el motor del proyecto)",
+      body: [
+        { label: "Qué es", text: "Una fórmula para valorar cada tarea con un solo número: el Valor de Aporte. Suma ponderada de dimensiones que TÚ defines. Vienen 3 por defecto (Tiempo, Dificultad, Impacto Estratégico) pero puedes AGREGAR cuantas necesites — riesgo regulatorio, impacto en cliente, alineación con OKR, complejidad técnica — o QUITAR las que no apliquen. La calculadora se adapta a tu industria, no al revés." },
+        { label: "Cómo funciona el cálculo", text: "Cada dimensión tiene un peso 1-100; idealmente la suma de pesos da 100. Cada tarea recibe un valor 1-10 por dimensión. Aporte = suma(valor × peso) / 100. Ejemplo concreto: con pesos Tiempo=30, Dificultad=30, Estratégico=40, una tarea con valores 7/8/10 vale (7×30 + 8×30 + 10×40)/100 = 8.5 puntos. Otra trivial 3/2/4 = 3.1 puntos. Ese gap es lo que tu radar de métricas y tu evolutivo van a explotar." },
+        { label: "Qué pasa con las tareas viejas cuando cambias pesos", text: "Detalle CRÍTICO que la gente entiende mal: cada tarea guarda su aporte calculado al crearla o editarla (un snapshot congelado). Cambiar los pesos NO recalcula el histórico — las tareas viejas quedan con la fórmula vieja, las nuevas con la nueva. Resultado: tu reporte mensual va a comparar peras (mes pasado, pesos viejos) con manzanas (este mes, pesos nuevos). La comparativa entre periodos se rompe. Si necesitas la nueva fórmula en lo viejo, hay que re-editar cada tarea manualmente." },
+        { label: "Errores comunes", text: "1) Poner todos los pesos en 100 pensando 'todo es importante' — pierde poder de jerarquización. 2) Definir 10 dimensiones — el equipo no las llena, dejan valor default 5 y la calculadora se vuelve ruido sin diferenciación. 3) Cambiar pesos a mitad de proyecto buscando 'mejorar la fórmula' — rompes la comparativa de tu propio reporte mensual y el evolutivo bimensual pierde su línea base." },
+        { label: "Tip pro (PO)", text: "Define los pesos en el kick-off CON el equipo (no en privado), déjalos quietos durante el proyecto y revísalos UNA VEZ por cuarto si la estrategia cambia. Si necesitas medir algo nuevo, AGREGAR una dimensión nueva rompe menos que reasignar pesos viejos — las tareas viejas se quedan con valor default 5 en la nueva dimensión y la diferencia se diluye en el promedio. Si decides recalcular el histórico, planéalo: avisa al equipo, hazlo en una semana de pocas tareas y verifica el impacto en las personas con más tareas finalizadas." },
+      ],
     },
     {
       tab: "config",
@@ -442,24 +454,29 @@ function TourOverlay({ role, script, step, activeTab, setActiveTab, onNext, onBa
   const isLast = step === script.length - 1;
   const isFirst = step === 0;
 
-  // Posición del tooltip
+  // Posición del tooltip. Width crece a 440 para los pasos densos (body con
+  // secciones etiquetadas). Si el contenido es largo, el body interno hace
+  // scroll, así que la altura asumida no necesita ser perfecta.
+  const isDeep = Array.isArray(current.body);
   let tooltipStyle = {};
   if (rect) {
     const pad = 12;
-    const tooltipW = 360;
-    const tooltipH = 220;
-    let top = rect.top + rect.height + pad;
+    const tooltipW = isDeep ? 440 : 360;
+    const assumedH = isDeep ? 420 : 240;
+    const spaceBelow = window.innerHeight - (rect.top + rect.height);
+    const spaceAbove = rect.top;
+    const placeBelow = spaceBelow >= assumedH || spaceBelow >= spaceAbove;
+    let top = placeBelow ? rect.top + rect.height + pad : Math.max(20, rect.top - assumedH - pad);
     let left = rect.left + rect.width / 2 - tooltipW / 2;
-    // Si no cabe abajo, posiciona arriba
-    if (top + tooltipH > window.innerHeight - 20) top = rect.top - tooltipH - pad;
     if (top < 20) top = 20;
+    if (top + assumedH > window.innerHeight - 20) top = Math.max(20, window.innerHeight - assumedH - 20);
     left = Math.max(16, Math.min(window.innerWidth - tooltipW - 16, left));
-    tooltipStyle = { position: "fixed", top, left, width: tooltipW };
+    tooltipStyle = { position: "fixed", top, left, width: tooltipW, maxHeight: `${window.innerHeight - 40}px` };
   } else {
-    // Modal centrado para pasos sin target
     tooltipStyle = {
       position: "fixed", top: "50%", left: "50%",
-      transform: "translate(-50%, -50%)", width: 460,
+      transform: "translate(-50%, -50%)", width: isDeep ? 520 : 460,
+      maxHeight: `${window.innerHeight - 60}px`,
     };
   }
 
@@ -521,10 +538,27 @@ function TourOverlay({ role, script, step, activeTab, setActiveTab, onNext, onBa
           </div>
         </div>
 
-        {/* Body */}
-        <p style={{ margin: "0 0 16px", fontSize: 13.5, color: "#444", lineHeight: 1.55 }}>
-          {current.body}
-        </p>
+        {/* Body — soporta string simple o array de secciones {label, text} */}
+        <div style={{ marginBottom: 16, overflowY: "auto", maxHeight: "55vh", paddingRight: 4 }}>
+          {Array.isArray(current.body) ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              {current.body.map((sec, i) => (
+                typeof sec === "string" ? (
+                  <p key={i} style={{ margin: 0, fontSize: 13, color: "#444", lineHeight: 1.55 }}>{sec}</p>
+                ) : (
+                  <div key={i} style={{ borderLeft: `3px solid ${r.color}`, paddingLeft: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: r.color, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>
+                      {sec.label}
+                    </div>
+                    <div style={{ fontSize: 13, color: "#444", lineHeight: 1.5 }}>{sec.text}</div>
+                  </div>
+                )
+              ))}
+            </div>
+          ) : (
+            <p style={{ margin: 0, fontSize: 13.5, color: "#444", lineHeight: 1.55 }}>{current.body}</p>
+          )}
+        </div>
 
         {/* Progress dots */}
         <div style={{ display: "flex", gap: 5, justifyContent: "center", marginBottom: 16 }}>

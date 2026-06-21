@@ -2,6 +2,7 @@ import {
   applyCors,
   assertProjectAccess,
   createSupabase,
+  fetchWithTimeout,
   getAppBaseUrl,
   getAuthenticatedUser,
   getBearerToken,
@@ -81,7 +82,7 @@ export default async function handler(req, res) {
 </body></html>`;
 
     const { apiKey, from } = getResendConfig();
-    const resendRes = await fetch('https://api.resend.com/emails', {
+    const resendRes = await fetchWithTimeout('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,

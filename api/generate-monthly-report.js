@@ -3,6 +3,7 @@ import {
   assertProjectCanUseIa,
   corsHeaders,
   createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getOrigin,
@@ -385,7 +386,7 @@ export default async function handler(req) {
 
   // Streaming SSE: la función Vercel devuelve la ReadableStream casi al instante
   // y Anthropic alimenta los chunks sin que el Edge runtime corte por timeout.
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+  const anthropicRes = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -407,7 +408,7 @@ export default async function handler(req) {
       ],
       messages: [{ role: "user", content: userPrompt }],
     }),
-  });
+  }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
     let errMsg = `Anthropic API error ${anthropicRes.status}`;

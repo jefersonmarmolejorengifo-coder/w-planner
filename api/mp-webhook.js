@@ -6,13 +6,51 @@
 //   URL: https://w-planner.vercel.app/api/mp-webhook
 //   Eventos: subscription_preapproval, subscription_authorized_payment
 
-import { applyCors, getSupabaseServiceKey, getSupabaseUrl } from "./_auth.js";
+import { applyCors, fetchWithTimeout, getSupabaseServiceKey, getSupabaseUrl } from "./_auth.js";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "node:crypto";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
 
+// Verifica la firma HMAC-SHA256 que Mercado Pago envía en la cabecera
+// `x-signature` (formato: "ts=<unix>,v1=<hex>"). El manifest que MP firma es
+//   id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+// (data.id en minúsculas si es alfanumérico). Devuelve true sólo si la firma
+// coincide. Si MP_WEBHOOK_SECRET no está configurado, devuelve null (modo
+// retrocompatible: el caller decide, pero loguea una advertencia crítica).
+function verifyMpSignature(req, dataId) {
+  const secret = process.env.MP_WEBHOOK_SECRET;
+  if (!secret) return null; // no configurado todavía
+
+  const sigHeader = req.headers["x-signature"] || "";
+  const requestId = req.headers["x-request-id"] || "";
+  if (!sigHeader) return false;
+
+  // Parse "ts=...,v1=..."
+  let ts = null, v1 = null;
+  for (const part of String(sigHeader).split(",")) {
+    const [k, v] = part.split("=").map((s) => (s || "").trim());
+    if (k === "ts") ts = v;
+    else if (k === "v1") v1 = v;
+  }
+  if (!ts || !v1) return false;
+
+  const id = String(dataId ?? "").toLowerCase();
+  const manifest = `id:${id};request-id:${requestId};ts:${ts};`;
+  const expected = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
+
+  // Comparación en tiempo constante.
+  try {
+    const a = Buffer.from(expected, "hex");
+    const b = Buffer.from(v1, "hex");
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
 async function fetchPreapproval(id, token) {
-  const r = await fetch(`https://api.mercadopago.com/preapproval/${id}`, {
+  const r = await fetchWithTimeout(`https://api.mercadopago.com/preapproval/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!r.ok) throw new Error(`MP preapproval fetch failed: ${r.status}`);
@@ -20,7 +58,7 @@ async function fetchPreapproval(id, token) {
 }
 
 async function fetchPayment(id, token) {
-  const r = await fetch(`https://api.mercadopago.com/v1/payments/${id}`, {
+  const r = await fetchWithTimeout(`https://api.mercadopago.com/v1/payments/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!r.ok) throw new Error(`MP payment fetch failed: ${r.status}`);
@@ -72,6 +110,42 @@ export default async function handler(req, res) {
   if (!type || !dataId) {
     // MP usa "ping" para test; no truenes con 4xx.
     return res.status(200).json({ ok: true, info: "missing type or id" });
+  }
+
+  // ── Verificación de firma (H-001) ──
+  // Si MP_WEBHOOK_SECRET está configurado, exigimos firma válida y rechazamos
+  // lo no firmado. Si no está configurado, procesamos pero avisamos (la firma
+  // se activa en cuanto se setea el secret en el dashboard de MP + Vercel).
+  const sigOk = verifyMpSignature(req, dataId);
+  if (sigOk === false) {
+    console.warn("[mp-webhook] firma inválida o ausente; evento rechazado");
+    return res.status(401).json({ error: "invalid signature" });
+  }
+  if (sigOk === null) {
+    console.warn("[mp-webhook] CRÍTICO: MP_WEBHOOK_SECRET no configurado; firma NO verificada. Configúralo para cerrar este endpoint.");
+  }
+
+  // ── Idempotencia (H-001) ──
+  // MP reintenta notificaciones; registramos el id único del evento y, si ya
+  // fue procesado, devolvemos 200 sin reprocesar. Usa x-request-id (único por
+  // notificación) con fallback a "<type>:<dataId>".
+  const eventId = String(req.headers["x-request-id"] || `${type}:${dataId}`);
+  try {
+    const { error: dedupeErr } = await admin
+      .from("mp_webhook_events")
+      .insert({ event_id: eventId, event_type: type, data_id: String(dataId) });
+    if (dedupeErr) {
+      if (dedupeErr.code === "23505") {
+        // Clave duplicada → ya procesado.
+        return res.status(200).json({ ok: true, info: "duplicate event ignored" });
+      }
+      // 42P01 (tabla inexistente) u otros: no bloqueamos el cobro, solo avisamos.
+      if (dedupeErr.code !== "42P01") {
+        console.warn("[mp-webhook] dedupe insert falló:", dedupeErr.message);
+      }
+    }
+  } catch (dedupeEx) {
+    console.warn("[mp-webhook] dedupe excepción:", dedupeEx?.message);
   }
 
   try {

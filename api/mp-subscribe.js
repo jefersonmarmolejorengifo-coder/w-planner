@@ -7,7 +7,7 @@
 
 import {
   applyCors,
-  createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getSupabaseServiceKey,
@@ -15,6 +15,7 @@ import {
   handleApiError,
 } from "./_auth.js";
 import { createClient } from "@supabase/supabase-js";
+import { PLANS, PLAN_CURRENCY, PLAN_FREQUENCY } from "../src/plans.js";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
 
@@ -38,51 +39,42 @@ export default async function handler(req, res) {
 
   try {
     const { tier } = req.body || {};
-    if (!tier || !["pro_solo", "pro_team", "pro_power"].includes(tier)) {
+    // Catálogo de planes definido en código (src/plans.js): editar un precio
+    // allí cambia lo que se cobra aquí, sin tocar la BD ni el panel de MP.
+    const plan = PLANS[tier];
+    if (!plan || !plan.purchasable) {
       return res.status(400).json({ error: "tier inválido" });
     }
 
     const token = getBearerToken(req);
     const user = await getAuthenticatedUser(token);
 
-    // Usa el cliente con el token del usuario para honrar RLS al leer tier_limits.
-    const supabase = createSupabase(token);
-
-    const { data: tierRow, error: tierErr } = await supabase
-      .from("tier_limits")
-      .select("tier, display_name, price_cop, mp_plan_id")
-      .eq("tier", tier)
-      .maybeSingle();
-    if (tierErr || !tierRow) {
-      return res.status(400).json({ error: "tier no encontrado en tier_limits" });
-    }
-
     const mpToken = ensure(process.env.MP_ACCESS_TOKEN, "MP_ACCESS_TOKEN no esta configurado", 503);
 
     const baseUrl = getAppBaseUrl();
-    const backUrl = `${baseUrl}/billing/return`;
+    // Vuelve a la raíz de la SPA con un flag que el frontend detecta para
+    // mostrar la confirmación del pago (no hay router, /billing/return no existe
+    // como ruta). MP añade sus propios params (?preapproval_id=...&...) con '&'.
+    const backUrl = `${baseUrl}/?billing=return`;
 
-    // Body para Preapproval. Si tier_limits.mp_plan_id existe, se usa.
-    // Si no, se define auto_recurring inline.
+    // Cobro recurrente inline (auto_recurring) con precio y frecuencia del
+    // catálogo en código. No usamos preapproval_plan_id porque los planes no se
+    // crean en el panel de MP — viven en src/plans.js.
     const preapprovalBody = {
-      reason: `Productivity-Plus · ${tierRow.display_name}`,
+      reason: `Productivity-Plus · ${plan.displayName}`,
       external_reference: `${user.id}:${tier}`,
       payer_email: user.email,
       back_url: backUrl,
       status: "pending",
+      auto_recurring: {
+        frequency: PLAN_FREQUENCY.frequency,
+        frequency_type: PLAN_FREQUENCY.frequency_type,
+        transaction_amount: plan.priceCop,
+        currency_id: PLAN_CURRENCY,
+      },
     };
-    if (tierRow.mp_plan_id) {
-      preapprovalBody.preapproval_plan_id = tierRow.mp_plan_id;
-    } else {
-      preapprovalBody.auto_recurring = {
-        frequency: 1,
-        frequency_type: "months",
-        transaction_amount: tierRow.price_cop,
-        currency_id: "COP",
-      };
-    }
 
-    const mpRes = await fetch("https://api.mercadopago.com/preapproval", {
+    const mpRes = await fetchWithTimeout("https://api.mercadopago.com/preapproval", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -116,7 +108,7 @@ export default async function handler(req, res) {
       init_point: mpData.init_point,
       preapproval_id: mpData.id,
       tier: tier,
-      price_cop: tierRow.price_cop,
+      price_cop: plan.priceCop,
     });
   } catch (err) {
     return handleApiError(err, res);

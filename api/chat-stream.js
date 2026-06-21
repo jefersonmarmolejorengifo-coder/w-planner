@@ -11,6 +11,7 @@ import {
   assertProjectAccess,
   corsHeaders,
   createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getOrigin,
@@ -205,7 +206,7 @@ export default async function handler(req) {
       : "Continúa la conversación con base en el contexto cargado."
   }`;
 
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+  const anthropicRes = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -222,7 +223,7 @@ export default async function handler(req) {
       ],
       messages,
     }),
-  });
+  }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
     let errMsg = `Anthropic API error ${anthropicRes.status}`;

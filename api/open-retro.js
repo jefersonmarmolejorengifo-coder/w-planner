@@ -10,6 +10,7 @@ import {
   applyCors,
   assertProjectAccess,
   createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getSupabaseServiceKey,
@@ -134,7 +135,7 @@ export default async function handler(req, res) {
           closesAtLocal, appUrl,
         });
 
-        const resp = await fetch("https://api.resend.com/emails", {
+        const resp = await fetchWithTimeout("https://api.resend.com/emails", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
           body: JSON.stringify({

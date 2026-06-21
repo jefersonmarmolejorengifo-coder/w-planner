@@ -31,21 +31,26 @@ En el panel de tu app MP → **Webhooks** → **Configurar notificaciones**:
 
 Guarda. MP enviará un ping de prueba — debe responder 200.
 
-## 4. (Opcional) Crear planes en MP en lugar de definir auto_recurring inline
+## 4. Los planes viven en código (no en el panel de MP)
 
-Por defecto, `mp-subscribe.js` define `auto_recurring` inline (precio + frecuencia) en cada suscripción. Si prefieres mantener planes editables desde MP:
+**No necesitas crear planes en el dashboard de Mercado Pago.** Los planes están
+definidos como fuente de verdad en [`src/plans.js`](../src/plans.js): tier,
+nombre, precio COP y frecuencia. `mp-subscribe.js` arma el `auto_recurring`
+(cobro recurrente inline) con esos valores en cada suscripción.
 
-1. Ve a **Suscripciones → Planes** en tu cuenta MP.
-2. Crea un plan por cada tier (Pro Solo / Team / Power) con su precio en COP, frecuencia mensual.
-3. Anota cada `preapproval_plan_id`.
-4. Actualiza `tier_limits` en Supabase:
-   ```sql
-   UPDATE public.tier_limits SET mp_plan_id = '<id_del_plan>' WHERE tier = 'pro_solo';
-   UPDATE public.tier_limits SET mp_plan_id = '<id_del_plan>' WHERE tier = 'pro_team';
-   UPDATE public.tier_limits SET mp_plan_id = '<id_del_plan>' WHERE tier = 'pro_power';
-   ```
+Para cambiar un precio o agregar un plan, edita `src/plans.js` y haz deploy:
 
-El endpoint `mp-subscribe` detectará el `mp_plan_id` y lo usará en lugar del `auto_recurring` inline. Ventaja: si después subes precios, los actualizas en MP sin redeploy.
+```js
+export const PLANS = {
+  pro_solo: { tier: "pro_solo", displayName: "Pro Solo", priceCop: 50000, iaProjects: 2, totalProjects: 4, purchasable: true },
+  // ...
+};
+```
+
+⚠️ Los **límites de capacidad** (`iaProjects` / `totalProjects`) se enforce en
+la BD (`tier_limits` + RPC `user_ia_capacity`). Si cambias un límite en código,
+cámbialo también con una migración SQL o la UI mostrará un número y la BD
+permitirá otro. **El precio sí es 100% código.**
 
 ## 5. Flujo end-to-end
 

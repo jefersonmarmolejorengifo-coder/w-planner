@@ -1,4 +1,4 @@
-import { createSupabase } from "./_auth.js";
+import { createSupabase, fetchWithTimeout } from "./_auth.js";
 import { getResendConfig, normalizeRecipients, sanitizeReportHtml } from "./_email.js";
 
 // ─── Helpers de tiempo en Colombia ─────────────────────────
@@ -137,14 +137,14 @@ async function generateReport({ projectId, reportType, range }) {
     ? { projectId, monthStart: range.weekStart, monthEnd: range.weekEnd }
     : { projectId, weekStart: range.weekStart, weekEnd: range.weekEnd };
 
-  const genRes = await fetch(`${getBaseUrl()}${endpoint}`, {
+  const genRes = await fetchWithTimeout(`${getBaseUrl()}${endpoint}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Cron-Secret": cronSecret,
     },
     body: JSON.stringify(body),
-  });
+  }, 55000); // genera con LLM: timeout largo, acotado por maxDuration=60s
 
   if (!genRes.ok) {
     const errText = await genRes.text();
@@ -190,7 +190,7 @@ async function sendAndArchive({ supabase, projectId, reportType, generated, reci
   const { apiKey, from } = getResendConfig();
   const subjectLabel = SUBJECT_BY_TYPE[reportType] || "Reporte";
 
-  const sendRes = await fetch("https://api.resend.com/emails", {
+  const sendRes = await fetchWithTimeout("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -333,11 +333,11 @@ export default async function handler(req, res) {
 
         const trigger = sp.status === "closed" ? "sprint_closed" : "end_date_passed";
         try {
-          await fetch(`${getBaseUrl()}/api/open-retro`, {
+          await fetchWithTimeout(`${getBaseUrl()}/api/open-retro`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-Cron-Secret": process.env.CRON_SECRET },
             body: JSON.stringify({ sprintId: sp.id, trigger }),
-          });
+          }, 25000);
           console.log(`[cron] Retro abierta para sprint ${sp.id} (${trigger})`);
         } catch (e) {
           console.warn(`[cron] No pude abrir retro sprint ${sp.id}:`, e?.message);

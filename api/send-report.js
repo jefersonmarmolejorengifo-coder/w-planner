@@ -2,6 +2,7 @@ import {
   applyCors,
   assertProjectAccess,
   createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getSupabaseServiceKey,
@@ -64,7 +65,7 @@ export default async function handler(req, res) {
     const label = REPORT_TYPE_LABELS[reportType] || "Reporte";
     const subject = `${label} Productivity-Plus · ${weekStart} al ${weekEnd}`;
 
-    const response = await fetch("https://api.resend.com/emails", {
+    const response = await fetchWithTimeout("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

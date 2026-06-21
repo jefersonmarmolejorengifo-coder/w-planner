@@ -3,6 +3,7 @@ import {
   assertProjectCanUseIa,
   corsHeaders,
   createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getOrigin,
@@ -391,7 +392,7 @@ export default async function handler(req) {
   // se cobran a 1.25x la primera vez y luego 0.1x en cada llamada dentro de 5
   // minutos. Para 4 reportes semanales suele haber 1 cache write + cache hits
   // en el resto del cluster.
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+  const anthropicRes = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -415,7 +416,7 @@ export default async function handler(req) {
       ],
       messages: [{ role: "user", content: userPrompt }],
     }),
-  });
+  }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
     let errMsg = `Anthropic API error ${anthropicRes.status}`;

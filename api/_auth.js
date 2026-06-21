@@ -81,6 +81,16 @@ export const jsonResponse = (body, status = 200, headers = {}) =>
     headers: { ...headers, "Content-Type": "application/json" },
   });
 
+// fetch con timeout duro (H-004). Evita que una API externa lenta cuelgue la
+// función serverless hasta agotar su maxDuration. Si el caller ya pasa su
+// propio AbortSignal, se respeta. Default 15s (suficiente para MP/Resend);
+// para llamadas LLM en streaming usar un timeout mayor (~55s).
+export const fetchWithTimeout = (url, options = {}, timeoutMs = 15000) =>
+  fetch(url, {
+    ...options,
+    signal: options.signal || AbortSignal.timeout(timeoutMs),
+  });
+
 export const getBearerToken = (req) => {
   const auth =
     typeof req.headers?.get === "function"
@@ -207,16 +217,26 @@ export const handleApiError = (err, res) => {
 
 // Verifica si el proyecto tiene IA habilitada Y su owner tiene premium activo.
 // Lanza si no — los endpoints IA llaman esto antes de gastar tokens del LLM.
-// Usa la RPC user_can_use_ia_on_project (migración 016). Si la RPC no existe,
-// deja pasar (tolera entornos sin la migración aplicada todavía).
+// Usa la RPC user_can_use_ia_on_project (migración 016).
+//
+// H-006: si la RPC no existe (42883) hacemos FAIL-CLOSED (bloqueamos) para no
+// regalar IA de pago ante un deploy con migraciones incompletas. Solo se tolera
+// la ausencia de la RPC si ALLOW_IA_WITHOUT_RPC="true" (uso en desarrollo).
 export const assertProjectCanUseIa = async (supabase, projectId) => {
   const { data, error } = await supabase.rpc("user_can_use_ia_on_project", {
     p_project_id: Number(projectId),
   });
   if (error) {
     if (error.code === "42883") {
-      // función no existe (migración 016 no aplicada). No bloqueamos.
-      return;
+      // función no existe (migración 016 no aplicada).
+      if (process.env.ALLOW_IA_WITHOUT_RPC === "true") {
+        console.warn("[assertProjectCanUseIa] RPC ausente y ALLOW_IA_WITHOUT_RPC=true → se permite IA (modo dev).");
+        return;
+      }
+      console.error("[assertProjectCanUseIa] RPC user_can_use_ia_on_project ausente; bloqueando IA (fail-closed). Aplica la migración 016.");
+      const err = new Error("La verificación de plan no está disponible (migración pendiente). Contacta al administrador.");
+      err.status = 503;
+      throw err;
     }
     const err = new Error(`No pude verificar premium: ${error.message}`);
     err.status = 500;

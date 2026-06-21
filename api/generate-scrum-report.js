@@ -3,6 +3,7 @@ import {
   assertProjectCanUseIa,
   corsHeaders,
   createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getOrigin,
@@ -318,7 +319,7 @@ export default async function handler(req) {
   // GEMINI_MODEL es configurable por env var: por defecto 2.5-flash (estable);
   // se puede cambiar a "gemini-3.5-flash" sin redeploy.
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  const geminiRes = await fetch(
+  const geminiRes = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: "POST",
@@ -334,7 +335,8 @@ export default async function handler(req) {
           maxOutputTokens: 8192,
         },
       }),
-    }
+    },
+    55000 // LLM: timeout largo
   );
 
   if (!geminiRes.ok) {

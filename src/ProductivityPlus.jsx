@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { supabase } from './supabaseClient';
+import { ALL_PLANS, PLAN_CONTACT_EMAIL } from './plans';
 import Onboarding from './Onboarding';
 import NameCaptureModal from './NameCaptureModal';
 import RoleAssignmentSection from './RoleAssignmentSection';
@@ -2533,25 +2534,23 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
 // toggle llama a la RPC set_project_ia_enabled que valida capacidad del tier.
 function PremiumPanel({ projectId }) {
   const [capacity, setCapacity] = useState(null);
-  const [tierLimits, setTierLimits] = useState([]);
   const [project, setProject] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [showPlans, setShowPlans] = useState(false);
 
   const load = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     setAuthUser(user);
     if (!user || !projectId) { setLoading(false); return; }
 
-    const [{ data: cap }, { data: tiers }, { data: proj }] = await Promise.all([
+    const [{ data: cap }, { data: proj }] = await Promise.all([
       supabase.rpc("user_ia_capacity").single(),
-      supabase.from("tier_limits").select("*").order("sort_order"),
       supabase.from("projects").select("id, owner_id, name, ia_enabled").eq("id", projectId).maybeSingle(),
     ]);
     setCapacity(cap || null);
-    setTierLimits(tiers || []);
     setProject(proj || null);
     setLoading(false);
   };
@@ -2638,40 +2637,46 @@ function PremiumPanel({ projectId }) {
 
         {!isPaid && (
           <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
               Activa un plan Pro para habilitar la IA en tus proyectos.
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-              {tierLimits.filter(t => t.tier !== "free" && t.tier !== "enterprise").map(t => (
-                <button key={t.tier}
-                  onClick={() => subscribe(t.tier)}
-                  disabled={busy}
-                  style={{
-                    background: "linear-gradient(135deg, #542c9c, #6e3ebf)",
-                    color: "#fff", border: "none", borderRadius: 10, padding: "14px 12px",
-                    cursor: busy ? "not-allowed" : "pointer",
-                    textAlign: "left",
-                    boxShadow: "0 4px 14px rgba(84,44,156,0.25)",
-                  }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{t.display_name}</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>
-                    COP ${t.price_cop.toLocaleString("es-CO")}<span style={{ fontSize: 11, opacity: 0.7, fontWeight: 400 }}> /mes</span>
-                  </div>
-                  <div style={{ fontSize: 10, opacity: 0.9 }}>
-                    {t.ia_projects} proyectos con IA · {t.total_projects} totales
-                  </div>
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={() => setShowPlans(true)}
+              style={{
+                background: "linear-gradient(135deg, #ec6c04, #149cac)",
+                color: "#fff", border: "none", borderRadius: 10, padding: "13px 22px",
+                cursor: "pointer", fontSize: 14, fontWeight: 700,
+                boxShadow: "0 6px 18px rgba(236,108,4,0.3)",
+              }}>
+              Ver planes y mejorar ✨
+            </button>
           </div>
         )}
 
         {isPaid && (
-          <div style={{ fontSize: 12, marginTop: 8, opacity: 0.85 }}>
-            Suscripción activa. Para cancelar o ajustar tu plan, ingresa a tu cuenta de Mercado Pago.
+          <div style={{ fontSize: 12, marginTop: 10, opacity: 0.9, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span>Suscripción activa. Para cancelar o ajustar tu plan, ingresa a tu cuenta de Mercado Pago.</span>
+            <button
+              onClick={() => setShowPlans(true)}
+              style={{
+                background: "rgba(255,255,255,0.15)", color: "#fff",
+                border: "1px solid rgba(255,255,255,0.3)", borderRadius: 8,
+                padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700,
+              }}>
+              Ver planes
+            </button>
           </div>
         )}
       </div>
+
+      {showPlans && (
+        <PlanSelectionModal
+          currentTier={tier}
+          busy={busy}
+          onSubscribe={(t) => { setShowPlans(false); subscribe(t); }}
+          onClose={() => setShowPlans(false)}
+        />
+      )}
 
       {/* Card 2: Toggle IA en este proyecto (solo owner) */}
       {isOwner && (
@@ -3715,42 +3720,35 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 }
 
 // ─── AuthScreen ───────────────────────────────────────────
-function AuthScreen({ onAuth }) {
-  const [authTab, setAuthTab] = useState('login'); // 'login' | 'register'
+// Inicio de sesión por LINK MÁGICO (passwordless). El usuario escribe su correo
+// y recibe un enlace; al abrirlo vuelve a la app y la sesión entra sola (la
+// detecta supabase-js en la URL y App la rutea en onAuthStateChange SIGNED_IN).
+// shouldCreateUser:true → mismo flujo sirve para entrar y para registrarse. El
+// nombre se captura después con NameCaptureModal al primer login.
+function AuthScreen() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
+  const [sent, setSent] = useState(false);
 
-  const inp = { background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "11px 14px", fontSize: 14, outline: "none", fontFamily: "inherit", color: "#fff", width: "100%", boxSizing: "border-box", transition: "border-color 0.2s" };
+  const inp = { background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "13px 14px", fontSize: 15, outline: "none", fontFamily: "inherit", color: "#fff", width: "100%", boxSizing: "border-box", transition: "border-color 0.2s" };
   const lbl = { fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 };
 
-  const handleLogin = async () => {
-    if (!email.trim() || !password) { setError("Completa todos los campos."); return; }
-    setLoading(true); setError(''); setInfo('');
-    const { data, error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setLoading(false);
-    if (err) { setError(err.message); return; }
-    if (data?.user) onAuth(data.user);
-  };
-
-  const handleRegister = async () => {
-    if (!name.trim() || !email.trim() || !password) { setError("Completa todos los campos."); return; }
-    if (password.length < 6) { setError("La contraseña debe tener al menos 6 caracteres."); return; }
-    setLoading(true); setError(''); setInfo('');
-    const { data, error: err } = await supabase.auth.signUp({
-      email: email.trim(), password,
-      options: { data: { full_name: name.trim() } },
+  const sendLink = async () => {
+    const mail = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { setError("Escribe un correo válido."); return; }
+    setLoading(true); setError('');
+    const { error: err } = await supabase.auth.signInWithOtp({
+      email: mail,
+      options: {
+        // Vuelve a esta misma URL (conserva ?join=... para invitaciones).
+        emailRedirectTo: window.location.origin + window.location.search,
+        shouldCreateUser: true,
+      },
     });
     setLoading(false);
     if (err) { setError(err.message); return; }
-    if (data?.user && !data?.session) {
-      setInfo("Revisa tu correo para confirmar tu cuenta.");
-      return;
-    }
-    if (data?.user) onAuth(data.user);
+    setSent(true);
   };
 
   return (
@@ -3763,52 +3761,36 @@ function AuthScreen({ onAuth }) {
         </div>
 
         <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
-          {/* Tabs */}
-          <div style={{ display: "flex", gap: 0, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: 4, marginBottom: 28 }}>
-            {[['login','Iniciar sesión'],['register','Crear cuenta']].map(([t, l]) => (
-              <button key={t} onClick={() => { setAuthTab(t); setError(''); setInfo(''); }}
-                style={{ flex: 1, background: authTab === t ? "rgba(236,108,4,0.9)" : "transparent", color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: authTab === t ? 700 : 400, fontSize: 13, transition: "all 0.2s", fontFamily: "inherit" }}>
-                {l}
-              </button>
-            ))}
-          </div>
-
-          {authTab === 'login' ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <label style={lbl}>Correo electrónico</label>
-                <input style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="tu@correo.com" autoFocus />
+          {sent ? (
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 44, marginBottom: 10 }}>📬</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 8 }}>Revisa tu correo</div>
+              <div style={{ fontSize: 13.5, color: "rgba(255,255,255,0.6)", lineHeight: 1.6 }}>
+                Te enviamos un enlace de acceso a<br />
+                <b style={{ color: "#fff" }}>{email.trim().toLowerCase()}</b>.<br />
+                Ábrelo desde este dispositivo para entrar.
               </div>
-              <div>
-                <label style={lbl}>Contraseña</label>
-                <input style={inp} type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="••••••••" />
-              </div>
-              {error && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{error}</div>}
-              {info && <div style={{ fontSize: 12, color: "#4dd8e8", fontWeight: 500 }}>{info}</div>}
-              <button onClick={handleLogin} disabled={loading}
-                style={{ background: loading ? "#555" : "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: loading ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: loading ? "none" : "0 4px 20px rgba(236,108,4,0.4)", marginTop: 4, fontFamily: "inherit" }}>
-                {loading ? "Ingresando..." : "Ingresar →"}
+              <button onClick={() => { setSent(false); setError(''); }}
+                style={{ marginTop: 22, background: "transparent", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit" }}>
+                Usar otro correo
               </button>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <label style={lbl}>Nombre</label>
-                <input style={inp} type="text" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRegister()} placeholder="Tu nombre completo" autoFocus />
+              <div style={{ textAlign: "center", marginBottom: 4 }}>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", marginBottom: 6 }}>Entra sin contraseña</div>
+                <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>
+                  Escribe tu correo y te enviamos un enlace seguro para entrar. Si es tu primera vez, tu cuenta se crea sola.
+                </div>
               </div>
               <div>
                 <label style={lbl}>Correo electrónico</label>
-                <input style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRegister()} placeholder="tu@correo.com" />
-              </div>
-              <div>
-                <label style={lbl}>Contraseña</label>
-                <input style={inp} type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRegister()} placeholder="Mínimo 6 caracteres" />
+                <input style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && sendLink()} placeholder="tu@correo.com" autoFocus />
               </div>
               {error && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{error}</div>}
-              {info && <div style={{ fontSize: 12, color: "#4dd8e8", fontWeight: 500 }}>{info}</div>}
-              <button onClick={handleRegister} disabled={loading}
-                style={{ background: loading ? "#555" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: loading ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: loading ? "none" : "0 4px 20px rgba(84,44,156,0.4)", marginTop: 4, fontFamily: "inherit" }}>
-                {loading ? "Creando cuenta..." : "Crear cuenta →"}
+              <button onClick={sendLink} disabled={loading}
+                style={{ background: loading ? "#555" : "linear-gradient(135deg,#ec6c04,#f07d1e)", color: "#fff", border: "none", borderRadius: 10, padding: "13px", cursor: loading ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: loading ? "none" : "0 4px 20px rgba(236,108,4,0.4)", marginTop: 4, fontFamily: "inherit" }}>
+                {loading ? "Enviando enlace..." : "Enviarme el enlace →"}
               </button>
             </div>
           )}
@@ -4173,6 +4155,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const [tplCreating, setTplCreating] = useState(false);
   const [myProjects, setMyProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
+  const [capacity, setCapacity] = useState(null); // límite de tableros por plan (user_ia_capacity)
   const [deletingProject, setDeletingProject] = useState(null); // project being confirmed for deletion
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deletingBusy, setDeletingBusy] = useState(false);
@@ -4181,6 +4164,13 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   useEffect(() => {
     supabase.from('project_templates').select('*').then(({ data }) => { if (data) setTemplates(data); });
   }, []);
+
+  // Capacidad del plan (cuántos tableros puede crear). El límite real lo enforce
+  // el servidor (trigger en projects, migración 027); esto es solo UX.
+  useEffect(() => {
+    if (!authUser?.id) { setCapacity(null); return; }
+    supabase.rpc('user_ia_capacity').single().then(({ data }) => setCapacity(data || null));
+  }, [authUser]);
 
   useEffect(() => {
     if (!authUser) return;
@@ -4220,10 +4210,13 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     loadMyProjects();
   }, [authUser]);
 
-  const isPremium = authUser?.user_metadata?.plan === 'premium';
-  const projectLimit = isPremium ? 10 : 3;
+  // Límite de tableros por plan: tier_limits.total_projects vía user_ia_capacity.
+  // Plan gratuito = 1 tablero. Mientras la capacidad carga, no bloqueamos (el
+  // servidor enforce el límite real con un trigger; migración 027).
   const ownedCount = myProjects.filter(p => p.owner_id === authUser?.id).length;
-  const atLimit = ownedCount >= projectLimit;
+  const isPremium = !!(capacity?.tier && capacity.tier !== 'free');
+  const projectLimit = capacity?.total_max ?? null;
+  const atLimit = projectLimit != null && ownedCount >= projectLimit;
 
   // Returns the authenticated user that will actually back the JWT on the
   // next request. We must use auth.getUser() (server round-trip) instead of
@@ -4283,7 +4276,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     if (!projName.trim()) { setErr("El nombre del proyecto es requerido."); return; }
     if (!projPin || projPin.length < 4) { setErr("La clave debe tener al menos 4 caracteres."); return; }
     if (atLimit) {
-      setErr(`Límite alcanzado: ${projectLimit} proyectos ${isPremium ? '(Premium)' : '(cuenta gratuita)'}. ${!isPremium ? 'Actualiza a Premium para crear hasta 10 proyectos.' : ''}`);
+      setErr(`Llegaste al límite de ${projectLimit} tablero${projectLimit === 1 ? '' : 's'} del plan ${capacity?.display_name || 'actual'}. Sube de plan para crear más.`);
       return;
     }
     setCreating(true); setErr("");
@@ -4337,11 +4330,14 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
       const msg = error?.message || 'desconocido';
       const isAuthNull = /auth\.uid is NULL/i.test(msg) || diag?.uid === null;
       const isRls = error?.code === '42501' || /row-level security/i.test(msg) || error?.status === 403;
-      setErr(isAuthNull
-        ? 'El servidor no reconoce tu sesión (auth.uid es null). Cierra sesión y vuelve a entrar.'
-        : isRls
-          ? 'Permiso denegado por el servidor. Revisa la consola y cierra/abre sesión.'
-          : 'Error creando proyecto: ' + msg);
+      const isLimit = error?.code === 'P0001' || /l[ií]mite de .* tablero/i.test(msg);
+      setErr(isLimit
+        ? msg
+        : isAuthNull
+          ? 'El servidor no reconoce tu sesión (auth.uid es null). Cierra sesión y vuelve a entrar.'
+          : isRls
+            ? 'Permiso denegado por el servidor. Revisa la consola y cierra/abre sesión.'
+            : 'Error creando proyecto: ' + msg);
       setCreating(false);
       return;
     }
@@ -4357,7 +4353,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     if (!selectedTemplate) return;
     if (!tplPin || tplPin.length < 4) { setErr("La clave debe tener al menos 4 caracteres."); return; }
     if (atLimit) {
-      setErr(`Límite alcanzado: ${projectLimit} proyectos ${isPremium ? '(Premium)' : '(cuenta gratuita)'}. ${!isPremium ? 'Actualiza a Premium para crear hasta 10 proyectos.' : ''}`);
+      setErr(`Llegaste al límite de ${projectLimit} tablero${projectLimit === 1 ? '' : 's'} del plan ${capacity?.display_name || 'actual'}. Sube de plan para crear más.`);
       return;
     }
     setTplCreating(true); setErr("");
@@ -4517,7 +4513,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
               {authUser && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: atLimit ? 'rgba(248,113,113,0.1)' : 'rgba(255,255,255,0.05)', border: `1px solid ${atLimit ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 8, padding: '8px 12px' }}>
                   <span style={{ fontSize: 11, color: atLimit ? '#f87171' : 'rgba(255,255,255,0.45)' }}>
-                    Proyectos creados: {ownedCount} / {projectLimit}
+                    Tableros creados: {ownedCount} / {projectLimit ?? '—'}
                   </span>
                   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: isPremium ? '#f5a623' : 'rgba(255,255,255,0.3)', textTransform: 'uppercase' }}>
                     {isPremium ? 'Premium' : 'Gratuito'}
@@ -4563,7 +4559,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
                   {authUser && (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: atLimit ? 'rgba(248,113,113,0.1)' : 'rgba(255,255,255,0.05)', border: `1px solid ${atLimit ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.1)'}`, borderRadius: 8, padding: '8px 12px' }}>
                       <span style={{ fontSize: 11, color: atLimit ? '#f87171' : 'rgba(255,255,255,0.45)' }}>
-                        Proyectos creados: {ownedCount} / {projectLimit}
+                        Tableros creados: {ownedCount} / {projectLimit ?? '—'}
                       </span>
                       <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: isPremium ? '#f5a623' : 'rgba(255,255,255,0.3)', textTransform: 'uppercase' }}>
                         {isPremium ? 'Premium' : 'Gratuito'}
@@ -7706,6 +7702,303 @@ const taskToDb = (t) => ({
   // updated_at / closed_at are managed by the DB trigger set_task_auto_fields.
 });
 
+// Pantalla de selección de planes (modal a pantalla completa). Lee el catálogo
+// de src/plans.js (ALL_PLANS) y muestra cada plan con sus características.
+//   - currentTier: tier activo del usuario (capacity.tier) → marca "Tu plan".
+//   - onSubscribe(tier): dispara el checkout de Mercado Pago (planes 'buy').
+//   - ctaType 'contact' (Enterprise) abre un correo a PLAN_CONTACT_EMAIL.
+function PlanSelectionModal({ currentTier, busy, onSubscribe, onClose }) {
+  const fmt = (n) => n.toLocaleString("es-CO");
+
+  const renderCta = (plan) => {
+    const isCurrent = plan.tier === currentTier;
+    if (isCurrent) {
+      return <button className="pp-plan-cta pp-plan-cta-current" disabled>Tu plan actual</button>;
+    }
+    if (plan.ctaType === "free") {
+      return <button className="pp-plan-cta pp-plan-cta-ghost" disabled>Plan base</button>;
+    }
+    if (plan.ctaType === "contact") {
+      const href = `mailto:${PLAN_CONTACT_EMAIL}?subject=${encodeURIComponent("Quiero el plan Enterprise de Productivity-Plus")}`;
+      return <a className="pp-plan-cta pp-plan-cta-buy" href={href} style={{ "--accent": plan.accent }}>Contáctanos</a>;
+    }
+    return (
+      <button
+        className="pp-plan-cta pp-plan-cta-buy"
+        style={{ "--accent": plan.accent }}
+        disabled={busy}
+        onClick={() => onSubscribe(plan.tier)}
+      >
+        {busy ? "Redirigiendo…" : `Elegir ${plan.displayName}`}
+      </button>
+    );
+  };
+
+  return (
+    <div className="pp-plans-overlay" onClick={onClose}>
+      <style>{`
+        @keyframes ppPlansIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes ppPlanRise { from { opacity: 0; transform: translateY(18px) } to { opacity: 1; transform: translateY(0) } }
+        .pp-plans-overlay {
+          position: fixed; inset: 0; z-index: 100001;
+          background: radial-gradient(1200px 600px at 50% -10%, rgba(84,44,156,0.35), rgba(5,5,14,0.96) 60%);
+          backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+          display: flex; align-items: flex-start; justify-content: center;
+          overflow-y: auto; padding: 48px 20px; animation: ppPlansIn .25s ease;
+        }
+        .pp-plans-shell {
+          width: 100%; max-width: 1180px; position: relative;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .pp-plans-close {
+          position: absolute; top: -12px; right: 0; width: 38px; height: 38px;
+          border-radius: 50%; border: 1px solid rgba(255,255,255,0.14);
+          background: rgba(255,255,255,0.04); color: #fff; font-size: 18px;
+          cursor: pointer; display: flex; align-items: center; justify-content: center;
+          transition: background .15s, transform .15s;
+        }
+        .pp-plans-close:hover { background: rgba(255,255,255,0.12); transform: rotate(90deg); }
+        .pp-plans-eyebrow {
+          font-size: 11px; letter-spacing: 5px; text-transform: uppercase;
+          color: rgba(255,255,255,0.4); text-align: center; margin-bottom: 14px;
+        }
+        .pp-plans-title {
+          font-size: 38px; font-weight: 800; letter-spacing: -1px; text-align: center;
+          margin: 0 0 10px; color: #fff;
+          background: linear-gradient(120deg, #fff 30%, #f5a623 70%, #149cac);
+          -webkit-background-clip: text; background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        .pp-plans-sub {
+          font-size: 14px; color: rgba(255,255,255,0.55); text-align: center;
+          margin: 0 auto 40px; max-width: 520px; line-height: 1.6;
+        }
+        .pp-plans-grid {
+          display: grid; gap: 16px;
+          grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+          align-items: stretch;
+        }
+        .pp-plan-card {
+          position: relative; display: flex; flex-direction: column;
+          background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+          border: 1px solid rgba(255,255,255,0.09); border-radius: 18px;
+          padding: 24px 20px 22px; color: #fff;
+          animation: ppPlanRise .5s cubic-bezier(.2,.7,.2,1) both;
+          transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+        }
+        .pp-plan-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.2); }
+        .pp-plan-popular {
+          border-color: rgba(236,108,4,0.55);
+          box-shadow: 0 0 0 1px rgba(236,108,4,0.4), 0 24px 60px rgba(236,108,4,0.18);
+          background: linear-gradient(180deg, rgba(236,108,4,0.14), rgba(255,255,255,0.02));
+        }
+        .pp-plan-popular:hover { transform: translateY(-8px); }
+        .pp-plan-badge {
+          position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+          background: linear-gradient(135deg, #ec6c04, #f5a623); color: #1a1206;
+          font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+          padding: 5px 12px; border-radius: 999px; white-space: nowrap;
+          box-shadow: 0 6px 16px rgba(236,108,4,0.4);
+        }
+        .pp-plan-name { font-size: 19px; font-weight: 800; margin: 2px 0 4px; }
+        .pp-plan-tagline { font-size: 12px; color: rgba(255,255,255,0.5); min-height: 32px; line-height: 1.4; margin-bottom: 16px; }
+        .pp-plan-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 4px; }
+        .pp-plan-price-amount { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+        .pp-plan-price-period { font-size: 12px; color: rgba(255,255,255,0.45); }
+        .pp-plan-price-currency { font-size: 12px; color: rgba(255,255,255,0.45); font-weight: 600; }
+        .pp-plan-divider { height: 1px; background: rgba(255,255,255,0.08); margin: 18px 0; }
+        .pp-plan-features { list-style: none; padding: 0; margin: 0 0 22px; display: flex; flex-direction: column; gap: 11px; flex: 1; }
+        .pp-plan-feature { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; line-height: 1.4; color: rgba(255,255,255,0.82); }
+        .pp-plan-check {
+          flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; margin-top: 1px;
+          display: flex; align-items: center; justify-content: center; font-size: 10px;
+          background: var(--accent, #149cac); color: #fff; font-weight: 900;
+        }
+        .pp-plan-cta {
+          width: 100%; padding: 12px 14px; border-radius: 11px; font-size: 13.5px;
+          font-weight: 700; cursor: pointer; border: none; text-align: center;
+          text-decoration: none; display: block; transition: transform .15s, filter .15s, opacity .15s;
+        }
+        .pp-plan-cta-buy { background: linear-gradient(135deg, var(--accent), #ffffff22), var(--accent); color: #fff; box-shadow: 0 8px 22px rgba(0,0,0,0.35); }
+        .pp-plan-cta-buy:hover { transform: translateY(-2px); filter: brightness(1.12); }
+        .pp-plan-cta-current { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.14); cursor: default; }
+        .pp-plan-cta-ghost { background: transparent; color: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.12); cursor: default; }
+        .pp-plan-cta:disabled { cursor: default; }
+        .pp-plans-foot { text-align: center; font-size: 11.5px; color: rgba(255,255,255,0.4); margin-top: 28px; line-height: 1.6; }
+        @media (max-width: 560px) { .pp-plans-title { font-size: 28px; } }
+      `}</style>
+
+      <div className="pp-plans-shell" onClick={(e) => e.stopPropagation()}>
+        <button className="pp-plans-close" onClick={onClose} aria-label="Cerrar">✕</button>
+        <div className="pp-plans-eyebrow">Productivity-Plus</div>
+        <h2 className="pp-plans-title">Elige tu plan</h2>
+        <p className="pp-plans-sub">
+          Desbloquea reportes con IA, pulso del equipo y analítica avanzada.
+          Cobro mensual en COP vía Mercado Pago. Cancela cuando quieras.
+        </p>
+
+        <div className="pp-plans-grid">
+          {ALL_PLANS.map((plan, i) => {
+            const isPopular = !!plan.badge;
+            const isCurrent = plan.tier === currentTier;
+            return (
+              <div
+                key={plan.tier}
+                className={`pp-plan-card${isPopular ? " pp-plan-popular" : ""}`}
+                style={{ animationDelay: `${i * 70}ms` }}
+              >
+                {plan.badge && <div className="pp-plan-badge">{plan.badge}</div>}
+                {isCurrent && !plan.badge && <div className="pp-plan-badge" style={{ background: "linear-gradient(135deg,#149cac,#27ae60)", color: "#fff" }}>Plan actual</div>}
+
+                <div className="pp-plan-name" style={{ color: plan.accent === "#7a8aa0" ? "#fff" : plan.accent }}>{plan.displayName}</div>
+                <div className="pp-plan-tagline">{plan.tagline}</div>
+
+                <div className="pp-plan-price">
+                  {plan.priceCop === 0 ? (
+                    <span className="pp-plan-price-amount">Gratis</span>
+                  ) : (
+                    <>
+                      <span className="pp-plan-price-currency">COP</span>
+                      <span className="pp-plan-price-amount">${fmt(plan.priceCop)}</span>
+                      <span className="pp-plan-price-period">/mes</span>
+                    </>
+                  )}
+                </div>
+
+                <div className="pp-plan-divider" />
+
+                <ul className="pp-plan-features">
+                  {plan.features.map((f, fi) => (
+                    <li className="pp-plan-feature" key={fi}>
+                      <span className="pp-plan-check" style={{ "--accent": plan.accent }}>✓</span>
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                {renderCta(plan)}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="pp-plans-foot">
+          Los precios se cobran mensualmente. La capacidad de IA y los reportes se activan al confirmarse el pago.<br />
+          ¿Dudas sobre qué plan elegir? Escríbenos a {PLAN_CONTACT_EMAIL}.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Overlay de retorno de pago de Mercado Pago. MP redirige al usuario a
+// `/?billing=return` (ver api/mp-subscribe.js). El webhook que activa la
+// suscripción puede tardar unos segundos, así que sondeamos `user_ia_capacity`
+// hasta que el tier deje de ser 'free' con status 'active'. Se monta una sola
+// vez al tope de App y se autogestiona desde la URL.
+function BillingReturnOverlay() {
+  const [state, setState] = useState("hidden"); // hidden | checking | success | pending
+  const [planName, setPlanName] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") !== "return") return;
+    setState("checking");
+
+    let cancelled = false;
+    let tries = 0;
+    const MAX_TRIES = 12;   // ~30 s en total
+    const INTERVAL = 2500;
+
+    const poll = async () => {
+      if (cancelled) return;
+      tries += 1;
+      try {
+        const { data } = await supabase.rpc("user_ia_capacity").single();
+        if (cancelled) return;
+        if (data && data.tier && data.tier !== "free" && data.status === "active") {
+          setPlanName(data.display_name || data.tier);
+          setState("success");
+          return;
+        }
+      } catch (_) { /* sesión aún no lista o RPC transitoria: reintenta */ }
+      if (tries >= MAX_TRIES) { setState("pending"); return; }
+      setTimeout(poll, INTERVAL);
+    };
+    poll();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  if (state === "hidden") return null;
+
+  const close = () => {
+    // Limpia ?billing=return y recarga para refrescar capacidad/plan en la app.
+    window.history.replaceState({}, "", window.location.pathname);
+    window.location.reload();
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100000,
+      background: "rgba(5,5,15,0.92)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <div style={{
+        maxWidth: 440, width: "100%", background: "#12121f",
+        border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16,
+        padding: "36px 32px", textAlign: "center", color: "#fff",
+        boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
+      }}>
+        {state === "checking" && (
+          <>
+            <div style={{ fontSize: 13, letterSpacing: 4, textTransform: "uppercase", color: "rgba(255,255,255,0.4)", marginBottom: 18 }}>
+              Mercado Pago
+            </div>
+            <div style={{ fontSize: 19, fontWeight: 700, marginBottom: 10 }}>Confirmando tu pago…</div>
+            <div style={{ width: 200, height: 2, background: "rgba(255,255,255,0.1)", borderRadius: 1, overflow: "hidden", margin: "20px auto 0" }}>
+              <div style={{ height: "100%", background: "linear-gradient(90deg, #ec6c04, #149cac)", borderRadius: 1, animation: "expandLine 1.5s ease infinite alternate" }} />
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 18 }}>
+              Esto puede tardar unos segundos. No cierres esta ventana.
+            </div>
+          </>
+        )}
+
+        {state === "success" && (
+          <>
+            <div style={{ fontSize: 48, marginBottom: 8 }}>✓</div>
+            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>¡Suscripción activada!</div>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
+              Tu plan <strong style={{ color: "#fff" }}>{planName}</strong> ya está activo. Ya puedes activar la IA en tus proyectos.
+            </div>
+            <button onClick={close} style={{
+              marginTop: 24, padding: "11px 28px", border: "none", borderRadius: 10,
+              background: "linear-gradient(135deg, #ec6c04, #149cac)", color: "#fff",
+              fontWeight: 700, fontSize: 14, cursor: "pointer",
+            }}>Continuar</button>
+          </>
+        )}
+
+        {state === "pending" && (
+          <>
+            <div style={{ fontSize: 48, marginBottom: 8 }}>⏳</div>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>Tu pago se está procesando</div>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
+              Mercado Pago aún no confirma el cobro. Suele reflejarse en unos minutos —
+              <strong style={{ color: "#fff" }}> no necesitas pagar de nuevo</strong>. Tu plan aparecerá en Configuración cuando se confirme.
+            </div>
+            <button onClick={close} style={{
+              marginTop: 24, padding: "11px 28px", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 10,
+              background: "transparent", color: "#fff", fontWeight: 600, fontSize: 14, cursor: "pointer",
+            }}>Entendido</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tasks, setTasks] = useState([]);
   const [participants, setParticipants] = useState([]);
@@ -7873,16 +8166,15 @@ export default function App() {
   };
 
   useEffect(() => {
-    const init = async () => {
-      // 1. Check Supabase auth session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setLoading(false);
-        // showIntro will lead to showAuth after animation
-        return;
-      }
-      const user = session.user;
+    // Evita rutear dos veces (init + SIGNED_IN pueden coincidir).
+    let routed = false;
+
+    // Rutea al usuario tras autenticarse: invitación ?join, proyecto guardado o
+    // pantalla de selección. Compartido por init() y por el retorno del link
+    // mágico (onAuthStateChange SIGNED_IN).
+    const routeAfterAuth = async (user) => {
       setAuthUser(user);
+      setShowAuth(false); setShowIntro(false);
 
       // 2. Handle ?join=CODE invite link
       const params = new URLSearchParams(window.location.search);
@@ -7923,15 +8215,33 @@ export default function App() {
       setLoading(false);
     };
 
+    const init = async () => {
+      // 1. Check Supabase auth session (espera la inicialización de supabase-js,
+      // incluida la detección del token del link mágico en la URL).
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setLoading(false);
+        // showIntro will lead to showAuth after animation
+        return;
+      }
+      routed = true;
+      await routeAfterAuth(session.user);
+    };
+
     init();
 
     // Auth state subscription
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         setAuthUser(null); setActiveUser(null); setProject(null);
         setProjectId(null); setTasks([]); setParticipants([]);
         setShowAuth(true); setShowIntro(true); setShowProjectLanding(false);
         setLoading(false);
+        routed = false;
+      } else if (event === 'SIGNED_IN' && session?.user && !routed) {
+        // Retorno del link mágico: la sesión entró después de init().
+        routed = true;
+        routeAfterAuth(session.user);
       }
     });
     return () => subscription.unsubscribe();
@@ -8533,6 +8843,8 @@ export default function App() {
 
   return (
     <>
+      <BillingReturnOverlay />
+
       {showProjectLanding && !loading && (
         <ProjectLandingScreen authUser={authUser} onProjectLoaded={(proj) => {
           setProject(proj);
@@ -8567,33 +8879,7 @@ export default function App() {
       )}
       {!loading && showIntro && <IntroScreen onFinish={() => { setShowIntro(false); if (!authUser) setShowAuth(true); }} />}
       {!loading && !showIntro && showAuth && (
-        <AuthScreen onAuth={async (user) => {
-          setAuthUser(user);
-          setShowAuth(false);
-          // Handle pending join code
-          const params = new URLSearchParams(window.location.search);
-          const joinCode = params.get('join');
-          if (joinCode) {
-            const proj = await joinProjectByCode(joinCode, user);
-            if (proj) {
-              localStorage.setItem('pp_project_id', String(proj.id));
-              setProjectId(proj.id); setProject(proj);
-              window.history.replaceState({}, '', window.location.pathname);
-              await loadAllForProject(proj.id, proj, user);
-              return;
-            }
-          }
-          // Check for stored project
-          const stored = localStorage.getItem('pp_project_id');
-          if (stored) {
-            const pid = Number(stored);
-            const { data: proj } = await supabase.from('projects').select('*').eq('id', pid).single();
-            if (proj) { setProjectId(pid); setProject(proj); await loadAllForProject(pid, proj, user); return; }
-            localStorage.removeItem('pp_project_id');
-          }
-          setShowProjectLanding(true);
-          setLoading(false);
-        }} />
+        <AuthScreen />
       )}
       {/* Conflict modal — user is already active, offer to take over or pick another */}
       {conflictUser && (

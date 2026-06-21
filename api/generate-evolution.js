@@ -12,6 +12,7 @@ import {
   assertProjectAccess,
   corsHeaders,
   createSupabase,
+  fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getOrigin,
@@ -432,7 +433,7 @@ export default async function handler(req) {
   }
 
   // Opus 4.7 con streaming SSE (mismo patrón que el mensual).
-  const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+  const anthropicRes = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -446,7 +447,7 @@ export default async function handler(req) {
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userPrompt }],
     }),
-  });
+  }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
     let errMsg = `Anthropic API error ${anthropicRes.status}`;

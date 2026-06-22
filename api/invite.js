@@ -2,6 +2,7 @@ import {
   applyCors,
   assertProjectAccess,
   createSupabase,
+  enforceRateLimit,
   fetchWithTimeout,
   getAppBaseUrl,
   getAuthenticatedUser,
@@ -34,6 +35,9 @@ export default async function handler(req, res) {
     const user = await getAuthenticatedUser(token);
     const supabase = createSupabase(token);
     const { project } = await assertProjectAccess(supabase, user, projectId, { ownerOnly: true });
+
+    // Rate limit: 30 invitaciones/hora por usuario (H-010).
+    await enforceRateLimit(supabase, { key: `invite:${user.id}`, max: 30, windowSeconds: 3600 });
 
     const inviteUrl = `${getAppBaseUrl()}?join=${encodeURIComponent(project.invite_code)}`;
     const safeInviteUrl = escapeHtml(inviteUrl);

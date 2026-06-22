@@ -12,6 +12,7 @@ import {
   assertProjectAccess,
   corsHeaders,
   createSupabase,
+  enforceRateLimit,
   fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
@@ -350,6 +351,9 @@ export default async function handler(req) {
         err.status = 402;
         throw err;
       }
+
+      // Rate limit por usuario (H-010). El cap por proyecto ya lo da el gap de 60 días.
+      await enforceRateLimit(supabase, { key: `gen-evolution:${user.id}`, max: 20, windowSeconds: 3600 });
 
       // Enforce: no se puede generar otro evolutivo antes de 60 días desde
       // el último (anti-spam / control de costo).

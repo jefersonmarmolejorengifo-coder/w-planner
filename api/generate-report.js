@@ -9,6 +9,7 @@ import {
   getOrigin,
   jsonResponse,
 } from "./_auth.js";
+import { AI_MODELS } from "../src/aiModels.js";
 
 export const config = { runtime: 'edge' };
 
@@ -406,7 +407,7 @@ export default async function handler(req) {
       // resumen por persona + recomendaciones), un caso donde Sonnet rinde
       // casi igual que Opus a 40% del costo. El evolutivo bimensual sí se
       // queda en Opus porque ahí sí pesa la profundidad de análisis.
-      model: "claude-sonnet-4-6",
+      model: AI_MODELS.weeklyReport.id,
       max_tokens: 12000,
       stream: true,
       system: [
@@ -485,8 +486,8 @@ export default async function handler(req) {
       ...headers,
       "Content-Type": "text/html; charset=utf-8",
       // Header informativo (el cliente puede mirar resp.headers para saberlo
-      // antes de procesar el body).
-      "X-Wplanner-Model": "claude-opus-4-7",
+      // antes de procesar el body). Refleja el modelo realmente invocado (H-022).
+      "X-Wplanner-Model": AI_MODELS.weeklyReport.id,
     },
   });
 }

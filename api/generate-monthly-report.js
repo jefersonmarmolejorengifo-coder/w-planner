@@ -9,6 +9,7 @@ import {
   getOrigin,
   jsonResponse,
 } from "./_auth.js";
+import { AI_MODELS } from "../src/aiModels.js";
 
 // Edge runtime con streaming: el reporte mensual puede generar 60-120s. Con
 // streaming SSE de Anthropic la función Vercel "termina" en ms al retornar
@@ -398,7 +399,7 @@ export default async function handler(req) {
     body: JSON.stringify({
       // Sonnet 4.6 ($3/$15): suficientemente analítico, 3x más rápido que Opus.
       // Si subes a Pro (300s) puedes volver a Opus en este endpoint.
-      model: "claude-sonnet-4-6",
+      model: AI_MODELS.monthlyReport.id,
       max_tokens: 8000,
       stream: true,
       system: [
@@ -481,7 +482,7 @@ export default async function handler(req) {
     headers: {
       ...headers,
       "Content-Type": "text/html; charset=utf-8",
-      "X-Wplanner-Model": "claude-sonnet-4-6",
+      "X-Wplanner-Model": AI_MODELS.monthlyReport.id,
       "X-Wplanner-Used-Previous": String((previousReports || []).length),
     },
   });

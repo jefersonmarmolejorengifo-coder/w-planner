@@ -10,6 +10,7 @@ import {
   jsonResponse,
   requirePositiveInt,
 } from "./_auth.js";
+import { AI_MODELS } from "../src/aiModels.js";
 
 export const config = { runtime: "edge" };
 
@@ -329,7 +330,7 @@ export default async function handler(req) {
   // operativa. No streaming: tamaño esperado es modesto (5-8 KB).
   // GEMINI_MODEL es configurable por env var: por defecto 2.5-flash (estable);
   // se puede cambiar a "gemini-3.5-flash" sin redeploy.
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || AI_MODELS.scrumReport.id;
   const geminiRes = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {

@@ -10,19 +10,18 @@
 import {
   assertProjectAccess,
   corsHeaders,
+  createAdminClient,
   createSupabase,
   fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
   getOrigin,
-  getSupabaseServiceKey,
-  getSupabaseUrl,
   jsonResponse,
   requirePositiveInt,
   requireString,
   MAX_USER_MESSAGE_CHARS,
 } from "./_auth.js";
-import { createClient } from "@supabase/supabase-js";
+import { AI_MODELS } from "../src/aiModels.js";
 
 export const config = { runtime: "edge" };
 
@@ -193,12 +192,9 @@ export default async function handler(req) {
   const context = await loadContext(supabase, projectId);
 
   // Persiste el mensaje del user usando service_role (la tabla bloquea
-  // INSERT a authenticated por diseño).
-  const adminUrl = getSupabaseUrl();
-  const adminKey = getSupabaseServiceKey();
-  const admin = (adminUrl && adminKey)
-    ? createClient(adminUrl, adminKey, { auth: { persistSession: false } })
-    : null;
+  // INSERT a authenticated por diseño). createAdminClient devuelve null si
+  // faltan las variables admin.
+  const admin = createAdminClient();
 
   if (admin) {
     await admin.from("chat_messages").insert({
@@ -235,7 +231,7 @@ export default async function handler(req) {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model: AI_MODELS.chat.id,
       max_tokens: 2000,
       stream: true,
       system: [

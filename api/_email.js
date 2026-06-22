@@ -151,3 +151,24 @@ export const sanitizeReportHtml = (html) => {
   // Preserva el <!doctype> porque sanitize-html lo descarta.
   return `<!DOCTYPE html>\n${sanitized}`;
 };
+
+// Sanitiza HTML enriquecido para persistir (p.ej. el evolutivo, H-012) usando la
+// misma allowlist que los correos, pero SIN exigir <!doctype>: el evolutivo se
+// renderiza en un iframe srcDoc y puede llegar como documento o como fragmento.
+// Conserva el doctype solo si venía. Lanza 413 si excede el tamaño máximo.
+export const sanitizeRichHtml = (html) => {
+  const value = String(html || "");
+
+  const byteLength = typeof Buffer !== "undefined"
+    ? Buffer.byteLength(value, "utf8")
+    : new TextEncoder().encode(value).byteLength;
+  if (byteLength > MAX_HTML_BYTES) {
+    const err = new Error("El contenido supera el tamano permitido");
+    err.status = 413;
+    throw err;
+  }
+
+  const sanitized = sanitizeHtml(value, SANITIZE_OPTIONS);
+  const hadDoctype = value.trim().toLowerCase().startsWith("<!doctype");
+  return hadDoctype ? `<!DOCTYPE html>\n${sanitized}` : sanitized;
+};

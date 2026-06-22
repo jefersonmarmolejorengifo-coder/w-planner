@@ -243,7 +243,7 @@ export default async function handler(req) {
   }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
-    let errMsg = `Anthropic API error ${anthropicRes.status}`;
+    let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
     try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep */ }
     return jsonError(errMsg, 502, headers);
   }

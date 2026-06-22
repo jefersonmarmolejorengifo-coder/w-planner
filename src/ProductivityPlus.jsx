@@ -2493,7 +2493,7 @@ function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
 
 // ─── ReportsConfigSection ──────────────────────────────────
 // Reemplaza la antigua "Reporte IA por correo" por 3 cards independientes:
-// Scrum bi-semanal (Gemini Flash), Semanal PO (Opus), Mensual Equipo (Opus).
+// Scrum bi-semanal, Semanal PO y Mensual del Equipo.
 // Cada uno con destinatarios, schedule y botón de envío manual independientes.
 // Persiste en report_configs (migración 012).
 // ─── PremiumPanel ──────────────────────────────────────────
@@ -2673,7 +2673,6 @@ const REPORT_TYPES = [
     desc: "Tu copiloto operativo. Caza tareas atascadas, riesgos de entrega y lo que hay que destrabar hoy, sin que revises el tablero. Llega solo dos veces por semana.",
     icon: "🏃",
     color: "#542c9c",
-    model: "Gemini Flash",
     costPerMonth: "$0.33",
     endpoint: "/api/generate-scrum-report",
     defaultSchedule: { days: ["wednesday", "friday"], hour: 8 },
@@ -2686,7 +2685,6 @@ const REPORT_TYPES = [
     desc: "Tu radar de decisión. Convierte la semana en un diagnóstico ejecutivo: qué avanzó, qué frenó, cómo rindió cada persona y dónde poner el foco. Listo para reenviar a tu jefe.",
     icon: "📊",
     color: "#0aa0ab",
-    model: "Opus 4.7",
     costPerMonth: "$0.85",
     endpoint: "/api/generate-report",
     defaultSchedule: { send_day: "monday", hour: 8, frequency: "weekly" },
@@ -2699,7 +2697,6 @@ const REPORT_TYPES = [
     desc: "Tu informe confidencial de gestión. Mide el aporte real de cada persona, separa a quien empuja de quien vende humo y compara contra los meses anteriores para mostrarte la tendencia.",
     icon: "🧠",
     color: "#ef7218",
-    model: "Opus 4.7",
     costPerMonth: "$0.13",
     endpoint: "/api/generate-monthly-report",
     defaultSchedule: { send_day: "monday", week: 1, hour: 8 },
@@ -2925,7 +2922,7 @@ function ReportCard({ def, row, onUpdateLocal, onSave, onSend, msg }) {
           </div>
           <div style={{ fontSize: 12, color: "#777", marginTop: 2 }}>{def.desc}</div>
           <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>
-            Modelo: <b>{def.model}</b> · Costo aprox: <b>{def.costPerMonth}/proy/mes</b>
+            Costo aprox: <b>{def.costPerMonth}/proy/mes</b>
             {row.last_sent && <> · Último envío: {new Date(row.last_sent).toLocaleString("es-CO")}</>}
           </div>
         </div>
@@ -3626,7 +3623,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
 
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, color: "#969696", marginBottom: 10, lineHeight: 1.5 }}>
-            Claude IA analiza cada tarea, usuario y resultado en lenguaje natural dentro del rango configurado.
+            La IA analiza cada tarea, usuario y resultado en lenguaje natural dentro del rango configurado.
           </div>
           <button onClick={generateAndSend} disabled={generating}
             style={{
@@ -4321,7 +4318,7 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800 }}>{REPORT_TYPE_LABEL[openReport.report_type] || openReport.report_type}</div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{openReport.period_start} a {openReport.period_end}{openReport.model_used ? ` · ${openReport.model_used}` : ""}</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{openReport.period_start} a {openReport.period_end}</div>
               </div>
               <button onClick={() => setOpenReport(null)} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>Cerrar</button>
             </div>
@@ -4469,7 +4466,7 @@ function BoardSummaryPill({ projectId, projectName }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                   <div>
                     <div style={{ fontSize: 16, fontWeight: 800 }}>{REPORT_TYPE_LABEL[openReport.report_type] || openReport.report_type}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{openReport.period_start} a {openReport.period_end}{openReport.model_used ? ` · ${openReport.model_used}` : ""}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{openReport.period_start} a {openReport.period_end}</div>
                   </div>
                   <button onClick={() => setOpenReport(null)} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>Cerrar</button>
                 </div>
@@ -7205,7 +7202,7 @@ function EvolutionTab({ projectId, isOwner }) {
 
   const generateNow = async () => {
     setGenerating(true);
-    setMsg("Generando tarjetas profesionales del equipo (Opus 4.7)...");
+    setMsg("Generando tarjetas profesionales del equipo...");
     setProgress(0);
     try {
       // Periodo: últimos 60 días.
@@ -7251,7 +7248,6 @@ function EvolutionTab({ projectId, isOwner }) {
         headers,
         body: JSON.stringify({
           projectId, periodStart, periodEnd, html,
-          modelUsed: genRes.headers.get("X-Wplanner-Model") || "claude-opus-4-7",
           truncated: html.includes("WPLANNER_TRUNCATED"),
         }),
       });

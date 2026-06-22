@@ -453,7 +453,7 @@ export default async function handler(req) {
   }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
-    let errMsg = `Anthropic API error ${anthropicRes.status}`;
+    let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
     try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep */ }
     return jsonError(errMsg, 502, headers);
   }
@@ -485,7 +485,7 @@ export default async function handler(req) {
               } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
                 stopReason = evt.delta.stop_reason;
               } else if (evt.type === "error") {
-                upstreamError = new Error(evt.error?.message || "Anthropic stream error");
+                upstreamError = new Error(evt.error?.message || "Error del flujo de IA");
               }
             } catch { /* keepalive */ }
           }
@@ -510,7 +510,6 @@ export default async function handler(req) {
     headers: {
       ...headers,
       "Content-Type": "text/html; charset=utf-8",
-      "X-Wplanner-Model": AI_MODELS.evolution.id,
       "X-Wplanner-Profiles": String(profiles.filter(p => p.daysActive >= MIN_DAYS).length),
       "X-Wplanner-InConstruction": String(profiles.filter(p => p.daysActive < MIN_DAYS).length),
     },

@@ -414,7 +414,7 @@ export default async function handler(req) {
   }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
-    let errMsg = `Anthropic API error ${anthropicRes.status}`;
+    let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
     try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep fallback */ }
     return jsonError(errMsg, 502, headers);
   }
@@ -455,7 +455,7 @@ export default async function handler(req) {
                 if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
                 if (evt.usage?.output_tokens) _outputTokens = evt.usage.output_tokens;
               } else if (evt.type === "error") {
-                upstreamError = new Error(evt.error?.message || "Anthropic stream error");
+                upstreamError = new Error(evt.error?.message || "Error del flujo de IA");
               }
             } catch {
               // keepalive SSE: ignorar
@@ -482,7 +482,6 @@ export default async function handler(req) {
     headers: {
       ...headers,
       "Content-Type": "text/html; charset=utf-8",
-      "X-Wplanner-Model": AI_MODELS.monthlyReport.id,
       "X-Wplanner-Used-Previous": String((previousReports || []).length),
     },
   });

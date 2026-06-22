@@ -204,6 +204,15 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 5 — accesibilidad (rama `fix/superauditor-sprint-5`)
+
+| Hallazgo | Estado | Cambio |
+|---|---|---|
+| **H-009** foco visible | ✅ listo | `src/index.css`: regla global `:focus-visible` con `box-shadow` (no la pisa el `outline:none` inline; visible en claro y oscuro). Sin migración. |
+| **H-008** modales accesibles | ✅ listo (núcleo) | Nuevo hook `src/useDialog.js` (foco inicial, trampa de foco, Escape, devolución de foco). Aplicado al `Modal` compartido (formulario de tareas), `NameCaptureModal`, `PlanSelectionModal` + semántica `role="dialog"`/`aria-modal`/`aria-labelledby` y `aria-label="Cerrar"`. La Visión consolidada (Shell componente-en-render) recibió `role`/`aria` + Escape a nivel de componente. Pendiente menor: aplicar el hook a `SuperTaskCreatorModal` y al tour de Onboarding. |
+
+`npm test` 42/42 ✅, build ✅. Sin migración (cambios solo de frontend).
+
 ### Sprint 4 — rate limiting (rama `fix/superauditor-sprint-4`)
 
 | Hallazgo | Estado | Cambio |

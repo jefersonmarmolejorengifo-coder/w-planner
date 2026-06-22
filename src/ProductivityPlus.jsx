@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo, useRef, memo } from "react";
+import { useState, useEffect, useMemo, useRef, memo, useId } from "react";
 import { supabase } from './supabaseClient';
+import { useDialog } from './useDialog';
 import { ALL_PLANS, PLAN_CONTACT_EMAIL } from './plans';
 import Onboarding from './Onboarding';
 import NameCaptureModal from './NameCaptureModal';
@@ -1354,6 +1355,8 @@ const TaskCard = memo(function TaskCard({ task, onClick, customFieldDefs = [] })
 
 // ─── Modal ─────────────────────────────────────────────────
 function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guardar" }) {
+  const titleId = useId();
+  const dialogRef = useDialog(onClose);
   return (
     <div style={{
       position: "fixed", inset: 0,
@@ -1361,8 +1364,9 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
       backdropFilter: "blur(4px)",
       display: "flex", alignItems: "flex-start", justifyContent: "center",
       zIndex: 1000, padding: "16px", overflowY: "auto",
-    }}>
-      <div style={{
+    }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} style={{
         background: "#ffffff",
         border: "1px solid rgba(84,44,156,0.15)",
         borderRadius: 16,
@@ -1370,10 +1374,11 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
         marginTop: 8,
         boxShadow: "0 20px 60px rgba(84,44,156,0.2)",
         overflow: "hidden",
+        outline: "none",
       }}>
         <div style={{ background: "linear-gradient(135deg, #542c9c, #6e3ebf)", borderRadius: "16px 16px 0 0", padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#ffffff" }}>{title}</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 22, lineHeight: 1 }}>×</button>
+          <h2 id={titleId} style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#ffffff" }}>{title}</h2>
+          <button onClick={onClose} aria-label="Cerrar" style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 22, lineHeight: 1 }}>×</button>
         </div>
         <div style={{ padding: "20px 22px 4px" }}>{children}</div>
         <div style={{ padding: "0 22px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4146,6 +4151,14 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
     return () => { cancelled = true; };
   }, [authUser]);
 
+  // Cierre con Escape (H-008). El Shell es un componente-en-render, así que el
+  // manejo de teclado vive a nivel del diálogo.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const isPaid = capacity && capacity.tier !== "free" && capacity.status === "active";
 
   // Totales globales
@@ -4162,9 +4175,9 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
   };
 
   const Shell = ({ children }) => (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100002, background: "radial-gradient(1200px 600px at 50% -10%, rgba(20,156,172,0.18), rgba(8,8,18,0.97) 60%)", overflowY: "auto", padding: "40px 20px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
+    <div role="dialog" aria-modal="true" aria-label="Visión consolidada" style={{ position: "fixed", inset: 0, zIndex: 100002, background: "radial-gradient(1200px 600px at 50% -10%, rgba(20,156,172,0.18), rgba(8,8,18,0.97) 60%)", overflowY: "auto", padding: "40px 20px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
       <div style={{ maxWidth: 1120, margin: "0 auto", position: "relative" }}>
-        <button onClick={onClose} style={{ position: "absolute", top: -10, right: 0, width: 38, height: 38, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+        <button onClick={onClose} aria-label="Cerrar" style={{ position: "absolute", top: -10, right: 0, width: 38, height: 38, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
         {children}
       </div>
     </div>
@@ -8118,6 +8131,8 @@ const taskToDb = (t) => ({
 //   - ctaType 'contact' (Enterprise) abre un correo a PLAN_CONTACT_EMAIL.
 function PlanSelectionModal({ currentTier, busy, onSubscribe, onClose }) {
   const fmt = (n) => n.toLocaleString("es-CO");
+  const titleId = useId();
+  const dialogRef = useDialog(onClose);
 
   const renderCta = (plan) => {
     const isCurrent = plan.tier === currentTier;
@@ -8237,10 +8252,10 @@ function PlanSelectionModal({ currentTier, busy, onSubscribe, onClose }) {
         @media (max-width: 560px) { .pp-plans-title { font-size: 28px; } }
       `}</style>
 
-      <div className="pp-plans-shell" onClick={(e) => e.stopPropagation()}>
+      <div className="pp-plans-shell" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <button className="pp-plans-close" onClick={onClose} aria-label="Cerrar">✕</button>
         <div className="pp-plans-eyebrow">Productivity-Plus</div>
-        <h2 className="pp-plans-title">Elige tu plan</h2>
+        <h2 id={titleId} className="pp-plans-title">Elige tu plan</h2>
         <p className="pp-plans-sub">
           Desbloquea reportes con IA, pulso del equipo y analítica avanzada.
           Cobro mensual en COP vía Mercado Pago. Cancela cuando quieras.

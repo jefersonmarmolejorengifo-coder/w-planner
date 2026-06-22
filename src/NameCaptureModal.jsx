@@ -7,9 +7,14 @@
 // Estos updates aseguran que el nombre aparezca consistente en
 // tareas, comentarios, reportes y retros.
 
-import React, { useState } from "react";
+import React, { useState, useId } from "react";
+import { useDialog } from "./useDialog";
 
 export default function NameCaptureModal({ supabase, authUser, onComplete }) {
+  const titleId = useId();
+  // Modal obligatorio (sin cierre): el hook aporta foco inicial, trampa de foco
+  // y devolución de foco. Sin onClose, Escape es no-op (es requerido). H-008.
+  const dialogRef = useDialog();
   const existing = authUser?.user_metadata?.full_name || "";
   const [name, setName] = useState(existing);
   const [saving, setSaving] = useState(false);
@@ -57,13 +62,13 @@ export default function NameCaptureModal({ supabase, authUser, onComplete }) {
         @keyframes wpncFadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes wpncSlideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} style={{
         background: "#fff", borderRadius: 20, padding: 36, maxWidth: 480, width: "92%",
         boxShadow: "0 24px 80px rgba(0,0,0,0.4)", animation: "wpncSlideUp 0.4s ease",
-        textAlign: "center",
+        textAlign: "center", outline: "none",
       }}>
         <div style={{ fontSize: 60, marginBottom: 12 }}>👋</div>
-        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: "#1e1e3a" }}>
+        <h2 id={titleId} style={{ margin: 0, fontSize: 24, fontWeight: 800, color: "#1e1e3a" }}>
           Antes de continuar, ¿cómo te llamas?
         </h2>
         <p style={{ margin: "12px 0 22px", color: "#666", fontSize: 14, lineHeight: 1.55 }}>

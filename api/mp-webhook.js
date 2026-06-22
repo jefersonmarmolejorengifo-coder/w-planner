@@ -18,7 +18,7 @@ export const config = { runtime: "nodejs", maxDuration: 30 };
 // (data.id en minúsculas si es alfanumérico). Devuelve true sólo si la firma
 // coincide. Si MP_WEBHOOK_SECRET no está configurado, devuelve null (modo
 // retrocompatible: el caller decide, pero loguea una advertencia crítica).
-function verifyMpSignature(req, dataId) {
+export function verifyMpSignature(req, dataId) {
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!secret) return null; // no configurado todavía
 
@@ -66,7 +66,7 @@ async function fetchPayment(id, token) {
 }
 
 // Mapea el status de MP al status interno.
-function mapStatus(mpStatus) {
+export function mapStatus(mpStatus) {
   switch ((mpStatus || "").toLowerCase()) {
     case "authorized": return "active";
     case "paused":     return "past_due";
@@ -78,7 +78,7 @@ function mapStatus(mpStatus) {
 
 // Reverse: 'pro_solo:USERID' o 'USERID:pro_solo' (depende del orden que
 // hayamos usado en mp-subscribe.js — usamos USER:tier).
-function parseExternalReference(ref) {
+export function parseExternalReference(ref) {
   if (!ref) return { userId: null, tier: null };
   const parts = String(ref).split(":");
   if (parts.length !== 2) return { userId: null, tier: null };
@@ -112,17 +112,24 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, info: "missing type or id" });
   }
 
-  // ── Verificación de firma (H-001) ──
-  // Si MP_WEBHOOK_SECRET está configurado, exigimos firma válida y rechazamos
-  // lo no firmado. Si no está configurado, procesamos pero avisamos (la firma
-  // se activa en cuanto se setea el secret en el dashboard de MP + Vercel).
+  // ── Verificación de firma (H-001 / H-013 fail-closed) ──
+  // Exigimos firma HMAC válida para procesar cualquier evento. Dos rechazos:
+  //   - firma inválida/ausente → 401.
+  //   - MP_WEBHOOK_SECRET no configurado → 503 (fail-closed): NO concedemos
+  //     premium sin poder verificar el origen. Solo se permite procesar sin
+  //     secreto si ALLOW_MP_WEBHOOK_WITHOUT_SECRET=true (exclusivo para dev/test).
   const sigOk = verifyMpSignature(req, dataId);
   if (sigOk === false) {
     console.warn("[mp-webhook] firma inválida o ausente; evento rechazado");
     return res.status(401).json({ error: "invalid signature" });
   }
   if (sigOk === null) {
-    console.warn("[mp-webhook] CRÍTICO: MP_WEBHOOK_SECRET no configurado; firma NO verificada. Configúralo para cerrar este endpoint.");
+    if (process.env.ALLOW_MP_WEBHOOK_WITHOUT_SECRET === "true") {
+      console.warn("[mp-webhook] DEV: MP_WEBHOOK_SECRET ausente y ALLOW_MP_WEBHOOK_WITHOUT_SECRET=true; firma NO verificada.");
+    } else {
+      console.error("[mp-webhook] CRÍTICO: MP_WEBHOOK_SECRET no configurado; evento rechazado (fail-closed). Configura el secreto en MP + Vercel.");
+      return res.status(503).json({ error: "webhook signature secret not configured" });
+    }
   }
 
   // ── Idempotencia (H-001) ──

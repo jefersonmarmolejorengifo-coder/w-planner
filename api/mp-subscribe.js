@@ -51,6 +51,13 @@ export default async function handler(req, res) {
 
     const mpToken = ensure(process.env.MP_ACCESS_TOKEN, "MP_ACCESS_TOKEN no esta configurado", 503);
 
+    // Validar el admin de Supabase ANTES de crear la preapproval (H-019): si
+    // falta la service_role no podríamos registrar el pending y el usuario pagaría
+    // quedando sin upgrade. Fail-closed: 503 antes de iniciar el cobro.
+    const adminUrl = ensure(getSupabaseUrl(), "Supabase no esta configurado (URL)", 503);
+    const adminKey = ensure(getSupabaseServiceKey(), "Supabase admin no esta configurado", 503);
+    const admin = createClient(adminUrl, adminKey, { auth: { persistSession: false } });
+
     const baseUrl = getAppBaseUrl();
     // Vuelve a la raíz de la SPA con un flag que el frontend detecta para
     // mostrar la confirmación del pago (no hay router, /billing/return no existe
@@ -89,20 +96,15 @@ export default async function handler(req, res) {
     }
 
     // Guarda el preapproval_id como pending en users_premium para reconciliar
-    // cuando llegue el webhook. Usa service_role para bypassar RLS.
-    const adminUrl = getSupabaseUrl();
-    const adminKey = getSupabaseServiceKey();
-    if (adminUrl && adminKey) {
-      const admin = createClient(adminUrl, adminKey, { auth: { persistSession: false } });
-      await admin.from("users_premium").upsert({
-        user_id: user.id,
-        tier: "free",          // se promueve a 'pro_*' cuando llegue el webhook
-        status: "pending",
-        mp_preapproval_id: mpData.id,
-        mp_payer_email: user.email,
-        metadata: { target_tier: tier },
-      }, { onConflict: "user_id" });
-    }
+    // cuando llegue el webhook. El admin (service_role) ya quedó validado arriba.
+    await admin.from("users_premium").upsert({
+      user_id: user.id,
+      tier: "free",          // se promueve a 'pro_*' cuando llegue el webhook
+      status: "pending",
+      mp_preapproval_id: mpData.id,
+      mp_payer_email: user.email,
+      metadata: { target_tier: tier },
+    }, { onConflict: "user_id" });
 
     return res.status(200).json({
       init_point: mpData.init_point,

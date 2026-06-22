@@ -8,6 +8,7 @@ import {
   getBearerToken,
   getOrigin,
   jsonResponse,
+  requirePositiveInt,
 } from "./_auth.js";
 
 export const config = { runtime: "edge" };
@@ -234,8 +235,16 @@ export default async function handler(req) {
   try { body = await req.json(); } catch { return jsonError("Body inválido", 400, headers); }
 
   const { weekStart, weekEnd, projectId } = body;
-  if (!projectId || !isDateOnly(weekStart) || !isDateOnly(weekEnd)) {
-    return jsonError("projectId, weekStart y weekEnd son requeridos", 400, headers);
+  // Validar tipos/identificadores antes de procesar (H-024). projectId debe ser
+  // un entero positivo: la ruta interna (cron) salta assertProjectAccess y lo usa
+  // crudo en las queries, así que se valida aquí explícitamente.
+  if (!isDateOnly(weekStart) || !isDateOnly(weekEnd)) {
+    return jsonError("weekStart y weekEnd deben tener formato YYYY-MM-DD", 400, headers);
+  }
+  try {
+    requirePositiveInt(projectId, "projectId");
+  } catch (e) {
+    return jsonError(e.message, e.status || 400, headers);
   }
 
   const internalSecret = req.headers.get("x-cron-secret");

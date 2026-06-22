@@ -18,6 +18,9 @@ import {
   getSupabaseServiceKey,
   getSupabaseUrl,
   jsonResponse,
+  requirePositiveInt,
+  requireString,
+  MAX_USER_MESSAGE_CHARS,
 } from "./_auth.js";
 import { createClient } from "@supabase/supabase-js";
 
@@ -110,8 +113,15 @@ export default async function handler(req) {
   try { body = await req.json(); } catch { return jsonError("Body inválido", 400, headers); }
 
   const { projectId, sessionId, userMessage } = body;
-  if (!projectId || !userMessage || !String(userMessage).trim()) {
-    return jsonError("projectId y userMessage requeridos", 400, headers);
+  // Validación de esquema + límite de tamaño ANTES de tocar BD/LLM (H-021/H-024):
+  // un userMessage gigante no debe persistirse ni cobrarse como tokens.
+  let userMessageClean;
+  try {
+    requirePositiveInt(projectId, "projectId");
+    if (sessionId != null) requirePositiveInt(sessionId, "sessionId");
+    userMessageClean = requireString(userMessage, "userMessage", { max: MAX_USER_MESSAGE_CHARS });
+  } catch (e) {
+    return jsonError(e.message, e.status || 400, headers);
   }
 
   const token = getBearerToken(req);
@@ -141,9 +151,18 @@ export default async function handler(req) {
   }
 
   // Resuelve o crea sesión activa para (project, user).
+  // El sessionId entrante se valida SIEMPRE contra (project_id + owner): un owner
+  // con varios proyectos no puede inyectar mensajes ni cuota en la sesión de otro
+  // proyecto propio pasando un id ajeno (H-017, IDOR). Si no casa, se ignora y se
+  // cae al resolver/crear la sesión activa del proyecto correcto.
   let session;
   if (sessionId) {
-    const { data } = await supabase.from("chat_sessions").select("*").eq("id", sessionId).maybeSingle();
+    const { data } = await supabase.from("chat_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .eq("project_id", projectId)
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
     session = data;
   }
   if (!session) {
@@ -183,7 +202,7 @@ export default async function handler(req) {
 
   if (admin) {
     await admin.from("chat_messages").insert({
-      session_id: session.id, role: "user", content: String(userMessage).trim(),
+      session_id: session.id, role: "user", content: userMessageClean,
     });
   }
 
@@ -199,7 +218,7 @@ export default async function handler(req) {
   for (const m of (history || [])) {
     messages.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content });
   }
-  messages.push({ role: "user", content: String(userMessage).trim() });
+  messages.push({ role: "user", content: userMessageClean });
 
   const isFirstTurn = !(history || []).some(m => m.role === "assistant");
   const contextSystemBlock = `<contexto>\n${context}\n</contexto>\n\n${

@@ -9,6 +9,7 @@ import {
   getOrigin,
   jsonResponse,
 } from "./_auth.js";
+import { AI_MODELS } from "../src/aiModels.js";
 
 export const config = { runtime: 'edge' };
 
@@ -406,7 +407,7 @@ export default async function handler(req) {
       // resumen por persona + recomendaciones), un caso donde Sonnet rinde
       // casi igual que Opus a 40% del costo. El evolutivo bimensual sí se
       // queda en Opus porque ahí sí pesa la profundidad de análisis.
-      model: "claude-sonnet-4-6",
+      model: AI_MODELS.weeklyReport.id,
       max_tokens: 12000,
       stream: true,
       system: [
@@ -421,7 +422,7 @@ export default async function handler(req) {
   }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
-    let errMsg = `Anthropic API error ${anthropicRes.status}`;
+    let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
     try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep fallback */ }
     return jsonError(errMsg, 502, headers);
   }
@@ -454,7 +455,7 @@ export default async function handler(req) {
               } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
                 stopReason = evt.delta.stop_reason;
               } else if (evt.type === "error") {
-                upstreamError = new Error(evt.error?.message || "Anthropic stream error");
+                upstreamError = new Error(evt.error?.message || "Error del flujo de IA");
               }
             } catch {
               // Ignore malformed SSE keepalive lines.
@@ -484,9 +485,6 @@ export default async function handler(req) {
     headers: {
       ...headers,
       "Content-Type": "text/html; charset=utf-8",
-      // Header informativo (el cliente puede mirar resp.headers para saberlo
-      // antes de procesar el body).
-      "X-Wplanner-Model": "claude-opus-4-7",
     },
   });
 }

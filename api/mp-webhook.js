@@ -6,8 +6,7 @@
 //   URL: https://w-planner.vercel.app/api/mp-webhook
 //   Eventos: subscription_preapproval, subscription_authorized_payment
 
-import { applyCors, fetchWithTimeout, getSupabaseServiceKey, getSupabaseUrl } from "./_auth.js";
-import { createClient } from "@supabase/supabase-js";
+import { applyCors, createAdminClient, fetchWithTimeout } from "./_auth.js";
 import crypto from "node:crypto";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
@@ -95,12 +94,10 @@ export default async function handler(req, res) {
   const mpToken = process.env.MP_ACCESS_TOKEN;
   if (!mpToken) return res.status(503).json({ error: "MP_ACCESS_TOKEN no esta configurado" });
 
-  const adminUrl = getSupabaseUrl();
-  const adminKey = getSupabaseServiceKey();
-  if (!adminUrl || !adminKey) {
+  const admin = createAdminClient();
+  if (!admin) {
     return res.status(503).json({ error: "Supabase no esta configurado" });
   }
-  const admin = createClient(adminUrl, adminKey, { auth: { persistSession: false } });
 
   // El body de MP puede llegar como query params (?type=...&data.id=...) o
   // como JSON body. Soportamos ambos.

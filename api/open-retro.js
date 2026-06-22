@@ -11,14 +11,12 @@ import {
   assertProjectAccess,
   createSupabase,
   fetchWithTimeout,
+  createAdminClient,
   getAuthenticatedUser,
   getBearerToken,
-  getSupabaseServiceKey,
-  getSupabaseUrl,
   handleApiError,
 } from "./_auth.js";
 import { getResendConfig } from "./_email.js";
-import { createClient } from "@supabase/supabase-js";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
 
@@ -71,9 +69,8 @@ export default async function handler(req, res) {
     const cronSecret = process.env.CRON_SECRET;
     const isInternal = cronSecret && req.headers["x-cron-secret"] === cronSecret;
 
-    const adminUrl = getSupabaseUrl();
-    const adminKey = getSupabaseServiceKey();
-    const admin = createClient(adminUrl, adminKey, { auth: { persistSession: false } });
+    const admin = createAdminClient();
+    if (!admin) return res.status(503).json({ error: "Supabase admin no configurado" });
 
     // Obtiene sprint y proyecto.
     const { data: sprint } = await admin.from("sprints").select("*").eq("id", sprintId).single();

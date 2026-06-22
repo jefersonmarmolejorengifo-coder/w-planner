@@ -136,6 +136,15 @@ export const getBearerToken = (req) => {
   return auth.slice("Bearer ".length).trim();
 };
 
+// fetch con timeout para el CLIENTE Supabase (H-025). Las queries de Supabase
+// usan el fetch global por defecto, sin tope: una conexión colgada retiene la
+// invocación serverless hasta agotar maxDuration. Inyectamos un AbortSignal.
+// Más holgado que el de APIs externas (10s) porque cubre lecturas potencialmente
+// grandes; si el caller ya pasa su propio signal, se respeta.
+const SUPABASE_FETCH_TIMEOUT_MS = 10000;
+const supabaseFetch = (url, options = {}) =>
+  fetch(url, { ...options, signal: options.signal || AbortSignal.timeout(SUPABASE_FETCH_TIMEOUT_MS) });
+
 export const createSupabase = (token, { admin = false } = {}) => {
   const url = getSupabaseUrl();
   const key = admin ? getSupabaseServiceKey() : getSupabaseAnonKey();
@@ -143,7 +152,22 @@ export const createSupabase = (token, { admin = false } = {}) => {
 
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+    global: {
+      fetch: supabaseFetch,
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    },
+  });
+};
+
+// Cliente admin (service_role) con el mismo timeout. Devuelve null si faltan las
+// variables, para que el caller decida cómo degradar (503, omitir persistencia…).
+export const createAdminClient = () => {
+  const url = getSupabaseUrl();
+  const key = getSupabaseServiceKey();
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    auth: { persistSession: false },
+    global: { fetch: supabaseFetch },
   });
 };
 

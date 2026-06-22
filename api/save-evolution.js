@@ -3,14 +3,14 @@
 import {
   applyCors,
   assertProjectAccess,
+  createAdminClient,
   createSupabase,
   getAuthenticatedUser,
   getBearerToken,
-  getSupabaseServiceKey,
-  getSupabaseUrl,
   handleApiError,
 } from "./_auth.js";
-import { createClient } from "@supabase/supabase-js";
+import { sanitizeRichHtml } from "./_email.js";
+import { AI_MODELS } from "../src/aiModels.js";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
 
@@ -61,12 +61,15 @@ export default async function handler(req, res) {
     }
 
     // Insert via service_role (la tabla bloquea INSERT a authenticated por diseño).
-    const adminUrl = getSupabaseUrl();
-    const adminKey = getSupabaseServiceKey();
-    if (!adminUrl || !adminKey) {
+    const admin = createAdminClient();
+    if (!admin) {
       return res.status(503).json({ error: "Supabase admin no configurado" });
     }
-    const admin = createClient(adminUrl, adminKey, { auth: { persistSession: false } });
+
+    // Sanitiza el HTML generado por la IA antes de persistirlo (H-012). El
+    // evolutivo se re-renderiza luego en un iframe; quitamos scripts/handlers/
+    // CSS no permitido para no almacenar contenido potencialmente peligroso.
+    const cleanHtml = sanitizeRichHtml(html);
 
     const payload = {
       project_id: projectId,
@@ -75,9 +78,9 @@ export default async function handler(req, res) {
       status: truncated ? "truncated" : "stored",
       cards: [],            // Se podría parsear desde el HTML; por ahora vacío.
       cell_suggestions: [],
-      plain_text: htmlToPlainText(html),
-      html: html,
-      model_used: modelUsed || "claude-opus-4-7",
+      plain_text: htmlToPlainText(cleanHtml),
+      html: cleanHtml,
+      model_used: modelUsed || AI_MODELS.evolution.id,
       tokens_input: tokensInput || null,
       tokens_output: tokensOutput || null,
       cost_usd: costUsd || null,

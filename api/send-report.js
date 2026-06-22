@@ -1,16 +1,14 @@
 import {
   applyCors,
   assertProjectAccess,
+  createAdminClient,
   createSupabase,
   fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
-  getSupabaseServiceKey,
-  getSupabaseUrl,
   handleApiError,
 } from "./_auth.js";
 import { getResendConfig, normalizeRecipients, sanitizeReportHtml } from "./_email.js";
-import { createClient } from "@supabase/supabase-js";
 
 const REPORT_TYPE_LABELS = {
   scrum: "Reporte Scrum",
@@ -86,10 +84,8 @@ export default async function handler(req, res) {
     // contra meses anteriores. Usamos service_role porque la tabla bloquea
     // INSERTs a roles authenticated por diseño.
     try {
-      const url = getSupabaseUrl();
-      const svc = getSupabaseServiceKey();
-      if (url && svc) {
-        const adminClient = createClient(url, svc, { auth: { persistSession: false } });
+      const adminClient = createAdminClient();
+      if (adminClient) {
         await adminClient.from("report_history").insert({
           project_id: projectId,
           report_type: reportType,

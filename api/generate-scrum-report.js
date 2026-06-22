@@ -10,6 +10,7 @@ import {
   jsonResponse,
   requirePositiveInt,
 } from "./_auth.js";
+import { AI_MODELS } from "../src/aiModels.js";
 
 export const config = { runtime: "edge" };
 
@@ -329,7 +330,7 @@ export default async function handler(req) {
   // operativa. No streaming: tamaño esperado es modesto (5-8 KB).
   // GEMINI_MODEL es configurable por env var: por defecto 2.5-flash (estable);
   // se puede cambiar a "gemini-3.5-flash" sin redeploy.
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || AI_MODELS.scrumReport.id;
   const geminiRes = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
@@ -351,7 +352,7 @@ export default async function handler(req) {
   );
 
   if (!geminiRes.ok) {
-    let errMsg = `Gemini API error ${geminiRes.status}`;
+    let errMsg = `El generador de IA respondió con error ${geminiRes.status}`;
     try { const e = await geminiRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep */ }
     return jsonError(errMsg, 502, headers);
   }
@@ -361,7 +362,7 @@ export default async function handler(req) {
   const finishReason = geminiData?.candidates?.[0]?.finishReason || "STOP";
 
   if (!html || !html.toLowerCase().includes("<!doctype html")) {
-    return jsonError("Gemini devolvió una respuesta vacía o sin HTML válido", 502, headers);
+    return jsonError("El generador de IA devolvió una respuesta vacía o sin HTML válido", 502, headers);
   }
 
   const usage = geminiData?.usageMetadata || {};

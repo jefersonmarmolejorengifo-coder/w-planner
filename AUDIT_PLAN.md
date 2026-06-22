@@ -229,6 +229,18 @@ Se introdujo **Vitest** (`npm test`). Cobertura inicial de la lógica de mayor r
 
 **29 tests, todos en verde.** Pendiente backlog: CI por push y unitarias de gating (RPCs de plan/cuota).
 
+### Sprint 2 — quick wins (rama `fix/superauditor-sprint-2`)
+
+| Hallazgo | Estado | Cambio |
+|---|---|---|
+| **H-025** timeout Supabase | ✅ listo | `_auth.js`: `createAdminClient()` + `createSupabase` inyectan un `fetch` con `AbortSignal.timeout` (10s). Refactorizados 6 endpoints que creaban el cliente admin inline. |
+| **H-012** HTML sin sanitizar | ✅ listo | `_email.js`: nuevo `sanitizeRichHtml` (misma allowlist que correos, sin exigir doctype). `save-evolution.js` lo aplica antes de persistir. |
+| **H-022** metadata de modelo | ✅ listo | Nueva fuente única `src/aiModels.js` (solo server-side; no entra al bundle del cliente). **Decisión de producto:** NO se expone qué IA/modelo se usa en ningún punto visible. Se eliminaron las menciones de modelo/proveedor de la UI (REPORT_TYPES, visor de reportes, tour de Onboarding, status del evolutivo, "Claude IA"), se quitó el header `X-Wplanner-Model` de los endpoints, y se genericaron los mensajes de error que nombraban a Anthropic/Gemini. |
+| **H-006** gating IA fail-open | ✅ verificado (sin cambios) | `assertProjectCanUseIa` ya hace fail-closed (503 sin RPC, salvo `ALLOW_IA_WITHOUT_RPC`) y todos los gates inline usan `!== true`. Ya estaba cerrado. |
+| **H-020** RPCs con anon | ✅ aplicado | `migrations/031` (aplicada en Supabase): revoca `anon` de `project_has_feature`/`can_use_evolutivo`/`can_use_chat`/`chat_quota_remaining`/`user_can_use_ia_on_project`. Sin guard de membresía (cron las llama con service_role). |
+
+**37 tests** en verde (+8: sanitización y consistencia de modelos). Migración 031 ya aplicada.
+
 <!-- Escribe aquí libremente -->
 
 ---

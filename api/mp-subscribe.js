@@ -7,14 +7,12 @@
 
 import {
   applyCors,
+  createAdminClient,
   fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
-  getSupabaseServiceKey,
-  getSupabaseUrl,
   handleApiError,
 } from "./_auth.js";
-import { createClient } from "@supabase/supabase-js";
 import { PLANS, PLAN_CURRENCY, PLAN_FREQUENCY } from "../src/plans.js";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
@@ -54,9 +52,7 @@ export default async function handler(req, res) {
     // Validar el admin de Supabase ANTES de crear la preapproval (H-019): si
     // falta la service_role no podríamos registrar el pending y el usuario pagaría
     // quedando sin upgrade. Fail-closed: 503 antes de iniciar el cobro.
-    const adminUrl = ensure(getSupabaseUrl(), "Supabase no esta configurado (URL)", 503);
-    const adminKey = ensure(getSupabaseServiceKey(), "Supabase admin no esta configurado", 503);
-    const admin = createClient(adminUrl, adminKey, { auth: { persistSession: false } });
+    const admin = ensure(createAdminClient(), "Supabase admin no esta configurado", 503);
 
     const baseUrl = getAppBaseUrl();
     // Vuelve a la raíz de la SPA con un flag que el frontend detecta para

@@ -270,6 +270,35 @@ export const assertProjectAccess = async (supabase, user, projectId, { ownerOnly
   return { project, role: "member" };
 };
 
+// Rate limiting (H-010). Llama a la RPC check_rate_limit (migración 033) que
+// incrementa un contador de ventana fija y devuelve si sigue dentro del límite.
+// Lanza 429 si se excede. Fail-open ante errores de infraestructura (incluida la
+// RPC ausente, 42883) para no romper la feature si la migración no está aplicada.
+//   key            identificador del bucket, p.ej. `invite:<userId>`
+//   max            máximo de solicitudes por ventana
+//   windowSeconds  tamaño de la ventana en segundos
+export const enforceRateLimit = async (supabase, { key, max, windowSeconds }) => {
+  try {
+    const { data: allowed, error } = await supabase.rpc("check_rate_limit", {
+      p_key: key,
+      p_max: max,
+      p_window_seconds: windowSeconds,
+    });
+    if (error) {
+      if (error.code !== "42883") console.warn("[rateLimit] check falló:", error.message);
+      return; // fail-open ante error de infra / RPC ausente
+    }
+    if (allowed === false) {
+      const err = new Error("Demasiadas solicitudes. Espera un momento e intenta de nuevo.");
+      err.status = 429;
+      throw err;
+    }
+  } catch (e) {
+    if (e?.status === 429) throw e;
+    console.warn("[rateLimit] excepción:", e?.message);
+  }
+};
+
 export const handleApiError = (err, res) => {
   const status = err.status || 500;
   return res.status(status).json({ error: err.message || "Error interno" });

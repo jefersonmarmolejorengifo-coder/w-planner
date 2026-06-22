@@ -204,6 +204,14 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 4 — rate limiting (rama `fix/superauditor-sprint-4`)
+
+| Hallazgo | Estado | Cambio |
+|---|---|---|
+| **H-010** sin rate limiting | ✅ código listo · ⏳ migración pendiente | `migrations/033`: tabla `api_rate_limits` + RPC `check_rate_limit` (ventana fija, limpieza oportunista). Helper `enforceRateLimit` en `_auth.js` (429; fail-open si la RPC falta). Aplicado en: invite (30/h), chat (30/min, además de la cuota mensual), y generación IA report/monthly/scrum (20/h por usuario + 50/día por proyecto) y evolution (20/h; el cap por proyecto ya lo da el gap de 60 días). Cron interno no se limita. |
+
+Pendiente operativo: aplicar **migración 033**. `npm test` 42/42 ✅, build ✅.
+
 ### Sprint 3 — concurrencia y datos (rama `fix/superauditor-sprint-3`)
 
 | Hallazgo | Estado | Cambio |

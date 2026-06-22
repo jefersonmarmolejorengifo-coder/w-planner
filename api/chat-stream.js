@@ -12,6 +12,7 @@ import {
   corsHeaders,
   createAdminClient,
   createSupabase,
+  enforceRateLimit,
   fetchWithTimeout,
   getAuthenticatedUser,
   getBearerToken,
@@ -129,6 +130,10 @@ export default async function handler(req) {
     user = await getAuthenticatedUser(token);
     supabase = createSupabase(token);
     await assertProjectAccess(supabase, user, projectId, { ownerOnly: true });
+
+    // Rate limit de ráfaga: 30 mensajes/min por usuario (complementa la cuota
+    // mensual; frena scripts que disparen el chat en bucle). H-010.
+    await enforceRateLimit(supabase, { key: `chat:${user.id}`, max: 30, windowSeconds: 60 });
 
     const { data: canChat } = await supabase.rpc("project_can_use_chat", { p_project_id: Number(projectId) });
     if (canChat !== true) {

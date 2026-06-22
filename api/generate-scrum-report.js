@@ -4,6 +4,7 @@ import {
   corsHeaders,
   createSupabase,
   fetchWithTimeout,
+  enforceRateLimit,
   getAuthenticatedUser,
   getBearerToken,
   getOrigin,
@@ -261,6 +262,9 @@ export default async function handler(req) {
       supabase = createSupabase(token);
       await assertProjectAccess(supabase, user, projectId, { ownerOnly: true });
       await assertProjectCanUseIa(supabase, projectId);
+      // Rate limit (H-010): por usuario y cap diario por proyecto en generación IA.
+      await enforceRateLimit(supabase, { key: `gen-scrum:${user.id}`, max: 20, windowSeconds: 3600 });
+      await enforceRateLimit(supabase, { key: `gen-scrum:proj:${projectId}`, max: 50, windowSeconds: 86400 });
     }
   } catch (err) {
     return jsonError(err.message, err.status || 500, headers);

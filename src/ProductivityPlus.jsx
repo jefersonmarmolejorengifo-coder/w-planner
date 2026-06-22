@@ -4782,7 +4782,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg,#0d0d1a 0%,#1a1a2e 50%,#2d1b4e 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 460 }}>
+      <div style={{ width: "100%", maxWidth: (authUser && myProjects.length > 0) ? 920 : 460, transition: "max-width .3s ease" }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <div style={{ fontSize: 72, fontWeight: 900, background: "linear-gradient(135deg,#ec6c04,#f5a623,#149cac)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", lineHeight: 1, letterSpacing: -3 }}>P+</div>
@@ -4803,64 +4803,71 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
           <div style={{ marginBottom: 24 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: 3, marginBottom: 10, textAlign: 'center' }}>Mis proyectos</div>
             {ownedCount >= 1 && (
-              <button onClick={() => setShowConsolidated(true)} style={{ width: '100%', marginBottom: 12, background: 'linear-gradient(135deg, rgba(20,156,172,0.22), rgba(84,44,156,0.22))', border: '1px solid rgba(20,156,172,0.4)', color: '#fff', borderRadius: 12, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit' }}>
-                📊 Visión consolidada de mis tableros
-              </button>
+              <div style={{ maxWidth: 460, margin: '0 auto 16px' }}>
+                <button onClick={() => setShowConsolidated(true)} style={{ width: '100%', background: 'linear-gradient(135deg, rgba(20,156,172,0.22), rgba(84,44,156,0.22))', border: '1px solid rgba(20,156,172,0.4)', color: '#fff', borderRadius: 12, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit' }}>
+                  📊 Visión consolidada de mis tableros
+                </button>
+              </div>
             )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 12 }}>
               {myProjects.map(proj => {
                 const isOwner = proj.owner_id === authUser.id;
                 const inviter = ownerNames[proj.id];
                 // Tablero invitado: acento teal + etiqueta de quién invitó, para
                 // distinguirlo de los propios (acento naranja "PROPIETARIO").
                 return (
-                  <div key={proj.id} style={{ position: 'relative', display: 'flex', alignItems: 'stretch', gap: 0 }}>
-                    <button
-                      onClick={() => { localStorage.setItem('pp_project_id', String(proj.id)); onProjectLoaded(proj); }}
-                      style={{ flex: 1,
-                        background: isOwner ? 'rgba(255,255,255,0.06)' : 'linear-gradient(135deg, rgba(20,156,172,0.16), rgba(20,156,172,0.06))',
-                        border: isOwner ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(20,156,172,0.45)',
-                        borderRight: isOwner ? 'none' : '1px solid rgba(20,156,172,0.45)',
-                        borderLeft: isOwner ? '1px solid rgba(255,255,255,0.12)' : '3px solid #149cac',
-                        borderRadius: isOwner ? '12px 0 0 12px' : 12, padding: '14px 18px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', fontFamily: 'inherit', color: 'inherit' }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: proj.description ? 3 : 0 }}>{proj.name}</div>
-                      {proj.description && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>{proj.description}</div>}
-                      {isOwner ? (
-                        <div style={{ fontSize: 10, color: '#ec6c04', marginTop: 5, fontWeight: 700, letterSpacing: 0.5 }}>PROPIETARIO</div>
-                      ) : (
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 7, background: 'rgba(20,156,172,0.18)', border: '1px solid rgba(20,156,172,0.4)', borderRadius: 999, padding: '3px 9px' }}>
-                          <span style={{ fontSize: 10 }}>👥</span>
-                          <span style={{ fontSize: 10, color: '#4dd8e8', fontWeight: 700, letterSpacing: 0.3 }}>
-                            Invitado{inviter ? ` por ${inviter}` : ''}
-                          </span>
-                        </div>
-                      )}
-                    </button>
+                  <div key={proj.id}
+                    onClick={() => { localStorage.setItem('pp_project_id', String(proj.id)); onProjectLoaded(proj); }}
+                    onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 12px 28px rgba(0,0,0,0.35)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
+                    style={{
+                      position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 120,
+                      background: isOwner ? 'linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))' : 'linear-gradient(180deg, rgba(20,156,172,0.16), rgba(20,156,172,0.05))',
+                      border: isOwner ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(20,156,172,0.45)',
+                      borderLeft: isOwner ? '1px solid rgba(255,255,255,0.12)' : '3px solid #149cac',
+                      borderRadius: 14, padding: '15px 16px', cursor: 'pointer',
+                      transition: 'transform .15s ease, box-shadow .15s ease',
+                    }}>
                     {isOwner && (
-                      <button
-                        title="Borrar proyecto"
+                      <button title="Borrar proyecto"
                         onClick={(e) => { e.stopPropagation(); setDeletingProject(proj); setDeleteConfirmText(''); setErr(''); }}
-                        style={{ background: 'rgba(220,38,38,0.15)', border: '1px solid rgba(220,38,38,0.3)', borderLeft: 'none', borderRadius: '0 12px 12px 0', color: '#f87171', cursor: 'pointer', padding: '0 14px', fontSize: 16, fontFamily: 'inherit', transition: 'all 0.2s' }}>
+                        style={{ position: 'absolute', top: 10, right: 10, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(220,38,38,0.12)', border: '1px solid rgba(220,38,38,0.28)', borderRadius: 8, color: '#f87171', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
                         🗑
                       </button>
                     )}
+                    <div style={{ fontSize: 14.5, fontWeight: 700, color: '#fff', lineHeight: 1.3, paddingRight: isOwner ? 34 : 0, marginBottom: proj.description ? 5 : 0 }}>{proj.name}</div>
+                    {proj.description && (
+                      <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.45)', lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{proj.description}</div>
+                    )}
+                    <div style={{ marginTop: 'auto', paddingTop: 12 }}>
+                      {isOwner ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, color: '#f5a623', fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ec6c04' }} />Propietario
+                        </span>
+                      ) : (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(20,156,172,0.18)', border: '1px solid rgba(20,156,172,0.4)', borderRadius: 999, padding: '3px 9px' }}>
+                          <span style={{ fontSize: 10 }}>👥</span>
+                          <span style={{ fontSize: 10, color: '#4dd8e8', fontWeight: 700, letterSpacing: 0.3 }}>Invitado{inviter ? ` por ${inviter}` : ''}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ textAlign: 'center', margin: '16px 0 4px', fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>o crea o únete a otro proyecto</div>
+            <div style={{ textAlign: 'center', margin: '18px 0 4px', fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>o crea o únete a otro proyecto</div>
           </div>
         ) : null)}
 
         {/* Compra de plan visible antes de crear un tablero */}
         {authUser && (
-          <div style={{ marginBottom: 18 }}>
+          <div style={{ maxWidth: 460, margin: '0 auto 18px' }}>
             <PlansLauncher variant="landing" />
           </div>
         )}
 
         {/* Card */}
-        <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+        <div style={{ maxWidth: 460, margin: "0 auto", background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
           {/* Tabs */}
           <div style={{ display: "flex", gap: 0, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: 4, marginBottom: 28 }}>
             {[['join','Unirse'],['create','Crear'],['template','Plantillas']].map(([t, l]) => (

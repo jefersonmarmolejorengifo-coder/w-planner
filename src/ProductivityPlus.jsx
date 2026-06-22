@@ -4139,13 +4139,15 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
       const projList = projs || [];
       const ids = projList.map(p => p.id);
 
-      let taskRows = [], reportRows = [];
+      let taskRows = [], reportRows = [], sprintRows = [], okrRows = [];
       if (ids.length) {
-        const [{ data: tk }, { data: rh }] = await Promise.all([
+        const [{ data: tk }, { data: rh }, { data: sp }, { data: ok }] = await Promise.all([
           supabase.from("tasks").select("project_id, status, responsible, aporte_snapshot, end_date").in("project_id", ids),
           supabase.from("report_history").select("id, project_id, report_type, period_start, period_end, generated_at, plain_text, model_used").in("project_id", ids).order("generated_at", { ascending: false }),
+          supabase.from("sprints").select("project_id, name, status").in("project_id", ids),
+          supabase.from("okrs").select("project_id, status").in("project_id", ids),
         ]);
-        taskRows = tk || []; reportRows = rh || [];
+        taskRows = tk || []; reportRows = rh || []; sprintRows = sp || []; okrRows = ok || [];
       }
       if (cancelled) return;
 
@@ -4161,8 +4163,14 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
         const people = new Set(ts.map(t => t.responsible).filter(Boolean));
         const aporteBy = {};
         ts.forEach(t => { if (t.responsible) aporteBy[t.responsible] = (aporteBy[t.responsible] || 0) + (Number(t.aporte_snapshot) || 0); });
-        const top = Object.entries(aporteBy).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-        return { project: p, total, done, blocked, inProgress, notStarted, overdue, donePct: total ? Math.round(done / total * 100) : 0, people, top };
+        const ranked = Object.entries(aporteBy).sort((a, b) => b[1] - a[1]);
+        const top2 = ranked.slice(0, 2).map(([name, ap]) => ({ name, ap }));
+        const activeSprint = (sprintRows.find(sp => sp.project_id === p.id && sp.status === "active") || {}).name || null;
+        const okrCount = okrRows.filter(o => o.project_id === p.id && o.status === "active").length;
+        const reportCount = reportRows.filter(r => r.project_id === p.id).length;
+        return { project: p, total, done, blocked, inProgress, notStarted, overdue,
+          donePct: total ? Math.round(done / total * 100) : 0, people, top: ranked[0]?.[0] || null,
+          top2, activeSprint, okrCount, reportCount };
       });
 
       setBoards(byBoard);
@@ -4251,29 +4259,58 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
             {boards.map(b => {
               const h = health(b);
+              const segs = [["#27ae60", b.done], ["#3a86d6", b.inProgress], ["#e74c3c", b.blocked], ["#7a8aa0", b.notStarted]];
+              const chip = (txt, c, bg) => <span style={{ background: bg, color: c, borderRadius: 999, padding: "3px 9px", fontSize: 10, fontWeight: 700 }}>{txt}</span>;
               return (
-                <div key={b.project.id} style={{ ...card, cursor: "pointer", transition: "transform .15s, border-color .15s" }}
+                <div key={b.project.id} style={{ ...card, cursor: "pointer", transition: "transform .15s, border-color .15s", display: "flex", flexDirection: "column", gap: 0 }}
                   onClick={() => onOpenProject?.(b.project)}
                   onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.borderColor = "rgba(20,156,172,0.5)"; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"; }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 10 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700 }}>{b.project.name}</div>
+                  {/* Encabezado */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 12 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.25 }}>{b.project.name}</div>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: h.c, whiteSpace: "nowrap" }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: h.c }} />{h.t}
                     </span>
                   </div>
-                  <div style={{ height: 7, background: "rgba(255,255,255,0.08)", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
-                    <div style={{ width: `${b.donePct}%`, height: "100%", background: "linear-gradient(90deg, #149cac, #27ae60)" }} />
+                  {/* Barra de estados */}
+                  <div style={{ display: "flex", height: 8, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.07)" }}>
+                    {b.total > 0 ? segs.map(([c, n], i) => n > 0 && <div key={i} title={`${n}`} style={{ width: `${n / b.total * 100}%`, background: c }} />)
+                      : <div style={{ width: "100%" }} />}
                   </div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                    <span><b style={{ color: "#fff" }}>{b.donePct}%</b> · {b.done}/{b.total} tareas</span>
-                    {b.blocked > 0 && <span style={{ color: "#f87171" }}>{b.blocked} bloq.</span>}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "rgba(255,255,255,0.6)", marginTop: 7 }}>
+                    <span><b style={{ color: "#fff", fontSize: 14 }}>{b.donePct}%</b> completado</span>
+                    <span>{b.done}/{b.total} tareas</span>
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 10 }}>
-                    <span style={{ background: "rgba(255,255,255,0.06)", borderRadius: 999, padding: "3px 8px", color: "rgba(255,255,255,0.7)" }}>👥 {b.people.size} personas</span>
-                    {b.top && <span style={{ background: "rgba(39,174,96,0.16)", borderRadius: 999, padding: "3px 8px", color: "#7ee2a8" }}>⭐ {b.top}</span>}
-                    {b.overdue > 0 && <span style={{ background: "rgba(245,166,35,0.16)", borderRadius: 999, padding: "3px 8px", color: "#f5c97a" }}>{b.overdue} vencidas</span>}
+                  {/* Chips de atención */}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 11 }}>
+                    {chip(`${b.inProgress} en proceso`, "#9cc8f0", "rgba(58,134,214,0.16)")}
+                    {b.blocked > 0 && chip(`${b.blocked} bloqueadas`, "#f5a3a3", "rgba(231,76,60,0.16)")}
+                    {b.overdue > 0 && chip(`${b.overdue} vencidas`, "#f5c97a", "rgba(245,166,35,0.16)")}
                   </div>
+                  {/* Meta del tablero */}
+                  <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "12px 0" }} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11.5, color: "rgba(255,255,255,0.62)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>🏃</span><span>{b.activeSprint ? <b style={{ color: "#fff", fontWeight: 600 }}>{b.activeSprint}</b> : "Sin sprint activo"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>🎯 {b.okrCount} OKR{b.okrCount === 1 ? "" : "s"} activo{b.okrCount === 1 ? "" : "s"}</span>
+                      <span>👥 {b.people.size} personas</span>
+                      <span>📄 {b.reportCount} reporte{b.reportCount === 1 ? "" : "s"}</span>
+                    </div>
+                  </div>
+                  {/* Top aportantes */}
+                  {b.top2.length > 0 && (
+                    <div style={{ marginTop: 11, display: "flex", flexDirection: "column", gap: 5 }}>
+                      {b.top2.map((c, i) => (
+                        <div key={c.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11.5 }}>
+                          <span style={{ color: "rgba(255,255,255,0.82)" }}>{["🥇", "🥈"][i]} {c.name}</span>
+                          <span style={{ color: "#7ee2a8", fontWeight: 700 }}>{Math.round(c.ap)} pts</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}

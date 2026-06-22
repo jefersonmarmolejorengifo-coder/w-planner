@@ -1,7 +1,7 @@
-# AUDIT_PLAN.md — Plan de Mejora y Auditoría Dual
+# AUDIT_PLAN.md — Plan de Mejora y Auditoría Triple
 
 > Documento autoactualizable generado y mantenido por **SuperAuditor**.
-> Auditoría ejecutada por IAs independientes: Claude (Auditor A) y Codex (Auditor B). Gemini (Auditor C) no concluyó esta ronda.
+> Auditoría ejecutada por IAs independientes: Claude (A), Codex/OpenAI (B) y Gemini/Google (C).
 > NO editar manualmente las secciones marcadas con 🤖 — serán sobrescritas en la próxima auditoría.
 > Las notas humanas van en la sección "Comentarios del equipo" al final.
 
@@ -10,319 +10,228 @@
 ## 📌 Resumen ejecutivo 🤖
 
 - **Proyecto:** `w-planner` (Productivity-Plus)
-- **Stack detectado:** SPA Vite + React 19 · Supabase (Postgres + RLS) · Funciones Vercel (Node/Edge) · Mercado Pago · Resend · Anthropic API
-- **Última auditoría:** `2026-06-19`
-- **Auditores:** Claude (A) en `claude-opus-4-8` + Codex (B) en `gpt-5.5` *(reasoning xhigh)*. Gemini (C) **omitido**.
-- **Modo:** `DEGRADADO` *(Auditor C/Gemini falló: el CLI devolvió `IneligibleTierError` — las cuentas individuales ya no son elegibles tras la migración de Google a Antigravity. A y B sí concluyeron, por lo que el contraste dual es válido.)*
-- **Commits cubiertos:** auditoría completa del repositorio (96 commits, HEAD=1a90dc1)
+- **Stack:** SPA Vite + React 19 · Supabase (Postgres + RLS) · Funciones Vercel (Node) · Mercado Pago · Resend · Anthropic/Gemini
+- **Última auditoría:** `2026-06-22`
+- **Auditores:** Claude (A) en `claude-opus-4-8` + Codex (B) en `gpt-5.5` *(xhigh)* + Gemini (C) en `Gemini 3.1 Pro (High)`.
+- **Modo:** `COMPLETO` — los tres auditores concluyeron (triple contraste válido).
+- **Commits cubiertos:** `1a90dc1..52ca539` (trabajo de esta sesión) sobre el estado completo del repo.
+- **Foco solicitado:** escalabilidad/concurrencia (muchas personas creando tarjetas a la vez), calidad, uso, UX.
+
+### Veredicto de producción
+**Funcionalmente listo, pero con un cuello de botella de concurrencia que conviene cerrar antes de escalar usuarios.** El hallazgo dominante para "muchas personas a la vez" es **H-014 (`claim_task_id` global)** — exclusivo de Auditor A. No hay bloqueadores de seguridad nuevos sin mitigación, pero sí varios fail-open y un IDOR de chat a corregir.
 
 ### Estado actual
 
 | Métrica | Valor |
 |---|---|
-| Hallazgos de consenso (A+B) — alta confianza | 5 |
-| Hallazgos solo Claude (A) | 3 |
-| Hallazgos solo Codex (B) | 3 |
-| Discrepancias de severidad | 1 |
-| Hallazgos abiertos totales | 12 |
-| Hallazgos cerrados esta ronda | 0 |
-| Hallazgos cerrados (acumulado) | 0 |
-| Críticos abiertos | 1 |
-| Altos abiertos | 5 |
-| Medios abiertos | 3 |
-| Bajos abiertos | 2 |
+| Consenso fuerte `[A+B+C]` | 2 |
+| Consenso de pares `[A+B]/[A+C]/[B+C]` | 2 |
+| Solo Claude `[A]` | 6 |
+| Solo Codex `[B]` | 7 |
+| Solo Gemini `[C]` | 2 |
+| Discrepancias de severidad | 3 |
+| **Cerrados esta ronda** | **3** |
+| Críticos abiertos | 0 (1 condicional) |
+| Altos abiertos | 6 |
+| Medios abiertos | 8 |
+| Bajos abiertos | 3 |
 
-<!-- Divergencia: 5 de 12 hallazgos en consenso (42%) ≥ 30% → sin alerta. -->
+<!-- Divergencia: alta dispersión de hallazgos solo-uno (15 de 19). Esperable: A buscó concurrencia, B seguridad de pago/IDOR, C arquitectura/bundle. Revisar los tres lados. -->
 
 ### Top 3 prioridades inmediatas
 
-> Siempre se priorizan los hallazgos de consenso (A+B) cuando los hay.
-
-1. **Webhook de Mercado Pago sin verificación de firma** `[A+B]` `CRÍTICO` — endpoint público que escribe `users_premium` con `service_role` sin validar `x-signature`. (H-001)
-2. **Llamadas a APIs externas sin timeout** `[A+B]` `ALTO` — quick win: envolver cada `fetch` en `AbortSignal.timeout`. (H-004)
-3. **Roles solo aplicados en la UI, no en RLS** `[B]` (confirmado por A) `ALTO` — un participante puede editar tasks/OKRs/sprints vía el cliente Supabase saltándose las tabs. (H-007)
+1. **`claim_task_id` serializa la creación de tarjetas a nivel global** `[A]` `ALTO` — el contador vive en `app_config` con un `nextId` por proyecto y el UPDATE no filtra por proyecto → cada creación bloquea las filas de TODOS los tableros y empeora con la escala. Reemplazar por un `SEQUENCE` nativo. (H-014) **← responde directo a tu pregunta de concurrencia.**
+2. **Webhook MP fail-open si falta el secreto** `[A+B+C]` `ALTO`/`CRÍTICO` — hacer fail-closed (rechazar sin firma válida). (H-013)
+3. **IDOR de `sessionId` en el chat IA** `[B]` `ALTO` — filtrar la sesión por `project_id`+owner para evitar contaminación entre proyectos y bypass de cuota. (H-017)
 
 ---
 
-## 🤝 Hallazgos de CONSENSO (A + B) — alta confianza 🤖
+## 🤝 Hallazgos de CONSENSO FUERTE `[A+B+C]` 🤖
 
-> Ambas IAs detectaron este problema independientemente. Probabilidad alta de que sea cierto.
+### H-002 `[A+B+C]` | ALTO | Arquitectura | Frontend monolítico (`ProductivityPlus.jsx`, ~9.752 líneas)
+**Severidad:** A=ALTO, B=ALTO, C=CRÍTICO → se adopta **ALTO** (ver discrepancia). **Esfuerzo:** ÉPICO.
+**Evidencia:** `src/ProductivityPlus.jsx:1` (9.752 líneas); Codex: `:2535, :4518, :7204, :8155`.
+**Descripción:** Un único componente concentra tablero, billing, reportes, chat, evolutivo, dashboards, onboarding y acceso directo a Supabase. C añade el ángulo de performance: todo entra al bundle inicial (sin code-splitting), penalizando TTI/First Paint.
+**Recomendación:** Descomponer por dominio (`features/tasks|billing|reports|chat`), mover mutaciones a hooks/servicios, e introducir `React.lazy` para cargar paneles pesados (planes, reportes, config) bajo demanda.
 
-### H-001 `[A+B]` | CRÍTICO | Seguridad | Webhook de Mercado Pago sin verificación de firma ni idempotencia
-
-**Auditores que lo reportan:** Claude (A, ALTO) y Codex (B, CRÍTICO) — severidades adyacentes; se adopta CRÍTICO.
-**Eje:** Seguridad / Pentesting / Conexiones
-**Detectado:** 2026-06-19
-**Severidad:** CRÍTICO
-**Esfuerzo estimado:** MEDIO
-
-**Evidencia:**
-- `api/mp-webhook.js:50-75` (procesa `type`/`data.id` sin validar firma)
-- `api/mp-webhook.js:101`, `api/mp-webhook.js:130` (`upsert` a `users_premium` vía `service_role`)
-
-**Descripción (Claude):**
-Cualquiera puede hacer POST a `/api/mp-webhook` con un `data.id` arbitrario. El re-fetch a la API de MP mitiga la *forja de datos* (no se puede inventar un pago "authorized"), pero no la invocación: un tercero puede forzar reprocesamiento de preapprovals ajenos y abusar de la cuota de la API de MP. Además no hay registro de `event_id` procesados → un reintento desordenado puede pisar `status` con un valor stale.
-
-**Descripción (Codex):**
-La ruta pública procesa `type` y `dataId` sin validar firma/origen antes de usar `service_role` para actualizar `users_premium` (webhook spoofing / replay).
-
-**Impacto:**
-Manipulación del estado de suscripción de cuentas ajenas, abuso de cuota de la API de MP, e inconsistencia de `users_premium` bajo reintentos. Riesgo financiero/integridad de datos de pago.
-
-**Recomendación:**
-Validar `x-signature` (HMAC-SHA256 sobre `ts` + `data.id`) con `MP_WEBHOOK_SECRET`; rechazar 401 si no valida. Añadir tabla `mp_webhook_events(event_id PK, processed_at)` para idempotencia y orden de eventos.
+### H-013 `[A+B+C]` | ALTO | Seguridad | Webhook de Mercado Pago procesa eventos aunque falte el secreto (fail-open)
+**Severidad:** A=ALTO, B=ALTO, C=CRÍTICO → se adopta **ALTO** (CRÍTICO si el secreto llegara a faltar). **Esfuerzo:** BAJO.
+**Evidencia:** `api/mp-webhook.js:21-26` (`verifyMpSignature` → `null` sin `MP_WEBHOOK_SECRET`), `:124-126` (solo `console.warn` y sigue), `:175` (escribe `users_premium` con service_role).
+**Descripción:** Mejoró respecto a la ronda previa (ya valida `x-signature` cuando el secreto existe — H-001 cerrado), pero si la variable no está, no valida y concede premium igual. No es fail-closed.
+**Recomendación:** Si no hay secreto o firma válida → 401/503 y no procesar. Validar `MP_WEBHOOK_SECRET` al arranque en producción.
 
 ---
 
-### H-002 `[A+B]` | ALTO | Arquitectura | Frontend monolítico de ~8.900 líneas
+## 🤝 Hallazgos de CONSENSO DE PARES 🤖
 
-**Auditores que lo reportan:** Claude (A) y Codex (B) — consenso de severidad ALTO.
-**Eje:** Arquitectura
-**Detectado:** 2026-06-19
-**Severidad:** ALTO
-**Esfuerzo estimado:** ÉPICO
+### H-008 `[A+B]` | MEDIO | UX | Modales sin semántica de diálogo ni control de foco
+**Evidencia:** Codex `:8183, :8276`, `src/NameCaptureModal.jsx:50`, `src/Onboarding.jsx:591`; A confirma en los nuevos paneles (Visión consolidada, pastilla, planes).
+**Descripción:** Overlays como `div` sin `role="dialog"`, `aria-modal`, trampa de foco ni cierre con `Esc`; `×` sin `aria-label`.
+**Recomendación:** Componente modal accesible común (foco inicial/retorno, `Esc`, `aria-labelledby`).
 
-**Evidencia:**
-- `src/ProductivityPlus.jsx` (8914 líneas; resto del frontend <1.300)
-- Codex: `src/ProductivityPlus.jsx:1429, 2534, 2771, 3116, 5278, 7709`
-
-**Descripción:**
-Un único componente concentra tablero, billing, reportes, configuración, sprints, auth, chat, evolutivo y acceso directo a Supabase. La lógica de negocio y seguridad queda acoplada a la UI.
-
-**Impacto:**
-Onboarding lento, alto riesgo de regresión, sin code-splitting por pantalla (todo al bundle inicial), PRs y merges costosos.
-
-**Recomendación:**
-Extraer por dominio (`features/tasks`, `features/billing`, `features/reports`, `features/sprints`) y mover las mutaciones Supabase a hooks/servicios tipados. Empezar por las piezas ya delimitadas (ChatEnterpriseTab, vista Evolutivo, Presentación).
-
----
-
-### H-003 `[A+B]` | ALTO | Arquitectura | Ausencia total de pruebas automatizadas
-
-**Auditores que lo reportan:** Claude (A) y Codex (B) — consenso de severidad ALTO.
-**Eje:** Arquitectura
-**Detectado:** 2026-06-19
-**Severidad:** ALTO
-**Esfuerzo estimado:** ALTO
-
-**Evidencia:**
-- No existe ningún `*.test.*`/`*.spec.*`/`__tests__/`; `package.json` solo define `dev`/`build`/`lint`/`preview`.
-- Codex: `package.json:6-9`, `docs/operations.md:270` ("Agregar tests automatizados" como pendiente).
-
-**Descripción:**
-Lógica financiera (suscripciones MP), cálculo de aporte por snapshot, scheduling de reportes (ventanas 4h/5d/25d) y gating por rol/tier sin una sola prueba.
-
-**Impacto:**
-RLS, webhooks, pagos, cron e IA pueden romperse sin detección previa; cada cambio se valida en producción.
-
-**Recomendación:**
-Añadir Vitest. Priorizar unitarias de alto valor: `shouldSendNow`/`computeRange` (cron), `mapStatus`/`parseExternalReference` (mp-webhook), cálculo de aporte; luego integración de `api/*` con mocks de Supabase/Resend/MP/LLM.
-
----
-
-### H-004 `[A+B]` | ALTO | Conexión | Llamadas a APIs externas sin timeout
-
-**Auditores que lo reportan:** Claude (A, esfuerzo BAJO) y Codex (B, esfuerzo MEDIO) — consenso de severidad ALTO.
-**Eje:** Conexiones
-**Detectado:** 2026-06-19
-**Severidad:** ALTO
-**Esfuerzo estimado:** BAJO
-
-**Evidencia:**
-- `api/mp-webhook.js:15-27`, `api/mp-subscribe.js:85`, `api/invite.js:84`, `api/send-report.js:67`, `api/chat-stream.js:208`, `api/cron.js:140,336`, `api/generate-report.js:394`, `api/generate-scrum-report.js:321`
-
-**Descripción:**
-Ningún `fetch` externo usa `AbortController`/`AbortSignal.timeout` ni política de retry/backoff.
-
-**Impacto:**
-Un proveedor lento cuelga la función hasta el `maxDuration` (30-60s), agota cómputo y retrasa el resto del lote del cron.
-
-**Recomendación:**
-Wrapper HTTP con timeout 10-15s; retry con backoff solo para operaciones idempotentes; **no** reintentar cobros sin idempotency key.
-
----
-
-### H-005 `[A+B]` | MEDIO | Arquitectura | Entorno sin contrato ejecutable (validación perezosa, falta `.env.example`)
-
-**Auditores que lo reportan:** Claude (A, BAJO) y Codex (B, MEDIO) — severidades adyacentes; se adopta MEDIO.
-**Eje:** Arquitectura / Conexiones
-**Detectado:** 2026-06-19
-**Severidad:** MEDIO
-**Esfuerzo estimado:** BAJO
-
-**Evidencia:**
-- `api/_auth.js:93-102` (validación al primer uso); `src/supabaseClient.js:3-6`; no existe `.env.example`.
-
-**Descripción:**
-Las variables de entorno se validan en runtime, no al desplegar; no hay `.env.example` ni validación centralizada.
-
-**Impacto:**
-Deploys con env incompleta parecen sanos hasta que un usuario dispara el flujo; errores ambiguos y degradación silenciosa.
-
-**Recomendación:**
-Módulo `config/env` que valide el set requerido al arrancar + `.env.example` sin valores reales.
+### H-009 `[A+B]` | MEDIO | UX | `outline: none` sin foco visible equivalente (WCAG 2.4.7)
+**Evidencia:** Codex `src/NameCaptureModal.jsx:73,84`, `src/ProductivityPlus.jsx:4818,4935`; patrón global.
+**Recomendación:** `:focus-visible` global con contraste suficiente; quitar `outline:none` salvo reemplazo.
 
 ---
 
 ## 🅰️ Hallazgos solo de Claude (A) 🤖
 
-> Solo el Auditor A reportó esto. Puede ser cierto o un falso positivo — vale la pena revisar manualmente.
+### H-014 `[A]` | ALTO | Escalabilidad/Concurrencia | `claim_task_id()` serializa la creación de tarjetas a nivel GLOBAL ⭐
+**Eje:** Arquitectura/Escalabilidad · **Severidad:** ALTO · **Esfuerzo:** MEDIO
+**Evidencia:** `migrations/006_security_hardening.sql:81-92` (UPDATE sin `project_id`), `migrations/002_multiproject.sql:29` (un `nextId` por proyecto), `src/ProductivityPlus.jsx:1445` (se reserva al ABRIR el formulario, no al guardar).
+**Descripción:** `UPDATE app_config SET value=value+1 WHERE key='nextId'` toca **todas** las filas `nextId` (una por proyecto) en cada llamada. Resultado: (1) contención cross-tenant — crear una tarjeta en un proyecto bloquea las filas de todos; (2) costo O(#proyectos) que empeora con la escala; (3) se dispara al abrir el formulario, amplificando el write global + broadcast realtime y quemando IDs.
+**Impacto:** Es el cuello de botella directo de "muchas personas creando tarjetas a la vez". Funciona a baja escala (IDs únicos, locks de µs), pero no escala como debería para producción multi-tenant.
+**Recomendación:** Reemplazar por un `SEQUENCE` de Postgres (`nextval`) lock-free, o `IDENTITY` en `tasks.id`; dejar `claim_task_id` como `SELECT nextval('tasks_id_seq')`. Reservar el ID al guardar, no al abrir.
 
-### H-010 `[A]` | MEDIO | Seguridad | Sin rate limiting en endpoints que generan costo
+### H-015 `[A]` | MEDIO | Escalabilidad | Visión consolidada agrega en el cliente sin paginación
+**Evidencia:** `src/ProductivityPlus.jsx` ConsolidatedDashboard: `from("tasks").select(...).in("project_id", ids)`; mismo patrón en `loadAllForProject`.
+**Recomendación:** RPC server-side que devuelva KPIs por tablero ya agregados; paginar/virtualizar listas largas.
 
-**Eje:** Seguridad · **Detectado:** 2026-06-19 · **Severidad:** MEDIO · **Esfuerzo:** MEDIO
+### H-016 `[A]` | MEDIO | Concurrencia | UPDATE de tarjeta last-write-wins (lost updates)
+**Evidencia:** `src/ProductivityPlus.jsx:9013` (`update().eq('id', task.id)` sin chequear `updated_at`).
+**Recomendación:** Optimistic concurrency con `.eq('updated_at', prev)`; si 0 filas → avisar "la tarjeta cambió".
 
-**Evidencia:** `api/invite.js` (email real vía Resend), `api/generate-report.js`, `api/generate-monthly-report.js`, `api/generate-scrum-report.js`, `api/chat-stream.js`. Sin throttle.
+### H-003 `[A]` | ALTO | Calidad | Cero pruebas automatizadas *(consenso A+B en ronda previa; re-confirmado por A)*
+**Evidencia:** sin `*.test.*`/`*.spec.*`; `package.json` sin script de test.
+**Recomendación:** Vitest. Priorizar lógica pura (aporte, gating) y endpoints de pago/webhook (firma/idempotencia). CI por push.
 
-**Descripción:** Hay gating por tier y cuota mensual de chat, pero ningún límite de frecuencia por minuto. Un owner puede invocar `invite` o los endpoints IA en bucle.
+### H-010 `[A]` | MEDIO | Seguridad | Sin rate limiting en endpoints que generan costo *(carry-forward)*
+**Evidencia:** `api/invite.js`, `api/generate-*.js`, `api/chat-stream.js`. **Recomendación:** rate limit por usuario/IP + cap diario por proyecto.
 
-**Impacto:** DoS económico (factura LLM/Resend); posible uso de `invite` para spam con plantilla de marca.
-
-**Recomendación:** Rate limit por usuario/IP (Upstash Ratelimit o tabla con ventana deslizante) en `invite` y endpoints IA; cap diario por proyecto.
-
----
-
-### H-011 `[A]` | BAJO | Conexión | Cliente admin de Supabase instanciado por request
-
-**Eje:** Conexiones · **Detectado:** 2026-06-19 · **Severidad:** BAJO · **Esfuerzo:** BAJO
-
-**Evidencia:** `api/mp-webhook.js:65`, `api/mp-subscribe.js:104`, `api/chat-stream.js:177-179`, `api/save-evolution.js`.
-
-**Descripción:** Se crea un `createClient` con service_role en cada invocación en lugar de reutilizar uno a nivel de módulo. Deuda menor.
-
-**Recomendación:** Factorizar `getAdminClient()` memoizado en `_auth.js`.
-
----
-
-### H-012 `[A]` | BAJO | UX | HTML de IA renderizado sin sanitización previa (contenido aislado)
-
-**Eje:** UX/Seguridad · **Detectado:** 2026-06-19 · **Severidad:** BAJO · **Esfuerzo:** BAJO
-
-**Evidencia:** `src/ProductivityPlus.jsx:6968-6973` (`srcDoc={html}` con HTML del LLM persistido sin `sanitize-html` en `save-evolution.js`).
-
-**Descripción:** El iframe usa `sandbox="allow-same-origin"` **sin** `allow-scripts`, por lo que el JS no se ejecuta (riesgo práctico nulo). Aun así, el HTML de IA se guarda sin sanitizar, a diferencia del pipeline de email (`sanitizeReportHtml`).
-
-**Recomendación:** Aplicar `sanitize-html` antes de persistir el evolutivo (defensa en profundidad y coherencia).
+### H-012 `[A]` | BAJO | Seguridad | HTML de IA (evolutivo) persistido sin sanitizar *(carry-forward)*
+**Evidencia:** `save-evolution.js`/iframe `srcDoc`. iframe sin `allow-scripts` (riesgo práctico bajo). **Recomendación:** `sanitize-html` antes de persistir.
 
 ---
 
 ## 🅱️ Hallazgos solo de Codex (B) 🤖
 
-> Solo el Auditor B reportó esto. Puede ser cierto o un falso positivo — vale la pena revisar manualmente.
+### H-017 `[B]` | ALTO | Pentest (IDOR) | `sessionId` de chat permite contaminación entre proyectos y bypass de cuota
+**Evidencia:** `api/chat-stream.js:122,146,170,185`. **Descripción:** valida acceso al `projectId` pero carga la sesión solo por `id`; un owner puede persistir mensajes en sesión de otro proyecto propio. **Fix:** filtrar sesión por `project_id`(+owner); cobrar cuota sobre la sesión real.
 
-### H-007 `[B]` (confirmado por A en verificación) | ALTO | Seguridad | Roles aplicados solo en la UI, no en RLS
+### H-018 `[B]` | MEDIO | Pentest (HTML injection) | Nombre de sprint sin escapar en correos de retro
+**Evidencia:** `api/open-retro.js:25,32,36,144`. **Fix:** escapar `sprint.name` en HTML y asunto.
 
-**Eje:** Seguridad / Pentesting · **Detectado:** 2026-06-19 · **Severidad:** ALTO · **Esfuerzo:** ALTO
+### H-019 `[B]` | ALTO | Conexión | El checkout MP inicia aunque falte `SUPABASE_SERVICE_ROLE_KEY`
+**Evidencia:** `api/mp-subscribe.js:93-95`, `api/mp-webhook.js:98`. **Descripción:** si falta la key admin, omite guardar el pending pero igual devuelve `init_point` → el usuario paga y puede quedar sin upgrade. **Fix:** validar admin antes de crear la preapproval; si falta → 503.
 
-**Evidencia:**
-- `src/ProductivityPlus.jsx:8507, 8512, 8525` (UI filtra tabs por `myRole`)
-- `migrations/006_security_hardening.sql:223, 267, 277` (policies `member_all` = `FOR ALL` a cualquier miembro)
-- `migrations/025_roles_and_name.sql:1-19` (comentario explícito: *"role solo define qué tour ve la persona y qué features se le habilitan"*)
+### H-020 `[B]` | MEDIO | Seguridad | RPCs `SECURITY DEFINER` de features/cuota concedidas a `anon`
+**Evidencia:** `migrations/017:30,46`, `migrations/023:22,57` (`project_has_feature`, `project_can_use_chat`, `project_chat_quota_remaining`). **Fix:** revocar `anon`; validar owner/miembro dentro de la RPC.
 
-**Descripción (Codex):** La UI filtra tabs por `myRole`, pero RLS permite `FOR ALL` a cualquier miembro en `tasks`, `okrs`, `key_results`, `sprints`, `task_history`, `notifications`. Un participante puede saltarse la UI y modificar recursos que visualmente no debería administrar.
+### H-021 `[B]` | MEDIO | Seguridad | Chat IA no limita el tamaño de `userMessage`
+**Evidencia:** `api/chat-stream.js:112-113,185,202`. **Fix:** límite de caracteres/tokens, 413 al exceder, contar antes de persistir/llamar al LLM.
 
-**Verificación (Claude):** Confirmado. La migración 025 añade `project_members.role` pero **no** modifica las policies `member_all` de la 006; el rol nunca se evalúa en la capa de datos. Un miembro con rol `participant` puede, con su JWT + anon key, hacer INSERT/UPDATE/DELETE directo sobre esas tablas.
+### H-023 `[B]` | MEDIO | Arquitectura | Planes en dos fuentes de verdad (código vs `tier_limits`)
+**Evidencia:** `src/plans.js`, `api/mp-subscribe.js:44`, `migrations/028`. **Descripción:** precio en código, gating real en BD; desalineación posible entre cobro y features. **Fix:** fuente canónica server-side o verificación de consistencia en deploy.
 
-**Impacto:** Broken Access Control intra-proyecto. Mitigado parcialmente porque todos son colaboradores invitados del mismo proyecto (confianza media), pero el control de rol es puramente cosmético.
+### H-022 `[B]` | BAJO | Conexión | Metadata de modelo IA inconsistente (Sonnet llamado, header/UI dicen Opus 4.7)
+**Evidencia:** `api/generate-report.js:409,489`, `src/ProductivityPlus.jsx:2721`. **Fix:** centralizar constantes de modelo.
 
-**Recomendación:** Modelar permisos por rol en SQL: funciones `can_edit_tasks`/`can_manage_sprints`/`can_manage_okrs` y reemplazar las policies `member_all` por policies por acción/rol, o mover las operaciones sensibles a RPCs con validación de rol.
-
----
-
-### H-008 `[B]` | ALTO | UX | Modales sin semántica accesible ni control de foco
-
-**Eje:** UX · **Detectado:** 2026-06-19 · **Severidad:** ALTO · **Esfuerzo:** MEDIO
-
-**Evidencia:** `src/ProductivityPlus.jsx:1379, 1399` (Modal genérico).
-
-**Descripción (Codex):** El modal no declara `role="dialog"`, `aria-modal`, título asociado, trampa de foco ni cierre con Escape; el botón `×` no tiene `aria-label`. *(No verificado a fondo por A — revisar manualmente.)*
-
-**Criterio violado:** WCAG 2.1 AA, navegación por teclado, semántica de diálogos.
-
-**Recomendación:** Componente modal accesible con foco inicial, retorno de foco, Escape, `aria-labelledby` y botón cerrar etiquetado.
+### H-007 `[B]` | ALTO | Seguridad | Roles aplicados solo en UI, no en RLS *(carry-forward, no corregido)*
+**Evidencia:** UI filtra tabs por `myRole`; policies `member_all` (`FOR ALL` a cualquier miembro) en `migrations/006:223,267,277`; `migrations/025` no toca RLS. **Fix:** permisos por rol en SQL/RPC; reemplazar `member_all`.
 
 ---
 
-### H-009 `[B]` | MEDIO | UX | `outline: none` sin reemplazo de foco visible consistente
+## 🅲️ Hallazgos solo de Gemini (C) 🤖
 
-**Eje:** UX · **Detectado:** 2026-06-19 · **Severidad:** MEDIO · **Esfuerzo:** BAJO
+### H-024 `[C]` | MEDIO | Pentest | Sin validación estricta de esquema en los endpoints
+**Evidencia:** `api/generate-scrum-report.js:234` y otros `req.body`. **Fix:** Zod/Joi para validar tipos/identificadores antes de procesar.
 
-**Evidencia:** `src/ProductivityPlus.jsx:1543, 2244, 3727, 4421, 5851`.
-
-**Descripción (Codex):** Muchos controles usan `outline: none` sin una estrategia global de foco visible. *(No verificado a fondo por A — revisar manualmente.)*
-
-**Criterio violado:** WCAG 2.4.7 — Focus Visible.
-
-**Recomendación:** Definir `:focus-visible` global y eliminar `outline: none` salvo que haya reemplazo equivalente.
+### H-025 `[C]` | MEDIO | Conexión | Cliente Supabase sin timeout (riesgo de retención de invocaciones)
+**Evidencia:** `api/_auth.js:103-112` (`createClient` usa `fetch` por defecto). **Descripción:** las HTTP externas usan `fetchWithTimeout`, pero las queries Supabase no. **Fix:** pasar un `fetch` con `AbortSignal.timeout` en `global.fetch` del cliente.
 
 ---
 
 ## ⚖️ Discrepancias de severidad 🤖
 
-> Mismo hallazgo, distinta calificación entre las dos IAs. Decide tú con qué severidad lo tratas.
-
-### H-006 ⚖️ | Discrepancia de severidad | Seguridad | `assertProjectCanUseIa` falla abierto si la RPC no existe
-
-**Evidencia:** `api/_auth.js:212-230` (ante error `42883` hace `return` y deja pasar la llamada IA); `api/generate-report.js:329`, `api/generate-scrum-report.js:250`, `api/generate-monthly-report.js:323`.
-
-**Opinión de Claude (A):** Severidad **BAJO** — "tolerancia pensada para entornos sin la migración 016; el riesgo solo se materializa si la RPC se renombra/borra por error de despliegue".
-
-**Opinión de Codex (B):** Severidad **ALTO** — "un ambiente con migraciones incompletas habilita reportes IA pagados sin validar plan, generando costos".
-
-**Decisión pendiente del equipo:** ambos coinciden en el fix → **fail-closed en producción**, permitir bypass solo con flag explícito de desarrollo (`ALLOW_IA_WITHOUT_RPC`). La severidad depende de cuán probable consideres un deploy con migración 016 ausente.
+- **H-002 (monolito):** A/B = ALTO, C = CRÍTICO. Se adopta ALTO (es deuda grave pero no rompe funcionalidad hoy).
+- **H-013 (webhook fail-open):** A/B = ALTO, C = CRÍTICO. Se adopta ALTO; sería CRÍTICO si el secreto faltara en producción.
+- **H-006 (gating IA fail-open si falta la RPC):** A = BAJO, B = ALTO *(carry-forward)*. Fix consensuado: fail-closed en prod con flag `ALLOW_IA_WITHOUT_RPC` solo en dev.
 
 ---
 
-## ✅ Hallazgos cerrados 🤖
+## ✅ Hallazgos cerrados esta ronda 🤖
 
 > Trazabilidad histórica. NO eliminar.
 
-*(Ninguno — primera auditoría.)*
+### H-001 ✅ CERRADO (mitigado) | Webhook MP sin verificación de firma ni idempotencia
+Se añadió `verifyMpSignature` (HMAC-SHA256 sobre `id;request-id;ts`) y la tabla `mp_webhook_events` (migración 026) para idempotencia. *Residual:* el comportamiento fail-open cuando falta el secreto se reabre como **H-013**.
+
+### H-004 ✅ CERRADO | Llamadas a APIs externas sin timeout
+Se introdujo `fetchWithTimeout` y se usa en las llamadas HTTP externas (mp-subscribe, webhook, invite, reportes, chat). *Residual:* el cliente Supabase aún sin timeout → **H-025**.
+
+### H-005 ✅ CERRADO | Falta `.env.example`
+Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.gitignore`.
 
 ---
 
 ## 🗺️ Plan de mejora priorizado 🤖
 
-> Recalculado en cada auditoría. Orden: consenso primero (por severidad × esfuerzo), luego solo-A y solo-B, luego discrepancias.
-
-### Sprint propuesto (próximas 1-2 semanas)
-
-1. **H-001 · `[A+B]` CRÍTICO** — Validar firma `x-signature` de MP + idempotencia por `event_id`. *(MEDIO)*
-2. **H-004 · `[A+B]` ALTO** — Wrapper `fetch` con `AbortSignal.timeout(10-15s)` en todas las llamadas externas. *(BAJO — quick win)*
-3. **H-007 · `[B]`✔ ALTO** — Permisos por rol en RLS/RPC; reemplazar policies `member_all`. *(ALTO)*
-4. **H-006 · ⚖️** — Hacer fail-closed el gating de IA en producción. *(BAJO)*
-5. **H-005 · `[A+B]` MEDIO** — `.env.example` + validación de entorno al arranque. *(BAJO)*
-6. **H-003 · `[A+B]` ALTO** — Bootstrap de Vitest + primeras unitarias de cron/webhook/aporte. *(ALTO, arrancar ahora)*
+### Sprint propuesto (antes de escalar usuarios)
+1. **H-014 · `[A]` ALTO** — `SEQUENCE` para `tasks.id` (elimina la contención global de creación). *(MEDIO)* ⭐ concurrencia
+2. **H-013 · `[A+B+C]` ALTO** — Webhook MP fail-closed. *(BAJO — quick win)*
+3. **H-017 · `[B]` ALTO** — Cerrar IDOR de `sessionId` del chat. *(BAJO)*
+4. **H-019 · `[B]` ALTO** — Validar Supabase admin antes de crear preapproval MP. *(BAJO)*
+5. **H-007 · `[B]` ALTO** — Permisos por rol en RLS/RPC (reemplazar `member_all`). *(ALTO)*
+6. **H-021 · `[B]` MEDIO** + **H-024 · `[C]` MEDIO** — Límite de tamaño + validación de esquema (Zod) en endpoints. *(BAJO-MEDIO)*
 
 ### Backlog (medio plazo)
+- **H-003 · ALTO** — Vitest + primeras unitarias (aporte, webhook, gating).
+- **H-015 / H-016 · `[A]` MEDIO** — Agregación server-side del dashboard + optimistic concurrency en tareas.
+- **H-002 · `[A+B+C]` ALTO** — Descomponer el monolito + `React.lazy`. *(ÉPICO)*
+- **H-020 / H-023 · `[B]` MEDIO** — RPCs sin `anon`; fuente canónica de planes.
+- **H-008 / H-009 · `[A+B]` MEDIO** — Modal accesible + `:focus-visible`.
+- **H-025 · `[C]` MEDIO** — Timeout en cliente Supabase.
+- **H-010 · `[A]` MEDIO** — Rate limiting.
 
-- **H-002 · `[A+B]` ALTO** — Descomponer el monolito `ProductivityPlus.jsx` por dominios. *(ÉPICO)*
-- **H-008 · `[B]` ALTO** — Modal accesible (WCAG AA). *(MEDIO)*
-- **H-010 · `[A]` MEDIO** — Rate limiting en `invite` y endpoints IA. *(MEDIO)*
-- **H-009 · `[B]` MEDIO** — Estrategia global de `:focus-visible`. *(BAJO)*
-
-### Mejoras menores (cuando sobre tiempo)
-
-- **H-011 · `[A]` BAJO** — `getAdminClient()` memoizado.
-- **H-012 · `[A]` BAJO** — Sanitizar HTML del evolutivo antes de persistir.
+### Mejoras menores
+- **H-022 · BAJO** — Constantes de modelo IA centralizadas.
+- **H-012 · BAJO** — Sanitizar HTML del evolutivo.
+- **H-006 · ⚖️** — Gating IA fail-closed en prod.
 
 ---
 
 ## 📜 Historial de auditorías 🤖
 
-| Fecha | Modo | Consenso | Solo A | Solo B | Discrepancias | Cerrados esta ronda | Commits |
-|---|---|---|---|---|---|---|---|
-| 2026-06-19 | DEGRADADO (sin C/Gemini) | 5 | 3 | 3 | 1 | 0 | 96 (repo completo) |
+| Fecha | Modo | A+B+C | Pares | Solo A | Solo B | Solo C | Discrep. | Cerrados | Commits |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-06-19 | DEGRADADO (sin C) | — | 5 (A+B) | 3 | 3 | — | 1 | 0 | 96 (repo) |
+| 2026-06-22 | COMPLETO (A+B+C) | 2 | 2 | 6 | 7 | 2 | 3 | 3 | 1a90dc1..52ca539 |
 
 ---
 
 ## 💬 Comentarios del equipo (editable manualmente)
 
-> Esta sección NO es sobrescrita por SuperAuditor. Úsala para anotar decisiones, postergar deliberadamente un hallazgo, justificar por qué algo se considera "aceptado como riesgo", o anotar por qué le diste la razón a A o a B en una discrepancia.
+> Esta sección NO es sobrescrita por SuperAuditor.
+
+### Sprint pre-escalado — implementado (2026-06-22)
+
+Se atacaron los 6 ALTOS priorizados. Estado por hallazgo:
+
+| Hallazgo | Estado | Cambio |
+|---|---|---|
+| **H-014** concurrencia | ✅ código listo · ⏳ migración pendiente de aplicar | `migrations/029_task_id_sequence.sql`: `claim_task_id()` ahora es `SELECT nextval('tasks_id_seq')` (lock-free, sin contención cross-tenant ni broadcast). Frontend: el id se reserva **al guardar**, no al abrir el formulario (`openNew`/`save` en `ProductivityPlus.jsx`). |
+| **H-013** webhook fail-open | ✅ listo | `api/mp-webhook.js`: sin `MP_WEBHOOK_SECRET` → 503 (fail-closed). Escape solo para dev con `ALLOW_MP_WEBHOOK_WITHOUT_SECRET=true`. |
+| **H-017** IDOR sessionId | ✅ listo | `api/chat-stream.js`: la sesión entrante se valida contra `project_id` + `owner_user_id`. |
+| **H-019** checkout sin admin | ✅ listo | `api/mp-subscribe.js`: valida `SUPABASE_SERVICE_ROLE_KEY` **antes** de crear la preapproval (503 si falta). |
+| **H-007** roles en RLS | ✅ código listo · ⏳ migración pendiente | `migrations/030_role_based_rls.sql`: helper `has_project_role()`; OKRs/key_results escribibles solo por `po`/`scrum_master`, sprints solo por `scrum_master` (owner siempre pasa). Tasks siguen colaborativas. |
+| **H-021 + H-024** validación | ✅ listo | `api/_auth.js`: helpers `requireString`/`requirePositiveInt`/`requireEnum` + `MAX_USER_MESSAGE_CHARS=8000`. Aplicados en `chat-stream.js` (límite 413 antes de persistir/LLM) y `generate-scrum-report.js`. Sin dependencia nueva (no Zod). |
+
+**Pendiente operativo:** aplicar manualmente en Supabase SQL editor las migraciones **029** y **030** (en orden). Verificado: `npm run build` pasa; los errores de `npm run lint` son preexistentes y ajenos a estos cambios.
+
+### H-003 — primera tanda de tests (2026-06-22)
+
+Se introdujo **Vitest** (`npm test`). Cobertura inicial de la lógica de mayor riesgo:
+
+- `src/lib/aporte.test.js` — cálculo de aporte (array + objeto legacy, piso de 1, dimensiones custom) y progreso por subtareas. `calcAporte`/`calcProgressFromSubtasks` se **extrajeron** del monolito a `src/lib/aporte.js` (testeable + primer corte de H-002).
+- `api/mp-webhook.test.js` — verificación de firma HMAC del webhook MP (válida/inválida/secreto incorrecto/replay de otro evento/normalización), `mapStatus`, `parseExternalReference`.
+- `api/_auth.validation.test.js` — helpers `requireString`/`requirePositiveInt`/`requireEnum` (incluye el 413 por tamaño de H-021).
+
+**29 tests, todos en verde.** Pendiente backlog: CI por push y unitarias de gating (RPCs de plan/cuota).
 
 <!-- Escribe aquí libremente -->
 
 ---
 
-*Generado por SuperAuditor v2 — Orquestado por Claude Code, motor B: Codex CLI (OpenAI).*
-*Para regenerar manualmente: `/superauditor` en Claude Code.*
+*Generado por SuperAuditor — Orquestado por Claude Code (A=Opus 4.8). Motor B: Codex CLI (gpt-5.5 xhigh). Motor C: Antigravity CLI (Gemini 3.1 Pro).*
+*Para regenerar: `/superauditor` en Claude Code.*

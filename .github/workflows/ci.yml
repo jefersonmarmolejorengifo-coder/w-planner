@@ -1,0 +1,45 @@
+name: CI
+
+# Corre en cada push a main y en cada PR. Gates obligatorios: tests + build.
+# (H-003 del AUDIT_PLAN: pruebas automatizadas en CI por push.)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancela corridas viejas de la misma rama/PR cuando llega un push nuevo.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests y build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Gate obligatorio: la suite de Vitest debe pasar.
+      - name: Tests (Vitest)
+        run: npm test
+
+      # Gate obligatorio: el bundle de producción debe compilar.
+      - name: Build (Vite)
+        run: npm run build
+
+      # Informativo: el lint tiene hallazgos preexistentes (componentes en
+      # render, setState en efectos) ajenos a este sprint. No bloquea el merge
+      # todavía; se irá limpiando junto con la descomposición del monolito (H-002).
+      - name: Lint (no bloqueante)
+        run: npm run lint
+        continue-on-error: true

@@ -91,6 +91,42 @@ export const fetchWithTimeout = (url, options = {}, timeoutMs = 15000) =>
     signal: options.signal || AbortSignal.timeout(timeoutMs),
   });
 
+// ── Validación ligera de inputs (H-021 tamaño / H-024 esquema) ──
+// Helpers puros sin dependencias para no inflar los bundles ni el runtime edge
+// con Zod/Joi. Lanzan un error con .status para que handleApiError/jsonError lo
+// traduzcan al código correcto (400 inválido, 413 demasiado grande).
+export const MAX_USER_MESSAGE_CHARS = 8000;
+
+export class BadRequestError extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.name = "BadRequestError";
+    this.status = status;
+  }
+}
+
+// Exige string no vacío y acotado. max excedido → 413 (payload too large).
+export const requireString = (value, name, { min = 1, max = 10000, trim = true } = {}) => {
+  if (typeof value !== "string") throw new BadRequestError(`${name} debe ser texto`);
+  const v = trim ? value.trim() : value;
+  if (v.length < min) throw new BadRequestError(`${name} es requerido`);
+  if (v.length > max) throw new BadRequestError(`${name} excede el máximo de ${max} caracteres`, 413);
+  return v;
+};
+
+// Exige entero positivo (ids de proyecto/sesión/etc.).
+export const requirePositiveInt = (value, name) => {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) throw new BadRequestError(`${name} inválido`);
+  return n;
+};
+
+// Exige que value sea uno de los permitidos (enums tipo tier/role).
+export const requireEnum = (value, name, allowed) => {
+  if (!allowed.includes(value)) throw new BadRequestError(`${name} inválido`);
+  return value;
+};
+
 export const getBearerToken = (req) => {
   const auth =
     typeof req.headers?.get === "function"

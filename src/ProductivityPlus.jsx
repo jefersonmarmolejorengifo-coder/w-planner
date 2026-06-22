@@ -4,6 +4,7 @@ import { ALL_PLANS, PLAN_CONTACT_EMAIL } from './plans';
 import Onboarding from './Onboarding';
 import NameCaptureModal from './NameCaptureModal';
 import RoleAssignmentSection from './RoleAssignmentSection';
+import { calcAporte, calcProgressFromSubtasks } from './lib/aporte';
 
 const getAuthJsonHeaders = async () => {
   const { data: { session } } = await supabase.auth.getSession();
@@ -120,32 +121,7 @@ const emptyTask = (id) => ({
   lastModifiedBy: '',
 });
 
-// ─── calcAporte ────────────────────────────────────────────
-// Supports both array dimensions and legacy {tiempo,dificultad,estrategico} object
-const calcAporte = (task, weights) => {
-  if (Array.isArray(weights)) {
-    return weights.reduce((sum, dim) => {
-      const val = dim.key === 'tiempo'      ? (task.estimatedTime  || 1)
-                : dim.key === 'dificultad'  ? (task.difficulty     || 1)
-                : dim.key === 'estrategico' ? (task.strategicValue || 1)
-                : (task.dimensionValues?.[dim.key] ?? 5);
-      return sum + val * (dim.weight || 0);
-    }, 0) / 100;
-  }
-  return ((task.estimatedTime || 1) * (weights.tiempo      || 0) +
-          (task.difficulty    || 1) * (weights.dificultad  || 0) +
-          (task.strategicValue|| 1) * (weights.estrategico || 0)) / 100;
-};
-
-/**
- * Calcula el porcentaje de avance basado en subtareas.
- * Retorna null si no hay subtareas (modo manual).
- */
-const calcProgressFromSubtasks = (subtasks) => {
-  if (!subtasks || subtasks.length === 0) return null;
-  const done = subtasks.filter((s) => s.done).length;
-  return parseFloat(((done / subtasks.length) * 100).toFixed(1));
-};
+// calcAporte / calcProgressFromSubtasks viven ahora en ./lib/aporte (importados arriba).
 
 // ─── StarRating ────────────────────────────────────────────
 function StarRating({ value, onChange, readonly }) {
@@ -1439,36 +1415,12 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
   const [fDateTo, setFDateTo] = useState("");
   const [search, setSearch] = useState("");
 
-  const openNew = async () => {
-    try {
-      // Intentar reservar ID atómicamente en el servidor
-      const { data: claimedId, error } = await supabase.rpc('claim_task_id');
-      
-      if (error) {
-        console.error('[openNew] Error RPC claim_task_id:', error);
-        // Fallback: usar nextId local si el RPC falla
-        console.warn('[openNew] Usando fallback con nextId local:', nextId);
-        setForm(emptyTask(nextId));
-        setModal("new");
-        return;
-      }
-      
-      if (claimedId === null || claimedId === undefined) {
-        console.error('[openNew] RPC retornó null, usando fallback:', nextId);
-        setForm(emptyTask(nextId));
-        setModal("new");
-        return;
-      }
-      
-      console.info('[openNew] ID reservado exitosamente:', claimedId);
-      setForm(emptyTask(claimedId));
-      setModal("new");
-    } catch (err) {
-      console.error('[openNew] Error inesperado:', err);
-      // Fallback seguro
-      setForm(emptyTask(nextId));
-      setModal("new");
-    }
+  const openNew = () => {
+    // El id se reserva al GUARDAR (ver save()), no al abrir, para no quemar ids
+    // de la secuencia ni disparar trabajo en el servidor por cada formulario que
+    // el usuario abre y descarta (H-014). El número definitivo aparece tras guardar.
+    setForm(emptyTask(null));
+    setModal("new");
   };
   const openEdit = async (t) => {
     setForm({ ...t });
@@ -1502,8 +1454,24 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
     if (!form.title.trim()) { alert("El título es obligatorio"); return; }
     setModal(null);
     if (modal === "new") {
+      // Reservar el id atómicamente recién ahora (lock-free vía SEQUENCE, H-014).
+      let id = form.id;
+      if (id == null) {
+        try {
+          const { data: claimedId, error } = await supabase.rpc('claim_task_id');
+          if (error || claimedId == null) {
+            console.warn('[save] claim_task_id falló, usando fallback nextId:', error?.message || claimedId);
+            id = nextId;
+          } else {
+            id = claimedId;
+          }
+        } catch (err) {
+          console.warn('[save] claim_task_id excepción, usando fallback nextId:', err?.message);
+          id = nextId;
+        }
+      }
       const activeDimensions = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;
-      const newTask = { ...form, aporteSnapshot: parseFloat(calcAporte(form, activeDimensions).toFixed(1)) };
+      const newTask = { ...form, id, aporteSnapshot: parseFloat(calcAporte(form, activeDimensions).toFixed(1)) };
       await createTask(newTask);
     } else {
       await updateTask(form);
@@ -1596,7 +1564,7 @@ function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, ind
 
       {modal && form && (
         <Modal
-          title={modal === "new" ? `Nueva tarea #${form.id}` : `Tarea #${form.id} — ${form.title || "Sin título"}`}
+          title={modal === "new" ? `Nueva tarea${form.id != null ? ` #${form.id}` : ""}` : `Tarea #${form.id} — ${form.title || "Sin título"}`}
           onClose={() => setModal(null)}
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}

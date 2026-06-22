@@ -2184,7 +2184,7 @@ function DimensionEditor({ dimensions, setDimensions }) {
         textAlign: "center", background: total === 100 ? "#e8f8ee" : "#fde8e8",
         borderRadius: 8, padding: "8px 12px", fontWeight: 700, transition: "all 0.2s",
       }}>
-        Total: {total}% {total !== 100 && "— debe sumar 100%"}
+        Total: {total}% {total !== 100 && "(debe sumar 100%)"}
       </div>
     </div>
   );
@@ -2539,7 +2539,6 @@ function PremiumPanel({ projectId }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const [showPlans, setShowPlans] = useState(false);
 
   const load = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -2636,47 +2635,17 @@ function PremiumPanel({ projectId }) {
         </div>
 
         {!isPaid && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
-              Activa un plan Pro para habilitar la IA en tus proyectos.
-            </div>
-            <button
-              onClick={() => setShowPlans(true)}
-              style={{
-                background: "linear-gradient(135deg, #ec6c04, #149cac)",
-                color: "#fff", border: "none", borderRadius: 10, padding: "13px 22px",
-                cursor: "pointer", fontSize: 14, fontWeight: 700,
-                boxShadow: "0 6px 18px rgba(236,108,4,0.3)",
-              }}>
-              Ver planes y mejorar ✨
-            </button>
+          <div style={{ fontSize: 13, color: "#666", marginTop: 12 }}>
+            Activa un plan Pro para habilitar la IA en tus tableros. Usa el botón <b>✨ Planes</b> en la barra superior para ver y elegir tu plan.
           </div>
         )}
 
         {isPaid && (
-          <div style={{ fontSize: 12, marginTop: 10, opacity: 0.9, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span>Suscripción activa. Para cancelar o ajustar tu plan, ingresa a tu cuenta de Mercado Pago.</span>
-            <button
-              onClick={() => setShowPlans(true)}
-              style={{
-                background: "rgba(255,255,255,0.15)", color: "#fff",
-                border: "1px solid rgba(255,255,255,0.3)", borderRadius: 8,
-                padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700,
-              }}>
-              Ver planes
-            </button>
+          <div style={{ fontSize: 12, marginTop: 10, opacity: 0.9 }}>
+            Suscripción activa. Para cancelar o ajustar tu plan, ingresa a tu cuenta de Mercado Pago. Puedes ver los planes con el botón <b>✨ Planes</b> de la barra superior.
           </div>
         )}
       </div>
-
-      {showPlans && (
-        <PlanSelectionModal
-          currentTier={tier}
-          busy={busy}
-          onSubscribe={(t) => { setShowPlans(false); subscribe(t); }}
-          onClose={() => setShowPlans(false)}
-        />
-      )}
 
       {/* Card 2: Toggle IA en este proyecto (solo owner) */}
       {isOwner && (
@@ -2733,7 +2702,7 @@ const REPORT_TYPES = [
   {
     key: "scrum",
     title: "Reporte Scrum bi-semanal",
-    desc: "Para el equipo técnico. Operativo, métricas accionables. Por defecto miércoles 8am + viernes 5pm.",
+    desc: "Tu copiloto operativo. Caza tareas atascadas, riesgos de entrega y lo que hay que destrabar hoy, sin que revises el tablero. Llega solo dos veces por semana.",
     icon: "🏃",
     color: "#542c9c",
     model: "Gemini Flash",
@@ -2746,7 +2715,7 @@ const REPORT_TYPES = [
   {
     key: "weekly_po",
     title: "Reporte Semanal para el PO",
-    desc: "Narrativa ejecutiva. Diagnóstico, iniciativas, análisis por persona, recomendaciones. Lunes por defecto.",
+    desc: "Tu radar de decisión. Convierte la semana en un diagnóstico ejecutivo: qué avanzó, qué frenó, cómo rindió cada persona y dónde poner el foco. Listo para reenviar a tu jefe.",
     icon: "📊",
     color: "#0aa0ab",
     model: "Opus 4.7",
@@ -2759,7 +2728,7 @@ const REPORT_TYPES = [
   {
     key: "monthly_team",
     title: "Análisis Mensual del Equipo",
-    desc: "Privado para el PO. Aporte real, ejes, vende-humo, lentos, repetitivos, comparativa con meses anteriores.",
+    desc: "Tu informe confidencial de gestión. Mide el aporte real de cada persona, separa a quien empuja de quien vende humo y compara contra los meses anteriores para mostrarte la tendencia.",
     icon: "🧠",
     color: "#ef7218",
     model: "Opus 4.7",
@@ -3416,7 +3385,7 @@ function ConfigTab({ participants, setParticipants, indicators, setIndicators, t
         {/* Fase D: la lista de participantes se alimenta automáticamente de
             los miembros invitados (project_members) cuando entran y registran
             su nombre. Los ficticios del seed quedan marcados como LEGACY.
-            No hay 'agregar a mano' — se invita por email desde la sección
+            No hay 'agregar a mano': se invita por email desde la sección
             🏗️ Proyecto y el participante se crea solo al registrarse. */}
         <div style={{ fontSize: 12, color: "#666", marginBottom: 14, lineHeight: 1.5, padding: "10px 12px", background: "#faf8ff", borderRadius: 8, border: "1px solid #efe6ff" }}>
           Esta lista se alimenta automáticamente: cuando invitas a alguien por correo (sección <b>🏗️ Proyecto</b>) y se registra, aparece aquí con su nombre real. Los ficticios del proyecto demo o de seeds antiguos quedan marcados como <b>LEGACY</b> y siguen siendo asignables, pero no son cuentas reales.
@@ -4156,6 +4125,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const [myProjects, setMyProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [capacity, setCapacity] = useState(null); // límite de tableros por plan (user_ia_capacity)
+  const [ownerNames, setOwnerNames] = useState({}); // { projectId: nombre del owner que invitó }
   const [deletingProject, setDeletingProject] = useState(null); // project being confirmed for deletion
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deletingBusy, setDeletingBusy] = useState(false);
@@ -4171,6 +4141,30 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
     if (!authUser?.id) { setCapacity(null); return; }
     supabase.rpc('user_ia_capacity').single().then(({ data }) => setCapacity(data || null));
   }, [authUser]);
+
+  // Para los tableros donde soy invitado (no soy owner), resuelve el nombre de
+  // quien me invitó (el owner) leyendo su fila en project_members.
+  useEffect(() => {
+    if (!authUser?.id || myProjects.length === 0) return;
+    const invited = myProjects.filter(p => p.owner_id !== authUser.id);
+    if (invited.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const ids = invited.map(p => p.id);
+      const { data } = await supabase
+        .from('project_members')
+        .select('project_id, name, user_id')
+        .in('project_id', ids);
+      if (cancelled || !data) return;
+      const byProject = {};
+      for (const proj of invited) {
+        const ownerRow = data.find(m => m.project_id === proj.id && m.user_id === proj.owner_id);
+        if (ownerRow?.name) byProject[proj.id] = ownerRow.name;
+      }
+      setOwnerNames(prev => ({ ...prev, ...byProject }));
+    })();
+    return () => { cancelled = true; };
+  }, [authUser, myProjects]);
 
   useEffect(() => {
     if (!authUser) return;
@@ -4441,14 +4435,31 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {myProjects.map(proj => {
                 const isOwner = proj.owner_id === authUser.id;
+                const inviter = ownerNames[proj.id];
+                // Tablero invitado: acento teal + etiqueta de quién invitó, para
+                // distinguirlo de los propios (acento naranja "PROPIETARIO").
                 return (
                   <div key={proj.id} style={{ position: 'relative', display: 'flex', alignItems: 'stretch', gap: 0 }}>
                     <button
                       onClick={() => { localStorage.setItem('pp_project_id', String(proj.id)); onProjectLoaded(proj); }}
-                      style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRight: isOwner ? 'none' : '1px solid rgba(255,255,255,0.12)', borderRadius: isOwner ? '12px 0 0 12px' : 12, padding: '14px 18px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', fontFamily: 'inherit', color: 'inherit' }}>
+                      style={{ flex: 1,
+                        background: isOwner ? 'rgba(255,255,255,0.06)' : 'linear-gradient(135deg, rgba(20,156,172,0.16), rgba(20,156,172,0.06))',
+                        border: isOwner ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(20,156,172,0.45)',
+                        borderRight: isOwner ? 'none' : '1px solid rgba(20,156,172,0.45)',
+                        borderLeft: isOwner ? '1px solid rgba(255,255,255,0.12)' : '3px solid #149cac',
+                        borderRadius: isOwner ? '12px 0 0 12px' : 12, padding: '14px 18px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', fontFamily: 'inherit', color: 'inherit' }}>
                       <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: proj.description ? 3 : 0 }}>{proj.name}</div>
                       {proj.description && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>{proj.description}</div>}
-                      {isOwner && <div style={{ fontSize: 10, color: '#ec6c04', marginTop: 5, fontWeight: 700, letterSpacing: 0.5 }}>PROPIETARIO</div>}
+                      {isOwner ? (
+                        <div style={{ fontSize: 10, color: '#ec6c04', marginTop: 5, fontWeight: 700, letterSpacing: 0.5 }}>PROPIETARIO</div>
+                      ) : (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 7, background: 'rgba(20,156,172,0.18)', border: '1px solid rgba(20,156,172,0.4)', borderRadius: 999, padding: '3px 9px' }}>
+                          <span style={{ fontSize: 10 }}>👥</span>
+                          <span style={{ fontSize: 10, color: '#4dd8e8', fontWeight: 700, letterSpacing: 0.3 }}>
+                            Invitado{inviter ? ` por ${inviter}` : ''}
+                          </span>
+                        </div>
+                      )}
                     </button>
                     {isOwner && (
                       <button
@@ -4462,9 +4473,16 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
                 );
               })}
             </div>
-            <div style={{ textAlign: 'center', margin: '16px 0 4px', fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>— o crea / únete a otro proyecto —</div>
+            <div style={{ textAlign: 'center', margin: '16px 0 4px', fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>o crea o únete a otro proyecto</div>
           </div>
         ) : null)}
+
+        {/* Compra de plan visible antes de crear un tablero */}
+        {authUser && (
+          <div style={{ marginBottom: 18 }}>
+            <PlansLauncher variant="landing" />
+          </div>
+        )}
 
         {/* Card */}
         <div style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "32px 28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
@@ -7076,12 +7094,12 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
   if (canUse === false) {
     return (
       <div style={{ padding: 40, textAlign: "center", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
-        <div style={{ fontSize: 56, marginBottom: 14 }}>🏢</div>
+        <div style={{ fontSize: 56, marginBottom: 14 }}>🤖</div>
         <h3 style={{ margin: "0 0 8px 0", color: "#542c9c" }}>Chat IA en vivo</h3>
         <p style={{ color: "#666", fontSize: 14, maxWidth: 540, margin: "0 auto 16px" }}>
           Conversación en tiempo real con la IA cargada con tarjetas profesionales del equipo, reportes recientes y estado de tareas. Pregunta lo que quieras: "¿quién está sobrecargado?", "arma una célula para X", "¿por qué Diego se atrasa?".
         </p>
-        <p style={{ color: "#999", fontSize: 12 }}>Esta feature requiere plan <b>Enterprise</b>.</p>
+        <p style={{ color: "#999", fontSize: 12 }}>Esta función está incluida en el plan <b>Pro Power</b>.</p>
       </div>
     );
   }
@@ -7090,9 +7108,9 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
     <div style={{ padding: 4 }}>
       <div style={{ background: "linear-gradient(135deg, #1e1e3a 0%, #542c9c 100%)", borderRadius: 12, padding: 20, marginBottom: 14, color: "#fff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 28 }}>🏢</div>
+          <div style={{ fontSize: 28 }}>🤖</div>
           <div style={{ flex: 1 }}>
-            <h2 style={{ margin: "0 0 4px 0", fontSize: 20, fontWeight: 700 }}>Chat IA en vivo (Enterprise)</h2>
+            <h2 style={{ margin: "0 0 4px 0", fontSize: 20, fontWeight: 700 }}>Chat IA en vivo</h2>
             <p style={{ margin: 0, opacity: 0.85, fontSize: 13 }}>
               Conversa con tu consultor de talento. Tiene cargados los últimos 2 reportes mensuales, el último evolutivo y el estado actual del proyecto.
             </p>
@@ -7131,7 +7149,7 @@ function ChatEnterpriseTab({ projectId, isOwner }) {
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                 disabled={streaming || (quota && quota.remaining <= 0)}
                 placeholder={quota && quota.remaining <= 0
-                  ? "Cuota mensual alcanzada — se renueva el 1 del próximo mes"
+                  ? "Cuota mensual alcanzada, se renueva el 1 del próximo mes"
                   : "Pregunta sobre tu equipo... (Enter para enviar, Shift+Enter para nueva línea)"}
                 style={{ flex: 1, minHeight: 60, maxHeight: 200, padding: 10, border: "1px solid #ddd", borderRadius: 8, fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
               />
@@ -7891,6 +7909,108 @@ function PlanSelectionModal({ currentTier, busy, onSubscribe, onClose }) {
   );
 }
 
+// Selector de tours guiados. Permite, después del onboarding automático, ver
+// el onboarding de cualquier rol (PO / Scrum Master / Participante). onPick
+// recibe el rol elegido (null = el tour del rol propio del usuario).
+function TourMenu({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const items = [
+    { role: null, label: "Mi tour guiado" },
+    { role: "po", label: "Tour de Product Owner" },
+    { role: "scrum_master", label: "Tour de Scrum Master" },
+    { role: "participant", label: "Tour de Participante" },
+  ];
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen(o => !o)} title="Ver tours guiados" style={{ background: "rgba(20,156,172,0.15)", border: "1px solid rgba(20,156,172,0.4)", color: "#4dd8e8", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 10, fontWeight: 600, fontFamily: "inherit" }}>
+        🎓 Tour ▾
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 9998 }} />
+          <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, background: "#1a1a2e", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 6, zIndex: 9999, minWidth: 210, boxShadow: "0 8px 28px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: 1, padding: "4px 8px 6px" }}>Ver onboarding</div>
+            {items.map(it => (
+              <button key={it.label} onClick={() => { setOpen(false); onPick(it.role); }}
+                style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", color: "rgba(255,255,255,0.85)", padding: "8px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                {it.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Lanzador reutilizable de la pantalla de selección de planes + checkout de
+// Mercado Pago. Se usa en el header (junto a notificaciones) y en el landing
+// (antes de crear un tablero). Encapsula el estado del modal, el tier actual y
+// el disparo del pago, para que la compra viva fuera de Configuración.
+function PlansLauncher({ variant = "header" }) {
+  const [open, setOpen] = useState(false);
+  const [currentTier, setCurrentTier] = useState("free");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.rpc("user_ia_capacity").single().then(({ data }) => {
+      if (!cancelled && data?.tier) setCurrentTier(data.tier);
+    });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  const subscribe = async (tier) => {
+    setBusy(true);
+    try {
+      const headers = await getAuthJsonHeaders();
+      const res = await fetch("/api/mp-subscribe", { method: "POST", headers, body: JSON.stringify({ tier }) });
+      const data = await res.json();
+      if (!res.ok || !data.init_point) throw new Error(data.error || `HTTP ${res.status}`);
+      window.location.assign(data.init_point);
+    } catch (err) {
+      setBusy(false);
+      alert("No se pudo iniciar el pago: " + err.message);
+    }
+  };
+
+  const trigger = variant === "landing" ? (
+    <button onClick={() => setOpen(true)} style={{
+      width: "100%", background: "linear-gradient(135deg, #ec6c04, #149cac)", color: "#fff",
+      border: "none", borderRadius: 12, padding: "14px 18px", cursor: "pointer",
+      fontSize: 14, fontWeight: 700, boxShadow: "0 6px 18px rgba(236,108,4,0.3)",
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit",
+    }}>
+      ✨ Ver planes y desbloquear la IA
+    </button>
+  ) : (
+    <button onClick={() => setOpen(true)} title="Ver planes y mejorar" style={{
+      background: "linear-gradient(135deg, #ec6c04, #f5a623)", color: "#fff",
+      border: "none", borderRadius: 6, padding: "6px 12px", cursor: "pointer",
+      fontSize: 12, fontWeight: 700, lineHeight: 1, boxShadow: "0 2px 10px rgba(236,108,4,0.35)",
+      display: "flex", alignItems: "center", gap: 5, fontFamily: "inherit",
+    }}>
+      ✨ Planes
+    </button>
+  );
+
+  return (
+    <>
+      {trigger}
+      {open && (
+        <PlanSelectionModal
+          currentTier={currentTier}
+          busy={busy}
+          onSubscribe={(t) => { setOpen(false); subscribe(t); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
 // Overlay de retorno de pago de Mercado Pago. MP redirige al usuario a
 // `/?billing=return` (ver api/mp-subscribe.js). El webhook que activa la
 // suscripción puede tardar unos segundos, así que sondeamos `user_ia_capacity`
@@ -7985,7 +8105,7 @@ function BillingReturnOverlay() {
             <div style={{ fontSize: 48, marginBottom: 8 }}>⏳</div>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>Tu pago se está procesando</div>
             <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
-              Mercado Pago aún no confirma el cobro. Suele reflejarse en unos minutos —
+              Mercado Pago aún no confirma el cobro. Suele reflejarse en unos minutos,
               <strong style={{ color: "#fff" }}> no necesitas pagar de nuevo</strong>. Tu plan aparecerá en Configuración cuando se confirme.
             </div>
             <button onClick={close} style={{
@@ -8008,6 +8128,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(null);
   const [forceTour, setForceTour] = useState(false);
+  const [forceTourRole, setForceTourRole] = useState(null); // rol elegido en el selector de tours (null = mi rol)
   // myRole: rol del usuario en el proyecto actual (po / scrum_master / participant).
   // null mientras carga o si no es miembro. Usado para gating de tabs en Fase B.
   const [myRole, setMyRole] = useState(null);
@@ -8824,7 +8945,7 @@ export default function App() {
     { id: "focus",        label: "Mi Día",               allowedRoles: ["po","scrum_master","participant"] },
     { id: "presentation", label: "Presentación",         allowedRoles: ["po","scrum_master"] },
     { id: "evolution",    label: "Evolutivo 💎",         allowedRoles: ["po"] },
-    { id: "chat",         label: "Chat IA 🏢",            allowedRoles: ["po"] },
+    { id: "chat",         label: "Chat IA 🤖",            allowedRoles: ["po"] },
     { id: "pulse",        label: "Pulso del equipo 🌡",  allowedRoles: ["po","scrum_master"] },
     { id: "config",       label: "Configuración",        allowedRoles: [] },  // solo owner
   ];
@@ -9019,15 +9140,15 @@ export default function App() {
         )}
         {authUser && (
           <>
-            <button onClick={() => setForceTour(true)} title="Volver a ver el tour guiado" style={{ background:"rgba(20,156,172,0.15)", border:"1px solid rgba(20,156,172,0.4)", color:"#4dd8e8", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontSize:10, fontWeight:600 }}>
-              🎓 Tour
-            </button>
+            <TourMenu onPick={(r) => { setForceTourRole(r); setForceTour(true); }} />
             <button onClick={() => supabase.auth.signOut()} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.4)", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontSize:10, fontWeight:500 }}>
               Salir
             </button>
           </>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Planes / mejorar (a la izquierda de las notificaciones) */}
+          {authUser && <PlansLauncher variant="header" />}
           {/* Notifications bell */}
           <div style={{ position: "relative" }}>
             <button
@@ -9191,9 +9312,11 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         forceOpen={forceTour}
-        onForceHandled={() => setForceTour(false)}
+        forceRole={forceTourRole}
+        onForceHandled={() => { setForceTour(false); setForceTourRole(null); }}
         enabled={!showProjectLanding && !loading && !!projectId}
         projectId={projectId}
+        isOwner={isOwnerOfProject}
       />
     </>
   );

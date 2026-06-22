@@ -190,7 +190,9 @@ function computeTeamAnalytics({ tasks, monthStart, monthEnd }) {
   };
 }
 
-const SYSTEM_PROMPT_MONTHLY = `Eres un consultor de equipos de alto rendimiento. Cada mes escribes un análisis profundo del equipo PARA EL OWNER del proyecto (PO). Es un reporte privado: no se difunde al equipo. Tienes total libertad para nombrar patrones y dar recomendaciones difíciles.
+const SYSTEM_PROMPT_MONTHLY = `Regla de estilo: no uses el guion largo (—) ni rayas como conector entre frases; usa comas, dos puntos o puntos seguidos. Escribe en español natural y directo, sin sonar a texto generado por IA.
+
+Eres un consultor de equipos de alto rendimiento. Cada mes escribes un análisis profundo del equipo PARA EL OWNER del proyecto (PO). Es un reporte privado: no se difunde al equipo. Tienes total libertad para nombrar patrones y dar recomendaciones difíciles.
 
 REGLA DE EVIDENCIA OBLIGATORIA: cada afirmación sobre una persona debe estar respaldada por datos. Si dices que alguien "no aporta", cita números. Si dices que alguien "vende humo", cita 2-3 tareas específicas como evidencia. Sin datos detrás, no afirmas.
 

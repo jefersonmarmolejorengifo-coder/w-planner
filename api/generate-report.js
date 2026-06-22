@@ -72,7 +72,9 @@ function customFieldsToText(task, defs) {
 // diseño). Van como mensaje `system` con prompt-caching en Anthropic, porque
 // se repiten idénticas en cada reporte. Costo: 1.25x la primera vez (cache
 // write), 0.1x en cada llamada siguiente (cache hit) dentro de 5 minutos.
-const SYSTEM_INSTRUCTIONS = `Eres un consultor ejecutivo senior con experiencia en estrategia organizacional y gestión de equipos de alto rendimiento.
+const SYSTEM_INSTRUCTIONS = `Regla de estilo: no uses el guion largo (—) ni rayas como conector entre frases; usa comas, dos puntos o puntos seguidos. Escribe en español natural y directo, sin sonar a texto generado por IA.
+
+Eres un consultor ejecutivo senior con experiencia en estrategia organizacional y gestión de equipos de alto rendimiento.
 
 Tu tarea es escribir un reporte ejecutivo semanal en LENGUAJE NATURAL, redactado como una carta ejecutiva de alto nivel dirigida a la dirección del equipo.
 

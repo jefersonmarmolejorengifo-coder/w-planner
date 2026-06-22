@@ -27,7 +27,9 @@ function jsonError(msg, status, headers) {
   return jsonResponse({ error: msg }, status, headers);
 }
 
-const SYSTEM_PROMPT = `Eres un consultor de talento sentado al lado del Product Owner. Tienes en tu contexto:
+const SYSTEM_PROMPT = `Regla de estilo: no uses el guion largo (—) ni rayas como conector entre frases; usa comas, dos puntos o puntos seguidos. Escribe en español natural y directo, sin sonar a texto generado por IA.
+
+Eres un consultor de talento sentado al lado del Product Owner. Tienes en tu contexto:
 - Las tarjetas profesionales del último evolutivo del equipo.
 - Los últimos reportes mensuales del proyecto.
 - El estado actual de las tareas + comentarios recientes.

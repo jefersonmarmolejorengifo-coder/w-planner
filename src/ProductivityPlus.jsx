@@ -4087,6 +4087,7 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
   const [capacity, setCapacity] = useState(null);
   const [boards, setBoards] = useState([]);     // [{ project, total, done, blocked, inProgress, notStarted, donePct, overdue, top, people }]
   const [reports, setReports] = useState([]);   // report_history rows
+  const [distinctPeople, setDistinctPeople] = useState(0); // personas distintas (global, server-side)
   const [openReport, setOpenReport] = useState(null);
   const [section, setSection] = useState("overview"); // 'overview' | 'reports'
 
@@ -4104,42 +4105,42 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
       const projList = projs || [];
       const ids = projList.map(p => p.id);
 
-      let taskRows = [], reportRows = [], sprintRows = [], okrRows = [];
+      let reportRows = [], byBoard = [], distinctPeopleCount = 0;
       if (ids.length) {
-        const [{ data: tk }, { data: rh }, { data: sp }, { data: ok }] = await Promise.all([
-          supabase.from("tasks").select("project_id, status, responsible, aporte_snapshot, end_date").in("project_id", ids),
+        // H-015: los KPIs por tablero se agregan en el SERVIDOR (RPC) en vez de
+        // traer todas las tareas al cliente. report_history se sigue cargando
+        // (volumen bajo) para la pestaña de reportes y el conteo por tablero.
+        const [{ data: overview }, { data: rh }] = await Promise.all([
+          supabase.rpc("owner_boards_overview"),
           supabase.from("report_history").select("id, project_id, report_type, period_start, period_end, generated_at, plain_text, model_used").in("project_id", ids).order("generated_at", { ascending: false }),
-          supabase.from("sprints").select("project_id, name, status").in("project_id", ids),
-          supabase.from("okrs").select("project_id, status").in("project_id", ids),
         ]);
-        taskRows = tk || []; reportRows = rh || []; sprintRows = sp || []; okrRows = ok || [];
+        reportRows = rh || [];
+        const ov = overview || {};
+        distinctPeopleCount = ov.distinct_people || 0;
+        const projById = Object.fromEntries(projList.map(p => [p.id, p]));
+        byBoard = (ov.boards || []).map(bd => {
+          const p = projById[bd.project_id] || { id: bd.project_id, name: bd.name, description: bd.description, ia_enabled: bd.ia_enabled };
+          const total = bd.total || 0, done = bd.done || 0;
+          const top = Array.isArray(bd.top) ? bd.top : [];
+          return {
+            project: p, total, done,
+            blocked: bd.blocked || 0, inProgress: bd.in_progress || 0,
+            notStarted: bd.not_started || 0, overdue: bd.overdue || 0,
+            donePct: total ? Math.round(done / total * 100) : 0,
+            peopleCount: bd.people_count || 0,
+            top: top[0]?.name || null,
+            top2: top.map(x => ({ name: x.name, ap: Number(x.ap) || 0 })),
+            activeSprint: bd.active_sprint || null,
+            okrCount: bd.okr_count || 0,
+            reportCount: reportRows.filter(r => r.project_id === bd.project_id).length,
+          };
+        });
       }
       if (cancelled) return;
 
-      const today = new Date().toISOString().slice(0, 10);
-      const byBoard = projList.map(p => {
-        const ts = taskRows.filter(t => t.project_id === p.id);
-        const total = ts.length;
-        const done = ts.filter(t => t.status === TASK_DONE).length;
-        const blocked = ts.filter(t => t.status === TASK_BLOCKED).length;
-        const notStarted = ts.filter(t => t.status === "Sin iniciar").length;
-        const inProgress = total - done - blocked - notStarted;
-        const overdue = ts.filter(t => t.status !== TASK_DONE && t.end_date && t.end_date < today).length;
-        const people = new Set(ts.map(t => t.responsible).filter(Boolean));
-        const aporteBy = {};
-        ts.forEach(t => { if (t.responsible) aporteBy[t.responsible] = (aporteBy[t.responsible] || 0) + (Number(t.aporte_snapshot) || 0); });
-        const ranked = Object.entries(aporteBy).sort((a, b) => b[1] - a[1]);
-        const top2 = ranked.slice(0, 2).map(([name, ap]) => ({ name, ap }));
-        const activeSprint = (sprintRows.find(sp => sp.project_id === p.id && sp.status === "active") || {}).name || null;
-        const okrCount = okrRows.filter(o => o.project_id === p.id && o.status === "active").length;
-        const reportCount = reportRows.filter(r => r.project_id === p.id).length;
-        return { project: p, total, done, blocked, inProgress, notStarted, overdue,
-          donePct: total ? Math.round(done / total * 100) : 0, people, top: ranked[0]?.[0] || null,
-          top2, activeSprint, okrCount, reportCount };
-      });
-
       setBoards(byBoard);
       setReports(reportRows);
+      setDistinctPeople(distinctPeopleCount);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -4151,7 +4152,6 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
   const g = boards.reduce((a, b) => ({
     tasks: a.tasks + b.total, done: a.done + b.done, blocked: a.blocked + b.blocked, overdue: a.overdue + b.overdue,
   }), { tasks: 0, done: 0, blocked: 0, overdue: 0 });
-  const allPeople = new Set(boards.flatMap(b => [...b.people]));
   const globalPct = g.tasks ? Math.round(g.done / g.tasks * 100) : 0;
 
   const health = (b) => {
@@ -4218,7 +4218,7 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
             {kpi("Avance global", `${globalPct}%`, "#27ae60")}
             {kpi("Bloqueadas", g.blocked, g.blocked ? "#e74c3c" : "#fff")}
             {kpi("Vencidas", g.overdue, g.overdue ? "#f5a623" : "#fff")}
-            {kpi("Personas", allPeople.size, "#bb8fff")}
+            {kpi("Personas", distinctPeople, "#bb8fff")}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
@@ -4261,7 +4261,7 @@ function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <span>🎯 {b.okrCount} OKR{b.okrCount === 1 ? "" : "s"} activo{b.okrCount === 1 ? "" : "s"}</span>
-                      <span>👥 {b.people.size} personas</span>
+                      <span>👥 {b.peopleCount} personas</span>
                       <span>📄 {b.reportCount} reporte{b.reportCount === 1 ? "" : "s"}</span>
                     </div>
                   </div>
@@ -8974,9 +8974,34 @@ export default function App() {
       delete dbTask.custom_fields;
       delete dbTask.last_modified_by;
     }
+    // Optimistic concurrency (H-016): la actualización solo aplica si la fila no
+    // cambió desde que se cargó (mismo updated_at). Evita lost updates cuando dos
+    // personas editan la misma tarjeta a la vez. Si updatedAt no está disponible
+    // (BD sin migración 008), se omite el guard y se mantiene el comportamiento previo.
+    const prevUpdatedAt = task.updatedAt;
     let updateQuery = supabase.from('tasks').update(dbTask).eq('id', task.id);
     if (projectId) updateQuery = updateQuery.eq('project_id', projectId);
-    const { error } = await updateQuery;
+    if (prevUpdatedAt) updateQuery = updateQuery.eq('updated_at', prevUpdatedAt);
+    const { data: updatedRows, error } = await updateQuery.select();
+
+    // Conflicto: con guard activo, 0 filas afectadas significa que el updated_at
+    // ya no coincide → otra persona modificó (o borró) la tarjeta. Recargamos la
+    // versión del servidor y avisamos, sin pisar los cambios ajenos.
+    if (!error && prevUpdatedAt && (!updatedRows || updatedRows.length === 0)) {
+      let freshQuery = supabase.from('tasks').select('*').eq('id', task.id);
+      if (projectId) freshQuery = freshQuery.eq('project_id', projectId);
+      const { data: freshRow } = await freshQuery.maybeSingle();
+      if (freshRow) {
+        const fresh = dbToTask(freshRow);
+        setTasks(prev => prev.map(t => t.id === task.id ? fresh : t));
+        alert('Esta tarjeta fue modificada por otra persona mientras la editabas. Se recargó con la versión más reciente; vuelve a abrirla para reaplicar tus cambios.');
+      } else {
+        setTasks(prev => prev.filter(t => t.id !== task.id));
+        alert('Esta tarjeta fue eliminada por otra persona mientras la editabas.');
+      }
+      return;
+    }
+
     if (!error) {
       // Log significant field changes to task_history
       if (projectId && activeUser) {
@@ -9024,7 +9049,11 @@ export default function App() {
           }
         }
       }
-      setTasks(prev => prev.map(t => t.id === task.id ? task : t));
+      // Refresca updatedAt local desde la fila devuelta para que ediciones
+      // sucesivas en la misma sesión no choquen con un updated_at obsoleto.
+      const newUpdatedAt = updatedRows?.[0]?.updated_at || task.updatedAt;
+      const merged = { ...task, updatedAt: newUpdatedAt };
+      setTasks(prev => prev.map(t => t.id === task.id ? merged : t));
     } else {
       console.error('Error actualizando tarea:', error);
       alert('Error al actualizar la tarea: ' + error.message);

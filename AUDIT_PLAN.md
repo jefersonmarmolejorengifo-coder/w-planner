@@ -204,6 +204,15 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 3 — concurrencia y datos (rama `fix/superauditor-sprint-3`)
+
+| Hallazgo | Estado | Cambio |
+|---|---|---|
+| **H-016** lost updates | ✅ listo | `updateTask` aplica optimistic concurrency: el UPDATE filtra por `updated_at` cargado; si 0 filas → recarga la versión del servidor y avisa sin pisar (o detecta borrado). Refresca `updatedAt` local tras guardar. Sin migración (el trigger `set_task_auto_fields` ya bumpea `updated_at`). |
+| **H-015** dashboard cliente | ✅ código listo · ⏳ migración pendiente | `migrations/032`: RPC `owner_boards_overview()` agrega los KPIs por tablero en SQL y devuelve JSONB compacto (antes traía todas las tareas de todos los tableros). `ConsolidatedDashboard` consume el RPC; report_history se sigue cargando (volumen bajo) para la pestaña de reportes. |
+
+Pendiente operativo: aplicar **migración 032**. `npm test` 37/37 ✅, build ✅.
+
 ### Sprint pre-escalado — implementado (2026-06-22)
 
 Se atacaron los 6 ALTOS priorizados. Estado por hallazgo:

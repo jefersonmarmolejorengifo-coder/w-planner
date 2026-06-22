@@ -4109,6 +4109,225 @@ function IntroScreen({ onFinish }) {
 }
 
 // ─── ProjectLandingScreen ──────────────────────────────────
+// ─── Visión consolidada (dashboard del dueño) ─────────────────
+// Agrega el análisis de TODOS los tableros del dueño en una sola vista. Solo
+// para cuentas de pago (capacity.tier != 'free' y status active). Incluye una
+// sesión de "Reportes IA" que lista y muestra los reportes archivados
+// (report_history) de cada tablero. RLS: el dueño solo ve sus propios tableros.
+const REPORT_TYPE_LABEL = { scrum: "Scrum", weekly_po: "Semanal PO", monthly_team: "Mensual Equipo" };
+const TASK_DONE = "Finalizada", TASK_BLOCKED = "Bloqueada";
+
+function ConsolidatedDashboard({ authUser, onClose, onOpenProject }) {
+  const [loading, setLoading] = useState(true);
+  const [capacity, setCapacity] = useState(null);
+  const [boards, setBoards] = useState([]);     // [{ project, total, done, blocked, inProgress, notStarted, donePct, overdue, top, people }]
+  const [reports, setReports] = useState([]);   // report_history rows
+  const [openReport, setOpenReport] = useState(null);
+  const [section, setSection] = useState("overview"); // 'overview' | 'reports'
+
+  useEffect(() => {
+    if (!authUser?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data: cap } = await supabase.rpc("user_ia_capacity").single();
+      if (cancelled) return;
+      setCapacity(cap || null);
+
+      const { data: projs } = await supabase
+        .from("projects").select("id, name, description, ia_enabled")
+        .eq("owner_id", authUser.id).order("id");
+      const projList = projs || [];
+      const ids = projList.map(p => p.id);
+
+      let taskRows = [], reportRows = [];
+      if (ids.length) {
+        const [{ data: tk }, { data: rh }] = await Promise.all([
+          supabase.from("tasks").select("project_id, status, responsible, aporte_snapshot, end_date").in("project_id", ids),
+          supabase.from("report_history").select("id, project_id, report_type, period_start, period_end, generated_at, plain_text, model_used").in("project_id", ids).order("generated_at", { ascending: false }),
+        ]);
+        taskRows = tk || []; reportRows = rh || [];
+      }
+      if (cancelled) return;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const byBoard = projList.map(p => {
+        const ts = taskRows.filter(t => t.project_id === p.id);
+        const total = ts.length;
+        const done = ts.filter(t => t.status === TASK_DONE).length;
+        const blocked = ts.filter(t => t.status === TASK_BLOCKED).length;
+        const notStarted = ts.filter(t => t.status === "Sin iniciar").length;
+        const inProgress = total - done - blocked - notStarted;
+        const overdue = ts.filter(t => t.status !== TASK_DONE && t.end_date && t.end_date < today).length;
+        const people = new Set(ts.map(t => t.responsible).filter(Boolean));
+        const aporteBy = {};
+        ts.forEach(t => { if (t.responsible) aporteBy[t.responsible] = (aporteBy[t.responsible] || 0) + (Number(t.aporte_snapshot) || 0); });
+        const top = Object.entries(aporteBy).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+        return { project: p, total, done, blocked, inProgress, notStarted, overdue, donePct: total ? Math.round(done / total * 100) : 0, people, top };
+      });
+
+      setBoards(byBoard);
+      setReports(reportRows);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [authUser]);
+
+  const isPaid = capacity && capacity.tier !== "free" && capacity.status === "active";
+
+  // Totales globales
+  const g = boards.reduce((a, b) => ({
+    tasks: a.tasks + b.total, done: a.done + b.done, blocked: a.blocked + b.blocked, overdue: a.overdue + b.overdue,
+  }), { tasks: 0, done: 0, blocked: 0, overdue: 0 });
+  const allPeople = new Set(boards.flatMap(b => [...b.people]));
+  const globalPct = g.tasks ? Math.round(g.done / g.tasks * 100) : 0;
+
+  const health = (b) => {
+    if (!b.total) return { c: "#7a8aa0", t: "Sin datos" };
+    if (b.blocked / b.total > 0.2) return { c: "#e74c3c", t: "En riesgo" };
+    if (b.donePct < 30) return { c: "#f5a623", t: "Arrancando" };
+    return { c: "#27ae60", t: "Saludable" };
+  };
+
+  const Shell = ({ children }) => (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100002, background: "radial-gradient(1200px 600px at 50% -10%, rgba(20,156,172,0.18), rgba(8,8,18,0.97) 60%)", overflowY: "auto", padding: "40px 20px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
+      <div style={{ maxWidth: 1120, margin: "0 auto", position: "relative" }}>
+        <button onClick={onClose} style={{ position: "absolute", top: -10, right: 0, width: 38, height: 38, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.04)", color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+        {children}
+      </div>
+    </div>
+  );
+
+  if (loading) return <Shell><div style={{ color: "rgba(255,255,255,0.6)", textAlign: "center", padding: 80 }}>Cargando visión consolidada…</div></Shell>;
+
+  if (!isPaid) {
+    return (
+      <Shell>
+        <div style={{ textAlign: "center", padding: "60px 20px", color: "#fff" }}>
+          <div style={{ fontSize: 46, marginBottom: 14 }}>📊</div>
+          <h2 style={{ fontSize: 26, fontWeight: 800, margin: "0 0 10px" }}>Visión consolidada</h2>
+          <p style={{ color: "rgba(255,255,255,0.6)", maxWidth: 460, margin: "0 auto 22px", lineHeight: 1.6 }}>
+            Reúne el análisis de todos tus tableros en una sola pantalla: avance global, bloqueos, aportantes clave y los reportes de IA de cada equipo. Disponible en los planes de pago.
+          </p>
+          <button onClick={onClose} style={{ background: "linear-gradient(135deg, #ec6c04, #149cac)", color: "#fff", border: "none", borderRadius: 10, padding: "12px 24px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+            Volver y ver planes (✨ en la barra superior)
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  const card = { background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 16, padding: 18, color: "#fff" };
+  const kpi = (label, value, accent) => (
+    <div style={{ ...card, textAlign: "center", padding: "16px 12px" }}>
+      <div style={{ fontSize: 30, fontWeight: 800, color: accent || "#fff", letterSpacing: -1 }}>{value}</div>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: 1, marginTop: 4 }}>{label}</div>
+    </div>
+  );
+
+  return (
+    <Shell>
+      <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, letterSpacing: 4, textTransform: "uppercase", marginBottom: 10 }}>Plan {capacity.display_name} · Dueño</div>
+      <h2 style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1, margin: "0 0 4px", color: "#fff" }}>Visión consolidada</h2>
+      <p style={{ color: "rgba(255,255,255,0.55)", margin: "0 0 22px", fontSize: 14 }}>El pulso de tus {boards.length} tableros en una sola pantalla.</p>
+
+      {/* Tabs de sesión */}
+      <div style={{ display: "inline-flex", gap: 0, background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: 4, marginBottom: 22 }}>
+        {[["overview", "Resumen"], ["reports", `Reportes IA${reports.length ? ` (${reports.length})` : ""}`]].map(([id, label]) => (
+          <button key={id} onClick={() => setSection(id)} style={{ background: section === id ? "rgba(20,156,172,0.9)" : "transparent", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", cursor: "pointer", fontSize: 13, fontWeight: section === id ? 700 : 500, fontFamily: "inherit" }}>{label}</button>
+        ))}
+      </div>
+
+      {section === "overview" && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 22 }}>
+            {kpi("Tableros", boards.length, "#4dd8e8")}
+            {kpi("Tareas", g.tasks)}
+            {kpi("Avance global", `${globalPct}%`, "#27ae60")}
+            {kpi("Bloqueadas", g.blocked, g.blocked ? "#e74c3c" : "#fff")}
+            {kpi("Vencidas", g.overdue, g.overdue ? "#f5a623" : "#fff")}
+            {kpi("Personas", allPeople.size, "#bb8fff")}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+            {boards.map(b => {
+              const h = health(b);
+              return (
+                <div key={b.project.id} style={{ ...card, cursor: "pointer", transition: "transform .15s, border-color .15s" }}
+                  onClick={() => onOpenProject?.(b.project)}
+                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.borderColor = "rgba(20,156,172,0.5)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"; }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 10 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>{b.project.name}</div>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: h.c, whiteSpace: "nowrap" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: h.c }} />{h.t}
+                    </span>
+                  </div>
+                  <div style={{ height: 7, background: "rgba(255,255,255,0.08)", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
+                    <div style={{ width: `${b.donePct}%`, height: "100%", background: "linear-gradient(90deg, #149cac, #27ae60)" }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                    <span><b style={{ color: "#fff" }}>{b.donePct}%</b> · {b.done}/{b.total} tareas</span>
+                    {b.blocked > 0 && <span style={{ color: "#f87171" }}>{b.blocked} bloq.</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 10 }}>
+                    <span style={{ background: "rgba(255,255,255,0.06)", borderRadius: 999, padding: "3px 8px", color: "rgba(255,255,255,0.7)" }}>👥 {b.people.size} personas</span>
+                    {b.top && <span style={{ background: "rgba(39,174,96,0.16)", borderRadius: 999, padding: "3px 8px", color: "#7ee2a8" }}>⭐ {b.top}</span>}
+                    {b.overdue > 0 && <span style={{ background: "rgba(245,166,35,0.16)", borderRadius: 999, padding: "3px 8px", color: "#f5c97a" }}>{b.overdue} vencidas</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {section === "reports" && (
+        <div>
+          {reports.length === 0 ? (
+            <div style={{ ...card, textAlign: "center", padding: 40, color: "rgba(255,255,255,0.55)" }}>
+              Aún no hay reportes de IA archivados. Se generan automáticamente según la cadencia configurada en cada tablero y aparecerán aquí.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {boards.filter(b => reports.some(r => r.project_id === b.project.id)).map(b => (
+                <div key={b.project.id} style={card}>
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: "#4dd8e8" }}>{b.project.name}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {reports.filter(r => r.project_id === b.project.id).map(r => (
+                      <button key={r.id} onClick={() => setOpenReport(r)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 9, padding: "10px 12px", cursor: "pointer", textAlign: "left", color: "#fff", fontFamily: "inherit" }}>
+                        <span style={{ fontSize: 12.5 }}>
+                          <b>{REPORT_TYPE_LABEL[r.report_type] || r.report_type}</b>
+                          <span style={{ color: "rgba(255,255,255,0.45)" }}> · {r.period_start} a {r.period_end}</span>
+                        </span>
+                        <span style={{ fontSize: 11, color: "#4dd8e8", whiteSpace: "nowrap" }}>Ver →</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {openReport && (
+        <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, zIndex: 100003, background: "rgba(5,5,14,0.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#14141f", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, maxWidth: 760, width: "100%", maxHeight: "85vh", overflowY: "auto", padding: 26, color: "#fff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{REPORT_TYPE_LABEL[openReport.report_type] || openReport.report_type}</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{openReport.period_start} a {openReport.period_end}{openReport.model_used ? ` · ${openReport.model_used}` : ""}</div>
+              </div>
+              <button onClick={() => setOpenReport(null)} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>Cerrar</button>
+            </div>
+            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", margin: 0 }}>{openReport.plain_text || "(Sin texto archivado)"}</pre>
+          </div>
+        </div>
+      )}
+    </Shell>
+  );
+}
+
 function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const [tab, setTab] = useState('join'); // 'create' | 'join' | 'template'
   const [creating, setCreating] = useState(false);
@@ -4126,6 +4345,7 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [capacity, setCapacity] = useState(null); // límite de tableros por plan (user_ia_capacity)
   const [ownerNames, setOwnerNames] = useState({}); // { projectId: nombre del owner que invitó }
+  const [showConsolidated, setShowConsolidated] = useState(false); // dashboard del dueño
   const [deletingProject, setDeletingProject] = useState(null); // project being confirmed for deletion
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deletingBusy, setDeletingBusy] = useState(false);
@@ -4432,6 +4652,11 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
         ) : myProjects.length > 0 ? (
           <div style={{ marginBottom: 24 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: 3, marginBottom: 10, textAlign: 'center' }}>Mis proyectos</div>
+            {ownedCount >= 1 && (
+              <button onClick={() => setShowConsolidated(true)} style={{ width: '100%', marginBottom: 12, background: 'linear-gradient(135deg, rgba(20,156,172,0.22), rgba(84,44,156,0.22))', border: '1px solid rgba(20,156,172,0.4)', color: '#fff', borderRadius: 12, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit' }}>
+                📊 Visión consolidada de mis tableros
+              </button>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {myProjects.map(proj => {
                 const isOwner = proj.owner_id === authUser.id;
@@ -4637,6 +4862,14 @@ function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
             </div>
           </div>
         </div>
+      )}
+
+      {showConsolidated && (
+        <ConsolidatedDashboard
+          authUser={authUser}
+          onClose={() => setShowConsolidated(false)}
+          onOpenProject={(proj) => { setShowConsolidated(false); localStorage.setItem('pp_project_id', String(proj.id)); onProjectLoaded(proj); }}
+        />
       )}
     </div>
   );

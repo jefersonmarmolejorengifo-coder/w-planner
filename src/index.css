@@ -70,6 +70,17 @@ body {
   box-sizing: border-box;
 }
 
+/* Foco visible por teclado (H-009, WCAG 2.4.7).
+   Muchos controles traen `outline: none` inline, que ganaría a un `outline` en
+   CSS; por eso usamos box-shadow, que no se ve afectado por ese inline y rinde
+   bien tanto sobre fondos claros como oscuros (anillo blanco + anillo de marca).
+   Solo aplica con :focus-visible (navegación por teclado), no al click de mouse. */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #149cac;
+  border-radius: 4px;
+}
+
 /* Indicator Chips Component */
 .indicator-chip {
   display: inline-flex;

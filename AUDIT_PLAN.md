@@ -204,6 +204,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 27 — monolito fase 22 · núcleo, fase D.4 (usePresence) (rama `fix/superauditor-sprint-27`)
+
+**H-002 (núcleo, fase D — paso 4):** se levanta el subsistema de presencia, la costura segura dentro del bloque de sesión (es cohesivo y NO llama a `loadAllForProject`).
+
+- `usePresence({ projectId, activeUser, setActiveUser, setCurrentUserId })` → `src/hooks/usePresence.js`: posee `activeUsers`/`kickedMsg`/`conflictUser` + los refs (`sessionIdRef`, `presenceChannelRef`, `activeUserRef`), los 3 effects (sync de ref, canal de presencia, track/untrack) y los handlers `handleForceEntry`/`handleChangeUser`.
+- `activeUser`/`currentUserId` permanecen en `App` (los puebla el spine y los consume `useTasks`); se pasan al hook junto con sus setters.
+- Limpieza lint-driven: `useRef` ya no se usa en el monolito → retirado del import de React. El warning de exhaustive-deps del canal se documenta con un disable (el setter de `useState` es estable; el canal solo debe re-suscribirse al cambiar de proyecto — comportamiento idéntico al original).
+
+`App` se aligera ~90 líneas más. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del hook nuevo limpio. Sin migración.
+
+Resta de la fase D: el **spine** propiamente dicho (auth `init`/`routeAfterAuth` + `loadAllForProject` + canal realtime), que es mutuamente dependiente y escribe en ~13 piezas de estado de todos los hooks. Es el núcleo más sensible; pendiente de evaluación.
+
 ### Sprint 26 — monolito fase 21 · núcleo, fase D.3 (useProjectConfig) (rama `fix/superauditor-sprint-26`)
 
 **H-002 (núcleo, fase D — paso 3):** se levantan los catálogos del proyecto.

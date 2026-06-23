@@ -204,6 +204,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 12 — monolito fase 7 (rama `fix/superauditor-sprint-12`)
+
+**H-002 (continuación):** extraído `SprintsTab` → `src/features/sprints/SprintsTab.jsx`, cargado con `React.lazy`. **Optimización:** su `SprintCard` era un componente-en-render (se remontaba en cada render); se movió a nivel de módulo con los handlers (`onStart`/`onCloseSprint`/`onDelete`) por props, y los estilos puros (`btn`/`si`) a nivel de módulo. Usa `STATUS_COLORS` desde `constants`. Refactor behavior-preserving. `index` baja a **483 kB**; chunk `SprintsTab` ~8.7 kB. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.
+
+Pendiente: `MetricsTab` (mover `ESTADOS`/`DEFAULT_TASK_TYPES`/`daysBetween`/`getUserColor`/`getInitials` a `lib/` primero).
+
 ### Sprint 11 — monolito fase 6 (rama `fix/superauditor-sprint-11`)
 
 **Groundwork de constantes/helpers compartidos:**

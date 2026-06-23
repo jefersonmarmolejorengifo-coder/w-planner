@@ -204,6 +204,15 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 19 — monolito fase 14 · ConfigTab por fases, paso 3 (rama `fix/superauditor-sprint-19`)
+
+**H-002 (ConfigTab, fase 3/N — PremiumPanel):**
+- `PremiumPanel` (~165 líneas: estado de suscripción + toggle IA por proyecto) → `src/features/config/PremiumPanel.jsx` (importado eager por ConfigTab, que sigue en el monolito hasta la fase 5). Deps: solo `supabase` + hooks. De paso se eliminó la función muerta `subscribe` (el upgrade se hace por el botón ✨ Planes) y su import `getAuthJsonHeaders`, ahora innecesario.
+
+Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.
+
+Siguientes: 4) DimensionEditor/FieldDefEditor · 5) ConfigTab (lazy).
+
 ### Sprint 18 — monolito fase 13 · ConfigTab por fases, paso 2 (rama `fix/superauditor-sprint-18`)
 
 **H-002 (ConfigTab, fase 2/N — cluster de reportes):**

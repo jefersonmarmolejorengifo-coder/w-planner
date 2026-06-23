@@ -204,6 +204,16 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 17 — monolito fase 12 · ConfigTab por fases, paso 1 (rama `fix/superauditor-sprint-17`)
+
+**H-002 (ConfigTab, fase 1/N — groundwork):** extraídos los helpers de campos personalizados (compartidos por `TaskForm`, `FieldDefEditor` y otras vistas) a `src/lib/`:
+- `src/lib/customFields.js` — `AUTO_FIELD_SOURCES`, `AUTO_FIELD_SOURCE_LABELS`, `slugifyKey`, `readCustomFieldValue` (puros).
+- `src/lib/CustomFieldsRenderer.jsx` — el componente (separado para no romper `react-refresh/only-export-components`).
+
+Refactor behavior-preserving (~210 líneas fuera del monolito). `npm test` 42/42 ✅, build ✅, lint de archivos nuevos limpio. Sin migración. (El bundle inicial no cambia: estos helpers los usa TaskForm, siempre presente.)
+
+Siguientes pasos de ConfigTab: 2) cluster de reportes, 3) PremiumPanel, 4) DimensionEditor/FieldDefEditor/ConfigSection, 5) ConfigTab.
+
 ### Sprint 16 — monolito fase 11 (rama `fix/superauditor-sprint-16`)
 
 **H-002 (continuación):** extraído "Mi Día" + su cluster de retros (cohesivo y solo usado por FocusTab): `RETRO_EMOJIS` + `SprintRetroForm` + `PendingRetrosBanner` + `FocusTab` → `src/features/focus/FocusTab.jsx`, cargado con `React.lazy`. Helper `getColombiaNow` movido a `src/lib/format.js` (usado por FocusTab + creación/edición de tareas en el monolito). `index` baja a **432 kB**; chunk `FocusTab` ~11.2 kB. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos sin errores. Sin migración.

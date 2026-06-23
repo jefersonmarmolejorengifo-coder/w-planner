@@ -204,6 +204,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 15 — monolito fase 10 (rama `fix/superauditor-sprint-15`)
+
+**H-002 (continuación):** extraída la unidad de Super-tareas (la más grande, ~565 líneas): `SuperTaskJar` + `SuperTaskExpanded` + `SuperTasksTab` → `src/features/tasks/SuperTasksTab.jsx`, cargado con `React.lazy`. Reutiliza `PresentationCard` (módulo hoja) y `SuperTaskCreatorModal` (lazy, ya extraído). Se limpiaron del monolito el import de `PresentationCard` y el lazy de `SuperTaskCreatorModal` (ya no usados allí), y se removió el prop `participants` que estaba sin uso (antes suprimido con `eslint-disable`). `index` baja a **442.8 kB**; chunk `SuperTasksTab` ~15.3 kB. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.
+
+Quedan: `FocusTab` (mover mapper `dbToTask`/`taskToDb` a `lib/` primero), `ConfigTab`, y el núcleo (`BoardTab`/`TaskForm`/`App`).
+
 ### Sprint 14 — monolito fase 9 (rama `fix/superauditor-sprint-14`)
 
 **H-002 (continuación):** extraída la vista de Presentación.

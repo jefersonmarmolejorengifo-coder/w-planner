@@ -523,6 +523,14 @@ function TourOverlay({ role, script, step, activeTab, setActiveTab, onNext, onBa
     if (current?.tab && current.tab !== activeTab) setActiveTab(current.tab);
   }, [step, current?.tab, activeTab, setActiveTab]);
 
+  // Escape salta el tour (H-008). No aplicamos trampa de foco completa para no
+  // interferir con la navegación del tour.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onSkip?.(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onSkip]);
+
   // Recalcula posición del target cuando cambia el paso o se hace scroll/resize.
   useLayoutEffect(() => {
     if (!current?.target) { setRect(null); return; }
@@ -619,7 +627,7 @@ function TourOverlay({ role, script, step, activeTab, setActiveTab, onNext, onBa
       )}
 
       {/* Tooltip */}
-      <div ref={tooltipRef} style={{
+      <div ref={tooltipRef} role="dialog" aria-modal="true" aria-label="Guía de onboarding" style={{
         ...tooltipStyle,
         background: "#fff", borderRadius: 14, padding: 20,
         boxShadow: "0 20px 60px rgba(0,0,0,0.35)",

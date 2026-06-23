@@ -204,6 +204,19 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 28 — monolito fase 23 · núcleo, fase D.5 / FINAL (useProjectData — consolidación) (rama `fix/superauditor-sprint-28`)
+
+**H-002 (núcleo, fase D — paso 5, cierre):** se consolida el spine por **composición**, sin deshacer los hooks de dominio.
+
+- `useProjectData({ activeUser, setActiveUser })` → `src/hooks/useProjectData.js`: compone `useProjectConfig` + `useTaskFieldDefs` + `useTasks`, y posee el spine — estado de nivel proyecto (`projectId`/`project`/`loading`/`okrs`/`keyResults`/`sprints`/`currentUserId`), la carga masiva (`loadAllForProject`) y el **canal realtime**. El spine vive junto a los setters que muta (sin pasar 20 parámetros, que era el anti-patrón a evitar).
+- `App` pasa a consumir **un único hook** de datos + `usePresence`, y conserva solo auth/UI (authUser/showAuth/showIntro/showProjectLanding/activeUser/depEditTask/tabs), la orquestación de sesión (`init`/`routeAfterAuth`) y el render.
+- El orden de hooks se preserva (useProjectData ejecuta config→fieldDefs→tasks, luego usePresence): sin violación de rules-of-hooks; el effect realtime sigue re-suscribiéndose solo al cambiar `projectId`. Comportamiento idéntico.
+- Limpieza: imports muertos en el monolito retirados (`dbToTask`, y los hooks de dominio que ahora solo usa `useProjectData`).
+
+**App: ~9.700 → 2.088 líneas.** Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del hook nuevo limpio (el monolito solo conserva el `_` preexistente). Sin migración.
+
+**Fase D y descomposición del núcleo COMPLETAS.** El monolito quedó reducido a `App` (orquestación auth/UI + render) + pantallas auxiliares; toda la lógica de dominio vive en hooks (`useProjectData`, `useTasks`, `useProjectConfig`, `useTaskFieldDefs`, `usePresence`) y features lazy.
+
 ### Sprint 27 — monolito fase 22 · núcleo, fase D.4 (usePresence) (rama `fix/superauditor-sprint-27`)
 
 **H-002 (núcleo, fase D — paso 4):** se levanta el subsistema de presencia, la costura segura dentro del bloque de sesión (es cohesivo y NO llama a `loadAllForProject`).

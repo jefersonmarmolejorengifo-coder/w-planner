@@ -204,6 +204,17 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 21 — monolito fase 16 · ConfigTab por fases, paso 5 / FINAL (rama `fix/superauditor-sprint-21`)
+
+**H-002 (ConfigTab, fase 5/5 — orquestador → lazy):**
+- `ConfigTab` (~600 líneas: orquestador con invitaciones, roles, PIN, participantes, indicadores, tipos de tarea, dimensiones, campos personalizados, panel premium y reportes IA) → `src/features/config/ConfigTab.jsx`, cargado con `React.lazy` + `<Suspense>` (igual que el resto de pestañas pesadas).
+- Migraron con él sus imports propios (ya no usados en el monolito): `RoleAssignmentSection`, `ConfigSection`, `DimensionEditor`, `FieldDefEditor`, `PremiumPanel`, `ReportsConfigSection`.
+- Limpieza: se eliminó la función muerta `addP` (+ estado `newP`/`setNewP`) — "agregar participante a mano" ya no existe desde Fase D del onboarding; era un error de lint preexistente.
+
+**Impacto en bundle:** ConfigTab queda en su propio chunk (58.9 kB / 14.5 kB gzip), fuera del bundle inicial. El index baja de ~432 kB a ~373 kB (~110 kB gzip). Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.
+
+**ConfigTab descompuesto al 100%.** Resta solo el núcleo (`BoardTab`/`TaskForm`/`App`), que requiere levantar estado y se aborda en sesión dedicada.
+
 ### Sprint 20 — monolito fase 15 · ConfigTab por fases, paso 4 (rama `fix/superauditor-sprint-20`)
 
 **H-002 (ConfigTab, fase 4/N — editores):**

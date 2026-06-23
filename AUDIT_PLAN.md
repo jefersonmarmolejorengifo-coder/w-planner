@@ -204,6 +204,16 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 18 — monolito fase 13 · ConfigTab por fases, paso 2 (rama `fix/superauditor-sprint-18`)
+
+**H-002 (ConfigTab, fase 2/N — cluster de reportes):**
+- `ConfigSection` (wrapper sección, 18 usos) → `src/lib/ConfigSection.jsx` (compartido).
+- `REPORT_TYPES` + `DAY_NAMES_ES` + `ReportsConfigSection` + `ReportCard` → `src/features/config/ReportsConfigSection.jsx` (importado eager por ConfigTab, que sigue en el monolito hasta la fase 5). Deps: supabase, getAuthJsonHeaders (lib). De paso se quitó el prop muerto `onSend` de ReportCard (el envío manual ya no existe).
+
+~395 líneas fuera del monolito. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos limpio. Sin migración.
+
+Siguientes: 3) PremiumPanel · 4) DimensionEditor/FieldDefEditor · 5) ConfigTab (lazy).
+
 ### Sprint 17 — monolito fase 12 · ConfigTab por fases, paso 1 (rama `fix/superauditor-sprint-17`)
 
 **H-002 (ConfigTab, fase 1/N — groundwork):** extraídos los helpers de campos personalizados (compartidos por `TaskForm`, `FieldDefEditor` y otras vistas) a `src/lib/`:

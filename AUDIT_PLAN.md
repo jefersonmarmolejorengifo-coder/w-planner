@@ -204,6 +204,16 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 13 — monolito fase 8 (rama `fix/superauditor-sprint-13`)
+
+**Groundwork de helpers compartidos:**
+- `ESTADOS` / `TIPOS` / `DEFAULT_TASK_TYPES` → `src/constants.js`.
+- `getUserColor` / `getInitials` (+ `USER_COLORS`) → `src/lib/format.js`.
+
+**Extracción:** `MetricsTab` (+ sub-componentes `MetricsSection`/`MetricCard`/`MetricRow`) → `src/features/metrics/MetricsTab.jsx`, cargado con `React.lazy`. `TYPE_COLORS` y `daysBetween` (exclusivos de Métricas) viven dentro del feature. Refactor behavior-preserving. `index` baja a **474.7 kB**; chunk `MetricsTab` ~9 kB. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos sin errores. Sin migración.
+
+Quedan (más entrelazados): `PresentationTab`, `SuperTasksTab`, `FocusTab`, `ConfigTab`, y el núcleo (`BoardTab`/`TaskForm`/`App`, requiere levantar estado).
+
 ### Sprint 12 — monolito fase 7 (rama `fix/superauditor-sprint-12`)
 
 **H-002 (continuación):** extraído `SprintsTab` → `src/features/sprints/SprintsTab.jsx`, cargado con `React.lazy`. **Optimización:** su `SprintCard` era un componente-en-render (se remontaba en cada render); se movió a nivel de módulo con los handlers (`onStart`/`onCloseSprint`/`onDelete`) por props, y los estilos puros (`btn`/`si`) a nivel de módulo. Usa `STATUS_COLORS` desde `constants`. Refactor behavior-preserving. `index` baja a **483 kB**; chunk `SprintsTab` ~8.7 kB. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.

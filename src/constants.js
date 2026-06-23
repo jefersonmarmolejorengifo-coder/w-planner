@@ -29,3 +29,8 @@ export const STATUS_LIGHT = {
   "Cancelada":     "#f4f4f4",
   "Finalizada":    "#e8f8ee",
 };
+
+// Tipos de tarea y estados base (compartidos por tablero, formulario, métricas…).
+export const TIPOS = ["Administrativa", "Operativa", "Apadrinamiento", "Seguimiento", "Creativa", "Otra"];
+export const DEFAULT_TASK_TYPES = [...TIPOS];
+export const ESTADOS = ["No programada", "Sin iniciar", "En proceso", "Bloqueada", "En pausa", "Cancelada", "Finalizada"];

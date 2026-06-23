@@ -204,6 +204,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 22 — monolito fase 17 · núcleo, fase A/B (clúster TaskForm) (rama `fix/superauditor-sprint-22`)
+
+**H-002 (núcleo — extracción del clúster de edición de tarea):** primer paso del núcleo. Nota clave: `BoardTab`/`TaskForm` ya estaban dirigidos 100% por props, así que esto es **extracción verbatim** (no rewrite de estado). El "levantar estado de App" se reserva para la fase D, al final.
+
+- `TaskForm` (~475 líneas) + sus privados (solo usados por él) → `src/features/board/TaskForm.jsx`: `StarRating`, `F` (field wrapper), `TaskSuperLinksEditor`, `TaskCommentsThread` (+ helpers `commentTimeAgo`/`commentInitials`/`commentColorOf`) y la constante `CLOSE_STATES`.
+- Estilos `inp`/`readonlyInp` (compartidos por TaskForm, AuthScreen y ProjectLandingScreen) → `src/lib/formStyles.js`. El monolito importa `inp`.
+- `TaskForm` se importa **eager** porque `BoardTab` (aún en el monolito) lo usa directo. La ganancia de bundle llegará en la fase C, cuando `BoardTab` pase a lazy y arrastre a `TaskForm` a su chunk.
+
+~900 líneas fuera del monolito. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos limpio. Sin migración.
+
+Siguientes: fase C) `BoardTab` (+ `TaskCard`/`TaskCardWithClick`/`Modal`/`formatCardCustomField`/`emptyTask`) y `GanttTab` → feature, lazy · fase D) levantar estado de `App` a hooks (`useTasks`, `useProjectData`) — solo si aporta.
+
 ### Sprint 21 — monolito fase 16 · ConfigTab por fases, paso 5 / FINAL (rama `fix/superauditor-sprint-21`)
 
 **H-002 (ConfigTab, fase 5/5 — orquestador → lazy):**

@@ -204,6 +204,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 23 — monolito fase 18 · núcleo, fase C (BoardTab + GanttTab → lazy) (rama `fix/superauditor-sprint-23`)
+
+**H-002 (núcleo — tablero y Gantt):** extracción verbatim del clúster del tablero, ahora con code-splitting.
+
+- `BoardTab` (~175 líneas) + sus privados (`emptyTask`, `formatCardCustomField`, `TaskCard`, `TaskCardWithClick`, `Modal`) → `src/features/board/BoardTab.jsx`, cargado con `React.lazy` + `<Suspense>`. Importa `TaskForm` (del sprint 22), que ahora **viaja en este chunk**.
+- `GanttTab` (~245 líneas, autónomo) → `src/features/board/GanttTab.jsx`, lazy.
+- Limpieza de imports muertos tras la extracción (lint-driven): `memo`, `useId` (React), `useDialog`, `parseDeps`, `inp` (su único usuario era TaskForm; AuthScreen/ProjectLandingScreen tienen su propio `inp` local), `calcProgressFromSubtasks`, y el import completo de `./lib/depGraph` (`computeDepLayout` + `NODE_*`, muerto desde la extracción de DependenciesTab — resuelve un error de lint preexistente).
+
+**Impacto en bundle:** `BoardTab` → chunk 35.95 kB (10.37 kB gzip), `GanttTab` → 8.42 kB (2.80 kB gzip). El index inicial baja de **~373 kB a 328.5 kB** (gzip ~110 → 99 kB). Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos limpio. Sin migración.
+
+**Núcleo: solo resta la fase D** — adelgazar el cuerpo de `App` levantando estado a hooks (`useTasks`, `useProjectData`). Es opcional y de mayor riesgo; se hará solo si aporta claridad sin comprometer comportamiento.
+
 ### Sprint 22 — monolito fase 17 · núcleo, fase A/B (clúster TaskForm) (rama `fix/superauditor-sprint-22`)
 
 **H-002 (núcleo — extracción del clúster de edición de tarea):** primer paso del núcleo. Nota clave: `BoardTab`/`TaskForm` ya estaban dirigidos 100% por props, así que esto es **extracción verbatim** (no rewrite de estado). El "levantar estado de App" se reserva para la fase D, al final.

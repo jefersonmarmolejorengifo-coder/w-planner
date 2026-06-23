@@ -204,6 +204,16 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 14 — monolito fase 9 (rama `fix/superauditor-sprint-14`)
+
+**H-002 (continuación):** extraída la vista de Presentación.
+- `PresentationCard` + `LinkedTaskChip` → `src/features/presentation/PresentationCard.jsx` (módulo hoja compartido: lo usan PresentationTab y `SuperTaskExpanded` del monolito, que ahora lo importa). Solo depende de `parseDeps`.
+- `PresentationTab` (+ `PresentationGraph` + `StatCard`) → `src/features/presentation/PresentationTab.jsx`, cargado con `React.lazy`. Usa `lib/depGraph`, `lib/deps`, `constants` y el PresentationCard hoja.
+
+`index` baja a **464.2 kB**; chunk `PresentationTab` ~10.3 kB. (PresentationCard queda eager porque SuperTaskExpanded lo usa; se volverá lazy-compartible cuando se extraiga Super-tareas.) Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos sin errores. Sin migración.
+
+Quedan: `SuperTasksTab` (usa el PresentationCard hoja — ya listo para extraer), `FocusTab`, `ConfigTab`, y el núcleo.
+
 ### Sprint 13 — monolito fase 8 (rama `fix/superauditor-sprint-13`)
 
 **Groundwork de helpers compartidos:**

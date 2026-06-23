@@ -204,6 +204,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 8 — monolito fase 3 (rama `fix/superauditor-sprint-8`)
+
+**H-002 (continuación):** extraído `SuperTaskCreatorModal` → `src/features/tasks/SuperTaskCreatorModal.jsx`, cargado con `React.lazy` (panel on-demand). Refactor behavior-preserving (copia verbatim). Bundle inicial baja a **721.8 kB** (gzip 192.9 kB); nuevo chunk `SuperTaskCreatorModal` ~6.3 kB. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.
+
+Acumulado de chunks on-demand: `PlanSelectionModal` (~10.8 kB), `ConsolidatedDashboard` (~11.9 kB), `SuperTaskCreatorModal` (~6.3 kB).
+
 ### Sprint 7 — monolito fase 2 (rama `fix/superauditor-sprint-7`)
 
 **H-002 (continuación):** extraído `ConsolidatedDashboard` → `src/features/dashboard/ConsolidatedDashboard.jsx`, cargado con `React.lazy`. Constante compartida `REPORT_TYPE_LABEL` movida a `src/constants.js` (la usan el dashboard y `BoardSummaryPill`). De paso se **corrigió un anti-patrón**: el `Shell` interno (componente-en-render que se remontaba en cada render) se movió a un `DashboardShell` de módulo.

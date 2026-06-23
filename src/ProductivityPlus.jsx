@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { supabase } from './supabaseClient';
 import { REPORT_TYPE_LABEL, STATUS_COLORS, STATUS_LIGHT, ESTADOS, DEFAULT_TASK_TYPES } from './constants';
 import { getAuthJsonHeaders } from './lib/authHeaders';
@@ -28,6 +28,7 @@ import { dbToTask } from './lib/taskMapping';
 import { useTaskFieldDefs } from './hooks/useTaskFieldDefs';
 import { useTasks } from './hooks/useTasks';
 import { useProjectConfig } from './hooks/useProjectConfig';
+import { usePresence } from './hooks/usePresence';
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 
@@ -1655,9 +1656,6 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [activeUser, setActiveUser] = useState(null);
-  const [activeUsers, setActiveUsers] = useState([]);
-  const [kickedMsg, setKickedMsg] = useState(null);
-  const [conflictUser, setConflictUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [projectId, setProjectId] = useState(null);
   const [project, setProject] = useState(null);
@@ -1690,6 +1688,14 @@ export default function App() {
     tasks, setTasks, nextId, setNextId,
     createTask, updateTask, deleteTask, exportCSV,
   } = useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeUser, taskFieldDefs });
+  // Presencia en tiempo real (activos, expulsión, conflicto de sesión) vive en
+  // usePresence. App conserva activeUser/currentUserId porque el spine los puebla. H-002 fase D.
+  const {
+    activeUsers,
+    kickedMsg, setKickedMsg,
+    conflictUser, setConflictUser,
+    handleForceEntry, handleChangeUser,
+  } = usePresence({ projectId, activeUser, setActiveUser, setCurrentUserId });
   const [showNotifPanel, setShowNotifPanel] = useState(false);
 
   // Carga el rol del usuario para el proyecto activo (Fase B onboarding).
@@ -1708,7 +1714,6 @@ export default function App() {
   const [dismissedNotifs, setDismissedNotifs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('pp_dismissed_notifs') || '[]'); } catch { return []; }
   });
-  const sessionIdRef = useRef(crypto.randomUUID());
 
   const loadAllForProject = async (pid, proj, authUser = null) => {
     setLoading(true);
@@ -1991,99 +1996,10 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [projectId]);
 
-  // ── Presence: track active users in real time ──────────────
-  const presenceChannelRef = useRef(null);
-  const activeUserRef = useRef(null);
-
-  useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
-
-  // Single channel per session — key is our unique sessionId
-  useEffect(() => {
-    if (!projectId) return undefined;
-    const channel = supabase.channel(`productivity-plus-presence-${projectId}`, {
-      config: { presence: { key: sessionIdRef.current } },
-    });
-
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        // Flatten all presences into a list, dedupe by userId (newest wins)
-        const byUser = {};
-        Object.values(state).forEach(presences => {
-          presences.forEach(p => {
-            if (!p.userId) return; // observer with no track data
-            const existing = byUser[p.userId];
-            if (!existing || (p.onlineAt || '') > (existing.onlineAt || '')) {
-              byUser[p.userId] = p;
-            }
-          });
-        });
-        const users = Object.values(byUser).map(p => ({
-          userId: p.userId, name: p.name, sessionId: p.sessionId,
-        }));
-        setActiveUsers(users);
-
-        // Check if someone newer took our userId
-        const currentActive = activeUserRef.current;
-        if (!currentActive) return;
-        const newestForMyUser = byUser[currentActive.id];
-        if (newestForMyUser && newestForMyUser.sessionId !== sessionIdRef.current) {
-          // Someone newer has our userId — we get kicked
-          setKickedMsg(`Alguien acaba de ingresar como "${currentActive.name}". Tu sesión ha sido cerrada.`);
-          setActiveUser(null);
-          channel.untrack();
-        }
-      })
-      .subscribe();
-
-    presenceChannelRef.current = channel;
-    return () => { supabase.removeChannel(channel); presenceChannelRef.current = null; };
-  }, [projectId]);
-
-  // Track/untrack our presence when activeUser changes
-  useEffect(() => {
-    const channel = presenceChannelRef.current;
-    if (!channel) return;
-
-    if (!activeUser) {
-      channel.untrack();
-      return;
-    }
-
-    const doTrack = () => {
-      channel.track({
-        name: activeUser.name,
-        sessionId: sessionIdRef.current,
-        userId: activeUser.id,
-        onlineAt: new Date().toISOString(),
-      });
-    };
-
-    // Small delay to ensure channel is SUBSCRIBED
-    const timer = setTimeout(doTrack, 150);
-    return () => clearTimeout(timer);
-  }, [activeUser]);
-
-  const handleForceEntry = () => {
-    if (!conflictUser) return;
-    setKickedMsg(null);
-    const p = conflictUser;
-    setConflictUser(null);
-    // Force enter — our newer onlineAt will kick the old session via sync
-    setActiveUser(p);
-    setCurrentUserId(p.id);
-  };
-
-  const handleChangeUser = () => {
-    if (presenceChannelRef.current) {
-      presenceChannelRef.current.untrack();
-    }
-    setActiveUser(null);
-  };
-
   // createTask / updateTask / deleteTask viven ahora en useTasks (hook). H-002 fase D.
   // saveParticipants / saveIndicators / saveTaskTypes / saveDimensions / saveProjectPin
   // y el CRUD de campos personalizados viven en useProjectConfig / useTaskFieldDefs. H-002 fase D.
+  // La presencia (activos/expulsión/conflicto) + handleForceEntry/handleChangeUser viven en usePresence. H-002 fase D.
 
   const currentUser = useMemo(() => participants.find((p) => p.id === currentUserId) || null, [participants, currentUserId]);
 

@@ -204,6 +204,17 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 24 — monolito fase 19 · núcleo, fase D.1 (useTaskFieldDefs) (rama `fix/superauditor-sprint-24`)
+
+**H-002 (núcleo, fase D — levantar estado de App a hooks, paso 1):** la fase D se ejecuta **en pasos seguros validados**, un hook por PR (no big-bang), de menor a mayor acoplamiento. Primer dominio: el más aislado.
+
+- `useTaskFieldDefs(projectId)` → `src/hooks/useTaskFieldDefs.js`: posee el estado `taskFieldDefs`/`hasCustomFieldsSchema` y las 4 funciones CRUD (`addTaskFieldDef`, `updateTaskFieldDefById`, `deleteTaskFieldDef`, `reorderTaskFieldDefs`).
+- Decisión de diseño (behavior-preserving): el hook **expone los setters** porque el "spine" del App —`loadAllForProject` (carga masiva) y el **canal realtime único** (compartido con participants/indicators/tasks/…)— los sigue poblando. Partir ese canal habría cambiado comportamiento (más conexiones), así que se mantiene en App; solo la lógica de mutación se mueve al hook.
+
+`App` se aligera ~110 líneas y el CRUD queda aislado/testeable. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del hook nuevo limpio (los errores restantes del monolito son preexistentes). Sin migración.
+
+Siguientes pasos de la fase D (por evaluar uno a uno): `useTasks` (tasks/nextId + createTask/updateTask/deleteTask/exportCSV), `useProjectConfig` (participants/indicators/taskTypes/dimensions + saves), `useAuthSession`. Cada uno depende del spine, así que se valorará si conviene mover también `loadAllForProject`/realtime o mantener el patrón de setters expuestos.
+
 ### Sprint 23 — monolito fase 18 · núcleo, fase C (BoardTab + GanttTab → lazy) (rama `fix/superauditor-sprint-23`)
 
 **H-002 (núcleo — tablero y Gantt):** extracción verbatim del clúster del tablero, ahora con code-splitting.

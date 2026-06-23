@@ -25,6 +25,7 @@ const GanttTab = lazy(() => import('./features/board/GanttTab'));
 import Onboarding from './Onboarding';
 import NameCaptureModal from './NameCaptureModal';
 import { calcAporte, DEFAULT_DIMENSIONS } from './lib/aporte';
+import { useTaskFieldDefs } from './hooks/useTaskFieldDefs';
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 
@@ -1742,10 +1743,13 @@ export default function App() {
   const [okrs, setOkrs] = useState([]);
   const [keyResults, setKeyResults] = useState([]);
   const [sprints, setSprints] = useState([]);
-  const [taskFieldDefs, setTaskFieldDefs] = useState([]);
-  // false when migration 008 is not yet applied (custom_fields column / table
-  // missing). Used to gracefully degrade taskToDb / addTaskFieldDef.
-  const [hasCustomFieldsSchema, setHasCustomFieldsSchema] = useState(true);
+  // Campos personalizados (estado + CRUD) viven en useTaskFieldDefs. El spine
+  // (loadAllForProject + canal realtime) sigue poblando vía los setters. H-002 fase D.
+  const {
+    taskFieldDefs, setTaskFieldDefs,
+    hasCustomFieldsSchema, setHasCustomFieldsSchema,
+    addTaskFieldDef, updateTaskFieldDefById, deleteTaskFieldDef, reorderTaskFieldDefs,
+  } = useTaskFieldDefs(projectId);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
 
   // Carga el rol del usuario para el proyecto activo (Fase B onboarding).
@@ -2327,121 +2331,8 @@ export default function App() {
     }
   };
 
-  // ── Custom field defs CRUD ──────────────────────────────────
-  // Realtime keeps `taskFieldDefs` in sync, so each helper also returns the
-  // server row so callers (e.g. form modal) can react immediately.
-  const addTaskFieldDef = async (payload) => {
-    if (!projectId) return { error: new Error('No project selected') };
-    let key = String(payload.key || '').trim();
-    // Resolve collisions against ALL keys ever used in this project,
-    // including soft-deleted ones, to avoid mixing archived historical values
-    // (stored in tasks.custom_fields[key]) with new ones under the same key.
-    if (key) {
-      const { data: allKeys } = await supabase
-        .from('task_field_defs')
-        .select('key')
-        .eq('project_id', projectId);
-      const used = new Set((allKeys || []).map(r => r.key));
-      if (used.has(key)) {
-        const base = key.slice(0, 47);
-        let n = 2;
-        while (used.has(`${base}_${n}`) && n < 1000) n += 1;
-        key = `${base}_${n}`;
-      }
-    }
-    const insertPayload = {
-      project_id: projectId,
-      key,
-      label: String(payload.label || '').trim(),
-      type: payload.type,
-      config: payload.config || {},
-      position: typeof payload.position === 'number' ? payload.position : taskFieldDefs.length,
-      required: !!payload.required,
-      show_on_card: !!payload.show_on_card,
-      show_in_presentation: !!payload.show_in_presentation,
-    };
-    let { data, error } = await supabase.from('task_field_defs').insert(insertPayload).select().single();
-    // Graceful: si la migración 011 aún no se aplicó, reintenta sin la columna nueva.
-    if (error && /show_in_presentation/i.test(error.message || '')) {
-      const fallback = { ...insertPayload };
-      delete fallback.show_in_presentation;
-      ({ data, error } = await supabase.from('task_field_defs').insert(fallback).select().single());
-    }
-    if (!error && data) {
-      setTaskFieldDefs(prev => {
-        if (prev.find(d => d.id === data.id)) return prev;
-        return [...prev, data].sort((a, b) => (a.position - b.position) || (a.id - b.id));
-      });
-    }
-    return { data, error };
-  };
-
-  const updateTaskFieldDefById = async (id, patch) => {
-    if (!projectId) return { error: new Error('No project selected') };
-    const safePatch = { ...patch };
-    // Never let the client move a def to another project or undelete via update.
-    delete safePatch.project_id;
-    delete safePatch.id;
-    let { data, error } = await supabase
-      .from('task_field_defs')
-      .update(safePatch)
-      .eq('id', id)
-      .eq('project_id', projectId)
-      .select()
-      .single();
-    // Graceful: si la migración 011 aún no se aplicó, reintenta sin la columna nueva.
-    if (error && /show_in_presentation/i.test(error.message || '')) {
-      const fallback = { ...safePatch };
-      delete fallback.show_in_presentation;
-      ({ data, error } = await supabase
-        .from('task_field_defs')
-        .update(fallback)
-        .eq('id', id)
-        .eq('project_id', projectId)
-        .select()
-        .single());
-    }
-    if (!error && data) {
-      setTaskFieldDefs(prev => prev.map(d => d.id === id ? data : d).sort((a, b) => (a.position - b.position) || (a.id - b.id)));
-    }
-    return { data, error };
-  };
-
-  const deleteTaskFieldDef = async (id) => {
-    if (!projectId) return { error: new Error('No project selected') };
-    // Soft delete to preserve historical values stored in tasks.custom_fields.
-    const { error } = await supabase
-      .from('task_field_defs')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('project_id', projectId);
-    if (!error) {
-      setTaskFieldDefs(prev => prev.filter(d => d.id !== id));
-    }
-    return { error };
-  };
-
-  const reorderTaskFieldDefs = async (orderedIds) => {
-    if (!projectId) return;
-    // Optimistic local reorder
-    setTaskFieldDefs(prev => {
-      const map = new Map(prev.map(d => [d.id, d]));
-      return orderedIds
-        .map((id, idx) => map.get(id) ? { ...map.get(id), position: idx } : null)
-        .filter(Boolean);
-    });
-    // Persist in parallel to minimise the realtime "list dancing" effect
-    // (each UPDATE fires a separate event; doing them at once batches the
-    // perceived re-render). For larger schemas consider an RPC.
-    const ops = orderedIds.map((id, i) =>
-      supabase.from('task_field_defs').update({ position: i }).eq('id', id).eq('project_id', projectId)
-    );
-    const results = await Promise.all(ops);
-    const firstErr = results.find(r => r.error);
-    if (firstErr) {
-      console.error('Error reordenando campos:', firstErr.error);
-    }
-  };
+  // El CRUD de campos personalizados (add/update/delete/reorder) vive ahora en
+  // useTaskFieldDefs (hook). H-002 fase D.
 
   const saveProjectPin = async (pin) => {
     if (projectId && project) {

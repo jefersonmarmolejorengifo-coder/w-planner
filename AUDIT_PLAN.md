@@ -204,6 +204,14 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 7 — monolito fase 2 (rama `fix/superauditor-sprint-7`)
+
+**H-002 (continuación):** extraído `ConsolidatedDashboard` → `src/features/dashboard/ConsolidatedDashboard.jsx`, cargado con `React.lazy`. Constante compartida `REPORT_TYPE_LABEL` movida a `src/constants.js` (la usan el dashboard y `BoardSummaryPill`). De paso se **corrigió un anti-patrón**: el `Shell` interno (componente-en-render que se remontaba en cada render) se movió a un `DashboardShell` de módulo.
+
+Resultado del code-splitting acumulado: el bundle inicial baja a **727.7 kB** (gzip 194 kB) desde 755 kB; chunks separados `PlanSelectionModal` (~10.8 kB) y `ConsolidatedDashboard` (~11.9 kB) se descargan solo al abrirlos.
+
+Refactor **behavior-preserving** (copia verbatim + fix del Shell), verificado: `npm test` 42/42 ✅, build ✅, lint de archivos nuevos sin errores. Sin migración.
+
 ### Sprint 6 — accesibilidad (cierre) + monolito fase 1 (rama `fix/superauditor-sprint-6`)
 
 **Accesibilidad pendiente (cerrada):** se aplicó `useDialog` + semántica de diálogo a `SuperTaskCreatorModal`; el tour de `Onboarding` recibió `role="dialog"`/`aria-label` + Escape-para-saltar (sin focus-trap, para no romper la navegación del tour).

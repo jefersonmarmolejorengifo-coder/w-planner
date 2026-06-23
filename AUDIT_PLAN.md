@@ -204,6 +204,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 10 — monolito fase 5 (rama `fix/superauditor-sprint-10`)
+
+**H-002 (continuación):** extraído `OKRsTab` → `src/features/okrs/OKRsTab.jsx`, cargado con `React.lazy` (tab on-demand, prop-driven, sin dependencias compartidas: solo `supabase` + hooks). Refactor behavior-preserving (copia verbatim). `npm test` 42/42 ✅, build ✅ (chunk OKRsTab ~10 kB), lint del archivo nuevo limpio. Sin migración.
+
+Próximos candidatos mapeados (cada uno su PR verificado): `SprintsTab` y `MetricsTab` y `DependenciesTab` — requieren primero mover las constantes compartidas `STATUS_COLORS`/`STATUS_LIGHT` a `src/constants.js` y mover sus sub-componentes privados (`SprintCard`, `MetricCard/Row/Section`, `computeDepLayout`). `FocusTab` depende de mappers (`dbToTask`/`taskToDb`/`calcAporte`), más entrelazado. El núcleo (`BoardTab`, `TaskForm`, `App` orquestador) requiere levantar estado a hooks/contexto antes de extraerse.
+
 ### Sprint 9 — monolito fase 4 (rama `fix/superauditor-sprint-9`)
 
 **H-002 (continuación):** extraídos dos paneles pesados on-demand, cargados con `React.lazy`:

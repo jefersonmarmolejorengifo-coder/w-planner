@@ -204,6 +204,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 20 — monolito fase 15 · ConfigTab por fases, paso 4 (rama `fix/superauditor-sprint-20`)
+
+**H-002 (ConfigTab, fase 4/N — editores):**
+- `DimensionEditor` (~117 líneas: pesos de aporte que suman 100%) → `src/features/config/DimensionEditor.jsx`.
+- `FieldDefEditor` + sus constantes `FIELD_TYPE_LABELS`/`FIELD_TYPE_HINTS` (~310 líneas: editor del esquema de campos personalizados, soft-delete) → `src/features/config/FieldDefEditor.jsx`.
+- `DEFAULT_DIMENSIONS` se mueve a `src/lib/aporte.js` (compartido por calculadora, plantillas y editor; 5 usos) e importado donde hace falta.
+- Limpieza: tras la extracción, `AUTO_FIELD_SOURCE_LABELS` y `slugifyKey` ya no se usan en el monolito → se quitan de su import de `lib/customFields` (queda `readCustomFieldValue`).
+
+Ambos importados eager por ConfigTab (que sigue en el monolito hasta la fase 5). Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos limpio. Sin migración.
+
+Siguiente: 5) ConfigTab orquestador → lazy.
+
 ### Sprint 19 — monolito fase 14 · ConfigTab por fases, paso 3 (rama `fix/superauditor-sprint-19`)
 
 **H-002 (ConfigTab, fase 3/N — PremiumPanel):**

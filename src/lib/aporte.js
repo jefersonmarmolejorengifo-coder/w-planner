@@ -5,6 +5,14 @@
 // IMPORTANTE: el aporte es un snapshot (ver modelo de la calculadora): cambiar
 // los pesos NO recalcula el histórico. Esta función solo computa el valor actual.
 
+// Dimensiones de aporte por defecto (las 3 builtin). Compartidas por la
+// calculadora, las plantillas y el DimensionEditor. H-002.
+export const DEFAULT_DIMENSIONS = [
+  { key: "tiempo",      label: "Tiempo estimado",   weight: 33, builtin: true },
+  { key: "dificultad",  label: "Dificultad",         weight: 34, builtin: true },
+  { key: "estrategico", label: "Valor estratégico",  weight: 33, builtin: true },
+];
+
 // ─── calcAporte ────────────────────────────────────────────
 // Soporta tanto dimensiones como array como el objeto legacy
 // {tiempo, dificultad, estrategico}.

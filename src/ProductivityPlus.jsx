@@ -27,6 +27,7 @@ import { DEFAULT_DIMENSIONS } from './lib/aporte';
 import { dbToTask } from './lib/taskMapping';
 import { useTaskFieldDefs } from './hooks/useTaskFieldDefs';
 import { useTasks } from './hooks/useTasks';
+import { useProjectConfig } from './hooks/useProjectConfig';
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 
@@ -1643,9 +1644,6 @@ function BillingReturnOverlay() {
 }
 
 export default function App() {
-  const [participants, setParticipants] = useState([]);
-  const [indicators, setIndicators] = useState([]);
-  const [taskTypes, setTaskTypes] = useState([]);
   const [activeTab, setActiveTab] = useState("board");
   const [currentUserId, setCurrentUserId] = useState(null);
   const [forceTour, setForceTour] = useState(false);
@@ -1653,7 +1651,6 @@ export default function App() {
   // myRole: rol del usuario en el proyecto actual (po / scrum_master / participant).
   // null mientras carga o si no es miembro. Usado para gating de tabs en Fase B.
   const [myRole, setMyRole] = useState(null);
-  const [dimensions, setDimensions] = useState(DEFAULT_DIMENSIONS);
   const [showIntro, setShowIntro] = useState(true);
   const [authUser, setAuthUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
@@ -1669,6 +1666,16 @@ export default function App() {
   const [okrs, setOkrs] = useState([]);
   const [keyResults, setKeyResults] = useState([]);
   const [sprints, setSprints] = useState([]);
+  // Catálogos del proyecto (participants/indicators/taskTypes/dimensions + saves)
+  // viven en useProjectConfig. Va aquí porque necesita projectId/project/setProject;
+  // el spine sigue poblando vía los setters. H-002 fase D.
+  const {
+    participants, setParticipants,
+    indicators, setIndicators,
+    taskTypes, setTaskTypes,
+    dimensions, setDimensions,
+    saveParticipants, saveIndicators, saveTaskTypes, saveDimensions, saveProjectPin,
+  } = useProjectConfig({ projectId, project, setProject });
   // Campos personalizados (estado + CRUD) viven en useTaskFieldDefs. El spine
   // (loadAllForProject + canal realtime) sigue poblando vía los setters. H-002 fase D.
   const {
@@ -2075,70 +2082,8 @@ export default function App() {
   };
 
   // createTask / updateTask / deleteTask viven ahora en useTasks (hook). H-002 fase D.
-
-  const saveParticipants = async (updaterFn) => {
-    const prev = participants;
-    const next = typeof updaterFn === 'function' ? updaterFn(prev) : updaterFn;
-    const toInsert = next.filter(n => !prev.find(p => p.id === n.id));
-    const toUpdate = next.filter(n => prev.find(p => p.id === n.id));
-    const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
-    for (const p of toInsert)
-      await supabase.from('participants').insert({ id: p.id, name: p.name, is_super_user: p.isSuperUser, project_id: projectId || undefined });
-    for (const p of toUpdate)
-      await supabase.from('participants').update({ name: p.name, is_super_user: p.isSuperUser }).eq('id', p.id).eq('project_id', projectId);
-    for (const p of toDelete)
-      await supabase.from('participants').delete().eq('id', p.id).eq('project_id', projectId);
-    setParticipants(next);
-  };
-
-  const saveIndicators = async (updaterFn) => {
-    const prev = indicators;
-    const next = typeof updaterFn === 'function' ? updaterFn(prev) : updaterFn;
-    const toInsert = next.filter(n => !prev.find(p => p.id === n.id));
-    const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
-    for (const i of toInsert)
-      await supabase.from('indicators').insert({ id: i.id, name: i.name, project_id: projectId || undefined });
-    for (const i of toDelete)
-      await supabase.from('indicators').delete().eq('id', i.id).eq('project_id', projectId);
-    setIndicators(next);
-  };
-
-  const saveTaskTypes = async (updaterFn) => {
-    const prev = taskTypes;
-    const next = typeof updaterFn === 'function' ? updaterFn(prev) : updaterFn;
-    const toInsert = next.filter(n => !prev.find(p => p.id === n.id));
-    const toUpdate = next.filter(n => prev.find(p => p.id === n.id));
-    const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
-    for (const t of toInsert)
-      await supabase.from('task_types').insert({ name: t.name, project_id: projectId || undefined });
-    for (const t of toUpdate)
-      await supabase.from('task_types').update({ name: t.name }).eq('id', t.id).eq('project_id', projectId);
-    for (const t of toDelete)
-      await supabase.from('task_types').delete().eq('id', t.id).eq('project_id', projectId);
-    const { data, error } = await supabase.from('task_types').select('*').eq('project_id', projectId).order('name', { ascending: true });
-    if (!error && data) setTaskTypes(data.map((t) => ({ id: t.id, name: t.name })));
-    return next;
-  };
-
-  const saveDimensions = async (dims) => {
-    setDimensions(dims);
-    if (projectId && project) {
-      const newConfig = { ...(project.config || {}), dimensions: dims };
-      await supabase.from('projects').update({ config: newConfig }).eq('id', projectId);
-      setProject(prev => ({ ...prev, config: newConfig }));
-    }
-  };
-
-  // El CRUD de campos personalizados (add/update/delete/reorder) vive ahora en
-  // useTaskFieldDefs (hook). H-002 fase D.
-
-  const saveProjectPin = async (pin) => {
-    if (projectId && project) {
-      const newConfig = { ...(project.config || {}), pin };
-      await supabase.from('projects').update({ config: newConfig }).eq('id', projectId);
-      setProject(prev => ({ ...prev, config: newConfig }));
-    }
-  };
+  // saveParticipants / saveIndicators / saveTaskTypes / saveDimensions / saveProjectPin
+  // y el CRUD de campos personalizados viven en useProjectConfig / useTaskFieldDefs. H-002 fase D.
 
   const currentUser = useMemo(() => participants.find((p) => p.id === currentUserId) || null, [participants, currentUserId]);
 

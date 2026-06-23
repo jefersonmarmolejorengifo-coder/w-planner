@@ -204,6 +204,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 26 — monolito fase 21 · núcleo, fase D.3 (useProjectConfig) (rama `fix/superauditor-sprint-26`)
+
+**H-002 (núcleo, fase D — paso 3):** se levantan los catálogos del proyecto.
+
+- `useProjectConfig({ projectId, project, setProject })` → `src/hooks/useProjectConfig.js`: posee `participants`/`indicators`/`taskTypes`/`dimensions` y `saveParticipants`/`saveIndicators`/`saveTaskTypes`/`saveDimensions`/`saveProjectPin`.
+- La llamada va tras la declaración de `project`/`projectId` (que el hook necesita) y **antes** de `useTasks` (que recibe `dimensions` como input). Expone los setters para el spine.
+- `DEFAULT_DIMENSIONS` permanece importado en el monolito (lo usan `createProject`/`createFromTemplate` de ProjectLandingScreen).
+
+`App` se aligera ~65 líneas más. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del hook nuevo limpio. Sin migración.
+
+Resta de la fase D: `useAuthSession` (auth/sesión/presencia) y mover el spine (`loadAllForProject` + canal realtime) a hook — el código más sensible, al final.
+
 ### Sprint 25 — monolito fase 20 · núcleo, fase D.2 (useTasks) (rama `fix/superauditor-sprint-25`)
 
 **H-002 (núcleo, fase D — paso 2):** se levanta el dominio de tareas.

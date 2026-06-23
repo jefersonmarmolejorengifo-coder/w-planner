@@ -204,6 +204,20 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 25 — monolito fase 20 · núcleo, fase D.2 (useTasks) (rama `fix/superauditor-sprint-25`)
+
+**H-002 (núcleo, fase D — paso 2):** se levanta el dominio de tareas.
+
+- Prerequisito: `dbToTask`/`taskToDb` (mapeo snake_case ↔ camelCase, funciones puras) → `src/lib/taskMapping.js`, para que el hook (archivo aparte) y el spine del App (`loadAllForProject` + realtime) los compartan sin ciclos.
+- `useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeUser, taskFieldDefs })` → `src/hooks/useTasks.js`: posee `tasks`/`nextId` y `createTask`/`updateTask`/`deleteTask`/`exportCSV` (incluida la concurrencia optimista por `updated_at` y el log a `task_history`). Recibe del App el contexto necesario; expone `setTasks`/`setNextId` para que el spine los siga poblando.
+- La llamada al hook va tras `useTaskFieldDefs` (necesita `projectId`/`dimensions`/`activeUser`/`taskFieldDefs`).
+- Limpieza lint-driven de imports muertos en el monolito: `getColombiaNow`, `readCustomFieldValue`, `calcAporte`, `taskToDb`.
+- Detalle de calidad: el BOM del CSV (`﻿`) se escribió como `String.fromCharCode(0xFEFF)` para evitar el carácter invisible que ESLint marca como *irregular whitespace*.
+
+`App` se aligera ~210 líneas más. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos limpio. Sin migración.
+
+Siguientes (por evaluar): `useProjectConfig` (participants/indicators/taskTypes/dimensions + saves), `useAuthSession`.
+
 ### Sprint 24 — monolito fase 19 · núcleo, fase D.1 (useTaskFieldDefs) (rama `fix/superauditor-sprint-24`)
 
 **H-002 (núcleo, fase D — levantar estado de App a hooks, paso 1):** la fase D se ejecuta **en pasos seguros validados**, un hook por PR (no big-bang), de menor a mayor acoplamiento. Primer dominio: el más aislado.

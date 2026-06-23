@@ -2,25 +2,21 @@ import { useState, useEffect, useMemo, useRef, memo, useId, lazy, Suspense } fro
 import { supabase } from './supabaseClient';
 import { useDialog } from './useDialog';
 import { REPORT_TYPE_LABEL } from './constants';
+import { getAuthJsonHeaders } from './lib/authHeaders';
 
 // Paneles pesados cargados bajo demanda (H-002, code-splitting con React.lazy):
 // salen del bundle inicial y se descargan solo cuando el usuario los abre.
 const PlanSelectionModal = lazy(() => import('./features/billing/PlanSelectionModal'));
 const ConsolidatedDashboard = lazy(() => import('./features/dashboard/ConsolidatedDashboard'));
 const SuperTaskCreatorModal = lazy(() => import('./features/tasks/SuperTaskCreatorModal'));
+const EvolutionTab = lazy(() => import('./features/evolution/EvolutionTab'));
+const ChatEnterpriseTab = lazy(() => import('./features/chat/ChatEnterpriseTab'));
 import Onboarding from './Onboarding';
 import NameCaptureModal from './NameCaptureModal';
 import RoleAssignmentSection from './RoleAssignmentSection';
 import { calcAporte, calcProgressFromSubtasks } from './lib/aporte';
 
-const getAuthJsonHeaders = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error("Debes iniciar sesión nuevamente.");
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${session.access_token}`,
-  };
-};
+// getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 
 const joinProjectByCode = async (code, user) => {
   const inviteCode = String(code || "").trim();
@@ -6793,436 +6789,15 @@ function SuperTasksTab({ projectId, tasks, participants, sprints, taskFieldDefs,
 // activa). Owner ve histórico de evolutivos bimensuales, puede generar uno
 // nuevo. Renderiza el HTML embebido en un iframe sandboxed para aislar
 // estilos.
-function EvolutionTab({ projectId, isOwner }) {
-  const [canUse, setCanUse] = useState(null);
-  const [evolutions, setEvolutions] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [progress, setProgress] = useState(0);
-
-  const reload = async () => {
-    if (!projectId) return;
-    const [{ data: can }, { data: list }] = await Promise.all([
-      supabase.rpc("project_can_use_evolutivo", { p_project_id: projectId }),
-      supabase.from("user_evolutions")
-        .select("id, period_start, period_end, generated_at, model_used, tokens_input, tokens_output, status")
-        .eq("project_id", projectId)
-        .order("period_end", { ascending: false }),
-    ]);
-    setCanUse(can === true);
-    setEvolutions(list || []);
-    if (list?.length && !selectedId) setSelectedId(list[0].id);
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (cancelled) return;
-      await reload();
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-
-  const generateNow = async () => {
-    setGenerating(true);
-    setMsg("Generando tarjetas profesionales del equipo...");
-    setProgress(0);
-    try {
-      // Periodo: últimos 60 días.
-      const today = new Date();
-      const start = new Date(today); start.setDate(today.getDate() - 60);
-      const fmt = (d) => d.toISOString().split("T")[0];
-      const periodStart = fmt(start);
-      const periodEnd = fmt(today);
-
-      const headers = await getAuthJsonHeaders();
-      const genRes = await fetch("/api/generate-evolution", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ projectId, periodStart, periodEnd }),
-      });
-      if (!genRes.ok) {
-        const e = await genRes.json().catch(() => ({}));
-        throw new Error(e.error || `HTTP ${genRes.status}`);
-      }
-
-      // Acumula stream
-      let html = "";
-      if (genRes.body?.getReader) {
-        const reader = genRes.body.getReader();
-        const decoder = new TextDecoder();
-        let chunks = 0;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          html += decoder.decode(value, { stream: true });
-          chunks++;
-          setProgress(html.length);
-          if (chunks % 10 === 0) setMsg(`Generando... ${(html.length/1024).toFixed(1)} KB recibidos`);
-        }
-        html += decoder.decode();
-      } else {
-        html = await genRes.text();
-      }
-
-      setMsg("Guardando...");
-      const saveRes = await fetch("/api/save-evolution", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          projectId, periodStart, periodEnd, html,
-          truncated: html.includes("WPLANNER_TRUNCATED"),
-        }),
-      });
-      const saved = await saveRes.json();
-      if (!saveRes.ok) throw new Error(saved.error || "Error guardando");
-
-      setMsg("✓ Evolutivo generado y guardado");
-      setTimeout(() => setMsg(""), 4000);
-      await reload();
-      setSelectedId(saved.evolution?.id);
-    } catch (err) {
-      setMsg("Error: " + err.message);
-    }
-    setGenerating(false);
-  };
-
-  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#888" }}>Cargando evolutivo…</div>;
-
-  if (canUse === false) {
-    return (
-      <div style={{ padding: 40, textAlign: "center", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
-        <div style={{ fontSize: 56, marginBottom: 14 }}>💎</div>
-        <h3 style={{ margin: "0 0 8px 0", color: "#542c9c" }}>Evolutivo profesional</h3>
-        <p style={{ color: "#666", fontSize: 14, maxWidth: 540, margin: "0 auto 16px" }}>
-          Tarjetas profesionales por miembro con rol detectado, fortalezas, oportunidades, y recomendaciones de células para distintos tipos de proyecto. Esta feature requiere <b>Pro Power</b> o <b>Enterprise</b> con IA activa en este proyecto.
-        </p>
-        <p style={{ color: "#999", fontSize: 12 }}>Configúralo en Configuración del proyecto.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: 4 }}>
-      {/* Cabecera */}
-      <div style={{ background: "linear-gradient(135deg, #542c9c 0%, #f5a623 100%)", borderRadius: 12, padding: 22, marginBottom: 18, color: "#fff" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <h2 style={{ margin: "0 0 4px 0", fontSize: 22, fontWeight: 700 }}>💎 Evolutivo profesional</h2>
-            <p style={{ margin: 0, opacity: 0.92, fontSize: 13 }}>
-              Tarjetas individuales con rol detectado, fortalezas, oportunidades y recomendaciones de células para tu equipo. Reporte privado: solo tú lo ves.
-            </p>
-          </div>
-          {isOwner && (
-            <button onClick={generateNow} disabled={generating}
-              style={{ background: "#fff", color: "#542c9c", border: "none", borderRadius: 8, padding: "10px 18px", cursor: generating ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700, boxShadow: "0 3px 12px rgba(0,0,0,0.15)" }}>
-              {generating ? "⏳ Generando..." : "🤖 Generar nueva tarjeta del equipo"}
-            </button>
-          )}
-        </div>
-        {msg && (
-          <div style={{ marginTop: 12, fontSize: 12, padding: "6px 10px", background: "rgba(255,255,255,0.15)", borderRadius: 6 }}>
-            {msg}
-            {generating && progress > 0 && <span style={{ marginLeft: 8, opacity: 0.7 }}>· {(progress/1024).toFixed(1)} KB</span>}
-          </div>
-        )}
-      </div>
-
-      {evolutions.length === 0 ? (
-        <div style={{ padding: 40, textAlign: "center", color: "#888", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
-          <div style={{ fontSize: 40, marginBottom: 10 }}>📋</div>
-          <div style={{ fontSize: 14, color: "#555", marginBottom: 6 }}>Aún no hay evolutivos generados.</div>
-          {isOwner && <div style={{ fontSize: 12, color: "#888" }}>Genera el primero con el botón de arriba. Tarda ~1-2 min.</div>}
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14 }}>
-          {/* Lista lateral */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>Histórico</div>
-            {evolutions.map(e => (
-              <button key={e.id}
-                onClick={() => setSelectedId(e.id)}
-                style={{
-                  background: selectedId === e.id ? "linear-gradient(135deg,#542c9c,#6e3ebf)" : "#fff",
-                  color: selectedId === e.id ? "#fff" : "#333",
-                  border: "1px solid " + (selectedId === e.id ? "#542c9c" : "#e0e0e0"),
-                  borderRadius: 8, padding: "10px 12px", cursor: "pointer",
-                  textAlign: "left", fontSize: 12,
-                }}>
-                <div style={{ fontWeight: 600, marginBottom: 3 }}>
-                  {new Date(e.period_start).toLocaleDateString("es-CO", { day: "numeric", month: "short" })} → {new Date(e.period_end).toLocaleDateString("es-CO", { day: "numeric", month: "short" })}
-                </div>
-                <div style={{ fontSize: 10, opacity: 0.75 }}>
-                  {new Date(e.generated_at).toLocaleDateString("es-CO")} · {e.status}
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {/* Vista del evolutivo seleccionado */}
-          <div style={{ background: "#fff", borderRadius: 12, padding: 0, border: "1px solid #e0e0e0", overflow: "hidden" }}>
-            {selectedId ? (
-              <EvolutionRender id={selectedId} />
-            ) : (
-              <div style={{ padding: 40, textAlign: "center", color: "#888" }}>Selecciona un evolutivo del histórico.</div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EvolutionRender({ id }) {
-  const [html, setHtml] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (cancelled) return;
-      const { data } = await supabase.from("user_evolutions").select("html").eq("id", id).maybeSingle();
-      if (cancelled) return;
-      setHtml(data?.html || "<p>No hay HTML guardado para este evolutivo.</p>");
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [id]);
-
-  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#888" }}>Cargando…</div>;
-
-  // Render en iframe sandboxed para aislar estilos del resto de la app.
-  return (
-    <iframe
-      title="Evolutivo profesional"
-      srcDoc={html}
-      style={{ width: "100%", height: "75vh", border: "none", background: "#fff" }}
-      sandbox="allow-same-origin"
-    />
-  );
-}
+// EvolutionTab vive ahora en ./features/evolution/EvolutionTab y se carga con
+// React.lazy (ver import arriba). H-002.
 
 // ─── ChatEnterpriseTab ─────────────────────────────────────
 // Chat en vivo del PO con la IA cargada con datos del equipo. Feature
 // Enterprise. Cada proyecto tiene su propia sesión activa por owner.
 // Persiste todo el historial en chat_messages.
-function ChatEnterpriseTab({ projectId, isOwner }) {
-  const [canUse, setCanUse] = useState(null);
-  const [sessionId, setSessionId] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [draftAssistant, setDraftAssistant] = useState("");
-  const [error, setError] = useState("");
-  const [quota, setQuota] = useState(null);  // {quota, used, remaining}
-
-  const refreshQuota = async () => {
-    const { data } = await supabase.rpc("project_chat_quota_remaining", { p_project_id: projectId });
-    if (data) setQuota(data);
-  };
-
-  // Verifica feature y carga sesión activa.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (cancelled || !projectId) return;
-      const { data: can } = await supabase.rpc("project_can_use_chat", { p_project_id: projectId });
-      if (cancelled) return;
-      setCanUse(can === true);
-      if (can === true) {
-        const { data: { user } } = await supabase.auth.getUser();
-        const { data: sess } = await supabase
-          .from("chat_sessions")
-          .select("id")
-          .eq("project_id", projectId)
-          .eq("owner_user_id", user?.id)
-          .is("archived_at", null)
-          .maybeSingle();
-        if (cancelled) return;
-        if (sess?.id) {
-          setSessionId(sess.id);
-          const { data: msgs } = await supabase
-            .from("chat_messages")
-            .select("role, content, created_at")
-            .eq("session_id", sess.id)
-            .order("created_at", { ascending: true });
-          if (!cancelled) setHistory(msgs || []);
-        }
-        await refreshQuota();
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [projectId]);
-
-  const send = async () => {
-    const userMsg = input.trim();
-    if (!userMsg || streaming) return;
-    setError("");
-    setStreaming(true);
-    setDraftAssistant("");
-    setHistory(h => [...h, { role: "user", content: userMsg, created_at: new Date().toISOString() }]);
-    setInput("");
-
-    try {
-      const headers = await getAuthJsonHeaders();
-      const res = await fetch("/api/chat-stream", {
-        method: "POST", headers,
-        body: JSON.stringify({ projectId, sessionId, userMessage: userMsg }),
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        // 429 = cuota mensual agotada: muestra el detalle y refresca contador.
-        if (res.status === 429) {
-          await refreshQuota();
-          const renewLabel = e.renews_on ? new Date(e.renews_on).toLocaleDateString("es-CO", { day: "numeric", month: "long" }) : "el 1 del próximo mes";
-          throw new Error(`Cuota mensual del chat alcanzada (${e.used}/${e.quota}). Se renueva el ${renewLabel}.`);
-        }
-        throw new Error(e.error || `HTTP ${res.status}`);
-      }
-      const sIdHeader = res.headers.get("X-Wplanner-Session");
-      if (sIdHeader) setSessionId(Number(sIdHeader));
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let assistant = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        assistant += chunk;
-        setDraftAssistant(assistant);
-      }
-      assistant += decoder.decode();
-      setHistory(h => [...h, { role: "assistant", content: assistant, created_at: new Date().toISOString() }]);
-      setDraftAssistant("");
-      refreshQuota();  // descuenta el mensaje recién enviado en el contador
-    } catch (err) {
-      setError(err.message);
-      setHistory(h => h.slice(0, -1)); // descarta el user msg si falló
-      setInput(userMsg);
-    }
-    setStreaming(false);
-  };
-
-  if (canUse === null) return <div style={{ padding: 40, textAlign: "center", color: "#888" }}>Cargando…</div>;
-  if (canUse === false) {
-    return (
-      <div style={{ padding: 40, textAlign: "center", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
-        <div style={{ fontSize: 56, marginBottom: 14 }}>🤖</div>
-        <h3 style={{ margin: "0 0 8px 0", color: "#542c9c" }}>Chat IA en vivo</h3>
-        <p style={{ color: "#666", fontSize: 14, maxWidth: 540, margin: "0 auto 16px" }}>
-          Conversación en tiempo real con la IA cargada con tarjetas profesionales del equipo, reportes recientes y estado de tareas. Pregunta lo que quieras: "¿quién está sobrecargado?", "arma una célula para X", "¿por qué Diego se atrasa?".
-        </p>
-        <p style={{ color: "#999", fontSize: 12 }}>Esta función está incluida en el plan <b>Pro Power</b>.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: 4 }}>
-      <div style={{ background: "linear-gradient(135deg, #1e1e3a 0%, #542c9c 100%)", borderRadius: 12, padding: 20, marginBottom: 14, color: "#fff" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 28 }}>🤖</div>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ margin: "0 0 4px 0", fontSize: 20, fontWeight: 700 }}>Chat IA en vivo</h2>
-            <p style={{ margin: 0, opacity: 0.85, fontSize: 13 }}>
-              Conversa con tu consultor de talento. Tiene cargados los últimos 2 reportes mensuales, el último evolutivo y el estado actual del proyecto.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e0e0e0", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Historial */}
-        <div style={{ maxHeight: "55vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, padding: "4px 2px" }}>
-          {history.length === 0 && !draftAssistant && !streaming && (
-            <div style={{ textAlign: "center", color: "#999", fontSize: 13, padding: 40, fontStyle: "italic" }}>
-              Empieza la conversación. Sugerencias:<br />
-              <span style={{ fontSize: 12, color: "#bbb" }}>"¿Quién es el eje más crítico del proyecto ahora?"<br />"Arma una célula de 3 personas para un proyecto digital."<br />"¿Cómo está Diego este mes vs el anterior?"</span>
-            </div>
-          )}
-          {history.map((m, i) => <ChatBubble key={i} role={m.role} content={m.content} />)}
-          {streaming && draftAssistant && <ChatBubble role="assistant" content={draftAssistant + " ▌"} />}
-          {streaming && !draftAssistant && (
-            <div style={{ display: "flex", gap: 6, padding: 10, alignItems: "center" }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#542c9c", animation: "pulse 1s infinite" }} />
-              <span style={{ fontSize: 12, color: "#888" }}>Pensando…</span>
-            </div>
-          )}
-        </div>
-
-        {error && <div style={{ fontSize: 12, color: "#c0392b", padding: 8, background: "#fde8e8", borderRadius: 6 }}>{error}</div>}
-
-        {/* Input */}
-        {isOwner ? (
-          <>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                disabled={streaming || (quota && quota.remaining <= 0)}
-                placeholder={quota && quota.remaining <= 0
-                  ? "Cuota mensual alcanzada, se renueva el 1 del próximo mes"
-                  : "Pregunta sobre tu equipo... (Enter para enviar, Shift+Enter para nueva línea)"}
-                style={{ flex: 1, minHeight: 60, maxHeight: 200, padding: 10, border: "1px solid #ddd", borderRadius: 8, fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
-              />
-              <button onClick={send} disabled={!input.trim() || streaming || (quota && quota.remaining <= 0)}
-                style={{
-                  background: !input.trim() || streaming || (quota && quota.remaining <= 0) ? "#ddd" : "linear-gradient(135deg, #542c9c, #6e3ebf)",
-                  color: "#fff", border: "none", borderRadius: 8, padding: "12px 18px",
-                  cursor: !input.trim() || streaming || (quota && quota.remaining <= 0) ? "not-allowed" : "pointer",
-                  fontSize: 13, fontWeight: 700,
-                }}>
-                {streaming ? "..." : "Enviar"}
-              </button>
-            </div>
-            {quota && quota.quota > 0 && (() => {
-              const pct = Math.min(100, (quota.used / quota.quota) * 100);
-              const lowColor = quota.remaining <= 10 ? "#c0392b" : quota.remaining <= 30 ? "#ec6c04" : "#542c9c";
-              return (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "#888", marginTop: 4 }}>
-                  <span><b style={{ color: lowColor }}>{quota.used}</b> / {quota.quota} mensajes este mes</span>
-                  <div style={{ flex: 1, height: 4, background: "#f0e8ff", borderRadius: 2, overflow: "hidden", maxWidth: 200 }}>
-                    <div style={{ width: `${pct}%`, height: "100%", background: lowColor, transition: "width 0.3s" }} />
-                  </div>
-                  {quota.remaining <= 10 && <span style={{ color: lowColor, fontWeight: 600 }}>Te quedan {quota.remaining}</span>}
-                </div>
-              );
-            })()}
-          </>
-        ) : (
-          <div style={{ fontSize: 12, color: "#888", padding: 10, background: "#fafafa", borderRadius: 6, textAlign: "center" }}>
-            Solo el owner del proyecto puede chatear con la IA.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ChatBubble({ role, content }) {
-  const isUser = role === "user";
-  return (
-    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
-      <div style={{
-        maxWidth: "85%",
-        background: isUser ? "linear-gradient(135deg, #542c9c, #6e3ebf)" : "#f5f5f7",
-        color: isUser ? "#fff" : "#222",
-        borderRadius: 14,
-        padding: "10px 14px",
-        fontSize: 13.5,
-        lineHeight: 1.5,
-        whiteSpace: "pre-wrap",
-        boxShadow: isUser ? "0 3px 12px rgba(84,44,156,0.18)" : "0 1px 3px rgba(0,0,0,0.05)",
-      }}>{content}</div>
-    </div>
-  );
-}
+// ChatEnterpriseTab vive ahora en ./features/chat/ChatEnterpriseTab y se carga
+// con React.lazy (ver import arriba). H-002.
 
 // ─── PendingRetrosBanner ───────────────────────────────────
 // Bloqueo blando: si hay sprints cerrados con retro pendiente para este
@@ -9110,10 +8685,14 @@ export default function App() {
           />
         )}
         {activeTab === "evolution" && (
-          <EvolutionTab projectId={projectId} isOwner={project?.owner_id === authUser?.id} />
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Cargando…</div>}>
+            <EvolutionTab projectId={projectId} isOwner={project?.owner_id === authUser?.id} />
+          </Suspense>
         )}
         {activeTab === "chat" && (
-          <ChatEnterpriseTab projectId={projectId} isOwner={project?.owner_id === authUser?.id} />
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Cargando…</div>}>
+            <ChatEnterpriseTab projectId={projectId} isOwner={project?.owner_id === authUser?.id} />
+          </Suspense>
         )}
         {activeTab === "pulse" && (
           <TeamPulseTab projectId={projectId} isOwner={project?.owner_id === authUser?.id} sprints={sprints} participants={participants} />

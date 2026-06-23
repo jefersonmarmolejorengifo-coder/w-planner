@@ -204,6 +204,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 9 — monolito fase 4 (rama `fix/superauditor-sprint-9`)
+
+**H-002 (continuación):** extraídos dos paneles pesados on-demand, cargados con `React.lazy`:
+- `EvolutionTab` (+ `EvolutionRender` interno) → `src/features/evolution/EvolutionTab.jsx`
+- `ChatEnterpriseTab` (+ `ChatBubble` interno) → `src/features/chat/ChatEnterpriseTab.jsx`
+
+Helper compartido `getAuthJsonHeaders` movido a `src/lib/authHeaders.js` (lo usan ambos paneles y 6 sitios del monolito).
+
+**Efecto en el bundle (honesto):** al haber varios `import()` dinámicos, Rolldown hoisteó `@supabase/supabase-js` a un chunk propio `supabaseClient` (~196 kB / 50 kB gzip) que se cachea aparte, y separó `jsx-runtime` (~8 kB). El `index` queda en ~512 kB. La carga inicial total es similar (supabase siempre se necesita), pero ahora **~42 kB de paneles** (`PlanSelection`, `Consolidated`, `SuperTaskCreator`, `Evolution`, `Chat`) salen del arranque y se descargan solo al abrirlos, y supabase es un chunk vendor cacheable entre navegaciones.
+
+Refactor behavior-preserving (copia verbatim). `npm test` 42/42 ✅, build ✅, lint de archivos nuevos sin errores (1 warning preexistente de exhaustive-deps). Sin migración.
+
 ### Sprint 8 — monolito fase 3 (rama `fix/superauditor-sprint-8`)
 
 **H-002 (continuación):** extraído `SuperTaskCreatorModal` → `src/features/tasks/SuperTaskCreatorModal.jsx`, cargado con `React.lazy` (panel on-demand). Refactor behavior-preserving (copia verbatim). Bundle inicial baja a **721.8 kB** (gzip 192.9 kB); nuevo chunk `SuperTaskCreatorModal` ~6.3 kB. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.

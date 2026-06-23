@@ -204,6 +204,17 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 11 — monolito fase 6 (rama `fix/superauditor-sprint-11`)
+
+**Groundwork de constantes/helpers compartidos:**
+- `STATUS_COLORS` / `STATUS_LIGHT` → `src/constants.js` (las usan tablero, métricas, red de tareas, sprints).
+- `parseDeps` → `src/lib/deps.js`.
+- `computeDepLayout` + `NODE_*` → `src/lib/depGraph.js` (compartido entre la Red de Tareas y la Presentación; **se detectó vía chequeo de referencias** que `PresentationGraph` también los usaba antes de mergear).
+
+**Extracción:** `DependenciesTab` → `src/features/deps/DependenciesTab.jsx`, cargado con `React.lazy`. Refactor behavior-preserving. `index` baja a **491 kB**; chunk `DependenciesTab` ~11.9 kB. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos sin errores. Sin migración.
+
+Pendientes para la próxima tanda (ya con `STATUS_COLORS`/`STATUS_LIGHT` en constants): `SprintsTab` (tiene `SprintCard` como componente-en-render: conviene moverlo fuera al extraer) y `MetricsTab` (arrastra `ESTADOS`/`DEFAULT_TASK_TYPES`/`daysBetween`/`getUserColor`/`getInitials` + `TYPE_COLORS`: mover esos helpers a `lib/` primero).
+
 ### Sprint 10 — monolito fase 5 (rama `fix/superauditor-sprint-10`)
 
 **H-002 (continuación):** extraído `OKRsTab` → `src/features/okrs/OKRsTab.jsx`, cargado con `React.lazy` (tab on-demand, prop-driven, sin dependencias compartidas: solo `supabase` + hooks). Refactor behavior-preserving (copia verbatim). `npm test` 42/42 ✅, build ✅ (chunk OKRsTab ~10 kB), lint del archivo nuevo limpio. Sin migración.

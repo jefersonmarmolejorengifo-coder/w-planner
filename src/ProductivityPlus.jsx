@@ -24,10 +24,7 @@ const GanttTab = lazy(() => import('./features/board/GanttTab'));
 import Onboarding from './Onboarding';
 import NameCaptureModal from './NameCaptureModal';
 import { DEFAULT_DIMENSIONS } from './lib/aporte';
-import { dbToTask } from './lib/taskMapping';
-import { useTaskFieldDefs } from './hooks/useTaskFieldDefs';
-import { useTasks } from './hooks/useTasks';
-import { useProjectConfig } from './hooks/useProjectConfig';
+import { useProjectData } from './hooks/useProjectData';
 import { usePresence } from './hooks/usePresence';
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
@@ -1646,7 +1643,6 @@ function BillingReturnOverlay() {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("board");
-  const [currentUserId, setCurrentUserId] = useState(null);
   const [forceTour, setForceTour] = useState(false);
   const [forceTourRole, setForceTourRole] = useState(null); // rol elegido en el selector de tours (null = mi rol)
   // myRole: rol del usuario en el proyecto actual (po / scrum_master / participant).
@@ -1656,40 +1652,33 @@ export default function App() {
   const [authUser, setAuthUser] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [activeUser, setActiveUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [projectId, setProjectId] = useState(null);
-  const [project, setProject] = useState(null);
   const [showProjectLanding, setShowProjectLanding] = useState(false);
   const [depEditTask, setDepEditTask] = useState(null);
-  const [okrs, setOkrs] = useState([]);
-  const [keyResults, setKeyResults] = useState([]);
-  const [sprints, setSprints] = useState([]);
-  // Catálogos del proyecto (participants/indicators/taskTypes/dimensions + saves)
-  // viven en useProjectConfig. Va aquí porque necesita projectId/project/setProject;
-  // el spine sigue poblando vía los setters. H-002 fase D.
+
+  // Todos los datos del proyecto (estado + carga masiva + realtime + CRUD/saves)
+  // viven en useProjectData, que compone los hooks de dominio y posee el spine.
+  // App solo orquesta auth/UI. H-002 fase D — consolidación.
   const {
+    projectId, setProjectId,
+    project, setProject,
+    currentUserId, setCurrentUserId,
+    loading, setLoading,
+    okrs, setOkrs,
+    keyResults, setKeyResults,
+    sprints, setSprints,
     participants, setParticipants,
-    indicators, setIndicators,
-    taskTypes, setTaskTypes,
-    dimensions, setDimensions,
+    indicators,
+    taskTypes,
+    dimensions,
     saveParticipants, saveIndicators, saveTaskTypes, saveDimensions, saveProjectPin,
-  } = useProjectConfig({ projectId, project, setProject });
-  // Campos personalizados (estado + CRUD) viven en useTaskFieldDefs. El spine
-  // (loadAllForProject + canal realtime) sigue poblando vía los setters. H-002 fase D.
-  const {
-    taskFieldDefs, setTaskFieldDefs,
-    hasCustomFieldsSchema, setHasCustomFieldsSchema,
+    taskFieldDefs,
     addTaskFieldDef, updateTaskFieldDefById, deleteTaskFieldDef, reorderTaskFieldDefs,
-  } = useTaskFieldDefs(projectId);
-  // Tareas (estado + CRUD + exportCSV) viven en useTasks. Recibe el contexto que
-  // necesita; el spine (loadAllForProject + realtime) sigue poblando vía setTasks/
-  // setNextId. Va aquí porque depende de projectId/dimensions/activeUser/taskFieldDefs. H-002 fase D.
-  const {
-    tasks, setTasks, nextId, setNextId,
+    tasks, setTasks, nextId,
     createTask, updateTask, deleteTask, exportCSV,
-  } = useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeUser, taskFieldDefs });
+    loadAllForProject,
+  } = useProjectData({ activeUser, setActiveUser });
   // Presencia en tiempo real (activos, expulsión, conflicto de sesión) vive en
-  // usePresence. App conserva activeUser/currentUserId porque el spine los puebla. H-002 fase D.
+  // usePresence. App conserva activeUser; currentUserId lo provee useProjectData. H-002 fase D.
   const {
     activeUsers,
     kickedMsg, setKickedMsg,
@@ -1714,120 +1703,6 @@ export default function App() {
   const [dismissedNotifs, setDismissedNotifs] = useState(() => {
     try { return JSON.parse(localStorage.getItem('pp_dismissed_notifs') || '[]'); } catch { return []; }
   });
-
-  const loadAllForProject = async (pid, proj, authUser = null) => {
-    setLoading(true);
-    try {
-      const q = (table) => pid ? supabase.from(table).select('*').eq('project_id', pid) : supabase.from(table).select('*');
-      const [
-        { data: tasksData },
-        { data: partsData },
-        { data: indsData },
-        { data: typesData },
-        { data: configData },
-        { data: okrsData },
-        { data: sprintsData },
-        { data: fieldDefsData, error: fieldDefsErr },
-      ] = await Promise.all([
-        q('tasks').order('id'),
-        q('participants').order('id'),
-        q('indicators').order('id'),
-        pid ? supabase.from('task_types').select('*').eq('project_id', pid).order('name', { ascending: true }) : supabase.from('task_types').select('*').order('name', { ascending: true }),
-        q('app_config'),
-        pid ? supabase.from('okrs').select('*').eq('project_id', pid).order('start_date', { ascending: false }) : Promise.resolve({ data: [] }),
-        pid ? supabase.from('sprints').select('*').eq('project_id', pid).order('created_at') : Promise.resolve({ data: [] }),
-        pid
-          ? supabase.from('task_field_defs').select('*').eq('project_id', pid).is('deleted_at', null).order('position', { ascending: true }).order('id', { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-
-      if (tasksData) setTasks(tasksData.map(dbToTask));
-      if (partsData) setParticipants(partsData.map(p => ({ id: p.id, name: p.name, isSuperUser: p.is_super_user, isLegacy: p.is_legacy === true, authUserId: p.auth_user_id || null })));
-      if (indsData) setIndicators(indsData);
-      if (typesData) setTaskTypes(typesData.map(t => ({ id: t.id, name: t.name })));
-      if (configData) {
-        configData.forEach(row => {
-          if (row.key === 'nextId') setNextId(Number(row.value));
-          if (row.key === 'currentUserId') setCurrentUserId(row.value === null ? null : Number(row.value));
-        });
-      }
-
-      if (okrsData) {
-        setOkrs(okrsData);
-        if (okrsData.length) {
-          const okrIds = okrsData.map(o => o.id);
-          const { data: krsData } = await supabase.from('key_results').select('*').in('okr_id', okrIds).order('id');
-          if (krsData) {
-            // Enriquece cada KR con las fechas de su OKR padre para que los
-            // formularios puedan filtrar por rango sin pedir okrs como prop.
-            const okrById = Object.fromEntries(okrsData.map(o => [o.id, o]));
-            const enriched = krsData.map(kr => ({
-              ...kr,
-              okr_start_date: okrById[kr.okr_id]?.start_date || null,
-              okr_end_date: okrById[kr.okr_id]?.end_date || null,
-              okr_status: okrById[kr.okr_id]?.status || null,
-            }));
-            setKeyResults(enriched);
-          }
-        }
-      }
-      if (sprintsData) setSprints(sprintsData);
-      // task_field_defs may fail silently on old DBs (pre-migration 008);
-      // treat absent as "no custom fields configured" so the app still works.
-      if (fieldDefsErr) {
-        if (fieldDefsErr.code === '42P01') {
-          console.warn('task_field_defs table not found — apply migration 008 to enable custom fields.');
-          setHasCustomFieldsSchema(false);
-        } else {
-          console.error('Error cargando task_field_defs:', fieldDefsErr);
-          setHasCustomFieldsSchema(true);
-        }
-        setTaskFieldDefs([]);
-      } else {
-        setHasCustomFieldsSchema(true);
-        setTaskFieldDefs(Array.isArray(fieldDefsData) ? fieldDefsData : []);
-      }
-
-      // Load dimensions and pin from project config
-      const p = proj || project;
-      if (p?.config) {
-        if (Array.isArray(p.config.dimensions) && p.config.dimensions.length) setDimensions(p.config.dimensions);
-      }
-
-      if (!partsData?.length && pid) {
-        const { data: createdDefault } = await supabase
-          .from('participants')
-          .insert({ name: 'Usuario', is_super_user: true, project_id: pid })
-          .select()
-          .single();
-        if (createdDefault) setParticipants([{ id: createdDefault.id, name: createdDefault.name, isSuperUser: true }]);
-      }
-
-      // Auto-set active user from auth
-      if (authUser && pid) {
-        const userName = authUser.user_metadata?.full_name || authUser.email.split('@')[0];
-        const isOwner = (proj || p)?.owner_id === authUser.id;
-        let part = partsData?.find(p2 => p2.auth_user_id === authUser.id || (p2.email && p2.email === authUser.email));
-        if (!part) {
-          const { data: created } = await supabase.from('participants').insert({
-            name: userName, is_super_user: isOwner, project_id: pid,
-            auth_user_id: authUser.id, email: authUser.email
-          }).select().single();
-          if (created) {
-            part = created;
-            setParticipants(prev => [...prev.filter(p2 => p2.id !== created.id), { id: created.id, name: created.name, isSuperUser: isOwner }]);
-          }
-        }
-        if (part) {
-          setActiveUser({ id: part.id, name: part.name, isSuperUser: isOwner });
-          setCurrentUserId(part.id);
-        }
-      }
-    } catch (err) {
-      console.error('Error cargando datos:', err);
-    }
-    setLoading(false);
-  };
 
   useEffect(() => {
     // Evita rutear dos veces (init + SIGNED_IN pueden coincidir).
@@ -1913,97 +1788,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Suscripciones Realtime ─────────────────────────────────
-  useEffect(() => {
-    if (!projectId) return undefined;
-    const projectFilter = `project_id=eq.${projectId}`;
-    const channel = supabase
-      .channel(`productivity-plus-realtime-${projectId}`)
 
-      // TASKS
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
-        setTasks(prev => {
-          if (prev.find(t => t.id === payload.new.id)) return prev;
-          return [...prev, dbToTask(payload.new)].sort((a, b) => a.id - b.id);
-        });
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
-        setTasks(prev => prev.map(t => t.id === payload.new.id ? dbToTask(payload.new) : t));
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
-        setTasks(prev => prev.filter(t => t.id !== payload.old.id));
-      })
-
-      // PARTICIPANTS
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
-        setParticipants(prev => {
-          if (prev.find(p => p.id === payload.new.id)) return prev;
-          return [...prev, { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user }];
-        });
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
-        setParticipants(prev => prev.map(p =>
-          p.id === payload.new.id ? { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user } : p
-        ));
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
-        setParticipants(prev => prev.filter(p => p.id !== payload.old.id));
-      })
-
-      // INDICATORS
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'indicators', filter: projectFilter }, (payload) => {
-        setIndicators(prev => {
-          if (prev.find(i => i.id === payload.new.id)) return prev;
-          return [...prev, { id: payload.new.id, name: payload.new.name }];
-        });
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'indicators', filter: projectFilter }, (payload) => {
-        setIndicators(prev => prev.filter(i => i.id !== payload.old.id));
-      })
-
-      // APP_CONFIG
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_config', filter: projectFilter }, (payload) => {
-        const { key, value } = payload.new;
-        if (key === 'nextId') setNextId(Number(value));
-        if (key === 'currentUserId') setCurrentUserId(value === null ? null : Number(value));
-      })
-
-      // TASK_FIELD_DEFS — schema of custom card fields per project.
-      // Treats soft-deleted rows (deleted_at NOT NULL) as removals so the
-      // UI stays in sync without an extra query.
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_field_defs', filter: projectFilter }, (payload) => {
-        const row = payload.new;
-        if (row.deleted_at) return;
-        setTaskFieldDefs(prev => {
-          if (prev.find(d => d.id === row.id)) return prev;
-          return [...prev, row].sort((a, b) => (a.position - b.position) || (a.id - b.id));
-        });
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_field_defs', filter: projectFilter }, (payload) => {
-        const row = payload.new;
-        setTaskFieldDefs(prev => {
-          const without = prev.filter(d => d.id !== row.id);
-          if (row.deleted_at) return without;
-          return [...without, row].sort((a, b) => (a.position - b.position) || (a.id - b.id));
-        });
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'task_field_defs', filter: projectFilter }, (payload) => {
-        setTaskFieldDefs(prev => prev.filter(d => d.id !== payload.old.id));
-      })
-
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [projectId]);
-
-  // createTask / updateTask / deleteTask viven ahora en useTasks (hook). H-002 fase D.
-  // saveParticipants / saveIndicators / saveTaskTypes / saveDimensions / saveProjectPin
-  // y el CRUD de campos personalizados viven en useProjectConfig / useTaskFieldDefs. H-002 fase D.
-  // La presencia (activos/expulsión/conflicto) + handleForceEntry/handleChangeUser viven en usePresence. H-002 fase D.
+  // Todo el estado/CRUD de datos del proyecto, la carga masiva (loadAllForProject)
+  // y el canal realtime viven en useProjectData (que compone useTasks /
+  // useProjectConfig / useTaskFieldDefs). La presencia vive en usePresence.
+  // App solo orquesta auth/UI + render. H-002 fase D — consolidación.
 
   const currentUser = useMemo(() => participants.find((p) => p.id === currentUserId) || null, [participants, currentUserId]);
-
-  // exportCSV vive ahora en useTasks (hook). H-002 fase D.
 
   const today = new Date().toISOString().split('T')[0];
   const alerts = useMemo(() => {

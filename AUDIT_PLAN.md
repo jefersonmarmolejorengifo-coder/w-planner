@@ -204,6 +204,17 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 6 — accesibilidad (cierre) + monolito fase 1 (rama `fix/superauditor-sprint-6`)
+
+**Accesibilidad pendiente (cerrada):** se aplicó `useDialog` + semántica de diálogo a `SuperTaskCreatorModal`; el tour de `Onboarding` recibió `role="dialog"`/`aria-label` + Escape-para-saltar (sin focus-trap, para no romper la navegación del tour).
+
+**H-002 — descomposición del monolito (fase 1):**
+- Se introdujo el patrón de **code-splitting con `React.lazy` + `Suspense`** y la estructura `src/features/`.
+- Extraído `PlanSelectionModal` → `src/features/billing/PlanSelectionModal.jsx`, cargado con `lazy`. Verificado: sale a su propio chunk (~10.8 kB / 3.5 kB gzip) y el bundle inicial baja.
+- Piezas ya extraídas en sprints previos: `calcAporte` → `lib/aporte.js`, `aiModels.js`, `useDialog.js`.
+
+> **H-002 es ÉPICO e incremental.** Próximas fases sugeridas (cada una su PR, con build verificado): extraer y `lazy`-cargar `ConsolidatedDashboard` (requiere mapear sus fronteras: Shell componente-en-render + visor de reportes anidado), luego paneles de reportes/evolutivo/chat, y mover constantes compartidas (`TASK_DONE`/`TASK_BLOCKED`) a `src/constants.js`. No hacer todo en un solo PR: el archivo es central y el riesgo de regresión es alto.
+
 ### Sprint 5 — accesibilidad (rama `fix/superauditor-sprint-5`)
 
 | Hallazgo | Estado | Cambio |

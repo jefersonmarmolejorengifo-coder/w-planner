@@ -204,6 +204,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 16 — monolito fase 11 (rama `fix/superauditor-sprint-16`)
+
+**H-002 (continuación):** extraído "Mi Día" + su cluster de retros (cohesivo y solo usado por FocusTab): `RETRO_EMOJIS` + `SprintRetroForm` + `PendingRetrosBanner` + `FocusTab` → `src/features/focus/FocusTab.jsx`, cargado con `React.lazy`. Helper `getColombiaNow` movido a `src/lib/format.js` (usado por FocusTab + creación/edición de tareas en el monolito). `index` baja a **432 kB**; chunk `FocusTab` ~11.2 kB. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint de archivos nuevos sin errores. Sin migración.
+
+Quedan: `ConfigTab` (~600 líneas, con DimensionEditor/FieldDefEditor/PremiumPanel/ReportsConfigSection) y el núcleo (`BoardTab`/`TaskForm`/`App`, requiere levantar estado).
+
 ### Sprint 15 — monolito fase 10 (rama `fix/superauditor-sprint-15`)
 
 **H-002 (continuación):** extraída la unidad de Super-tareas (la más grande, ~565 líneas): `SuperTaskJar` + `SuperTaskExpanded` + `SuperTasksTab` → `src/features/tasks/SuperTasksTab.jsx`, cargado con `React.lazy`. Reutiliza `PresentationCard` (módulo hoja) y `SuperTaskCreatorModal` (lazy, ya extraído). Se limpiaron del monolito el import de `PresentationCard` y el lazy de `SuperTaskCreatorModal` (ya no usados allí), y se removió el prop `participants` que estaba sin uso (antes suprimido con `eslint-disable`). `index` baja a **442.8 kB**; chunk `SuperTasksTab` ~15.3 kB. Refactor behavior-preserving. `npm test` 42/42 ✅, build ✅, lint del archivo nuevo limpio. Sin migración.

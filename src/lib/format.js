@@ -10,3 +10,14 @@ export const getUserColor = (name) =>
 // Iniciales (hasta 2) en mayúscula. "Ana Martínez" → "AM".
 export const getInitials = (name) =>
   (name || "?").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+
+// Timestamp "ahora" en zona horaria de Colombia (formato es-CO, 24h). Lo usan
+// la creación/edición de tareas y el cierre desde Mi Día.
+export const getColombiaNow = () => {
+  const d = new Date();
+  return d.toLocaleString("es-CO", {
+    timeZone: "America/Bogota",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+};

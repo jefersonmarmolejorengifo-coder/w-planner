@@ -27,6 +27,7 @@ import { DEFAULT_DIMENSIONS } from './lib/aporte';
 import { useProjectData } from './hooks/useProjectData';
 import { usePresence } from './hooks/usePresence';
 import { useReferralCapture, getReferralCode } from './hooks/useReferralCapture';
+import { useReferralSync } from './hooks/useReferralSync';
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 
@@ -1517,6 +1518,8 @@ function PlansLauncher({ variant = "header" }) {
     </button>
   );
 
+  const referralCode = getReferralCode();
+
   return (
     <>
       {trigger}
@@ -1525,6 +1528,7 @@ function PlansLauncher({ variant = "header" }) {
           <PlanSelectionModal
             currentTier={currentTier}
             busy={busy}
+            referralCode={referralCode}
             onSubscribe={(t) => { setOpen(false); subscribe(t); }}
             onClose={() => setOpen(false)}
           />
@@ -1654,6 +1658,10 @@ export default function App() {
   const [myRole, setMyRole] = useState(null);
   const [showIntro, setShowIntro] = useState(true);
   const [authUser, setAuthUser] = useState(null);
+
+  // Sync proactivo: si el usuario ya tiene sesión y hay ?ref= en localStorage,
+  // lo envía al backend sin esperar a que haga click en "Suscribirse".
+  useReferralSync(authUser);
   const [showAuth, setShowAuth] = useState(false);
   const [activeUser, setActiveUser] = useState(null);
   const [showProjectLanding, setShowProjectLanding] = useState(false);

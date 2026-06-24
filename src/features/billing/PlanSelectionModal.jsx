@@ -8,7 +8,7 @@ import { ALL_PLANS, PLAN_CONTACT_EMAIL } from "../../plans";
 //   - onSubscribe(tier): dispara el checkout de Mercado Pago (planes 'buy').
 //   - ctaType 'contact' (Enterprise) abre un correo a PLAN_CONTACT_EMAIL.
 // Extraído del monolito (H-002) y cargado con React.lazy para sacarlo del bundle inicial.
-export default function PlanSelectionModal({ currentTier, busy, onSubscribe, onClose }) {
+export default function PlanSelectionModal({ currentTier, busy, referralCode, onSubscribe, onClose }) {
   const fmt = (n) => n.toLocaleString("es-CO");
   const titleId = useId();
   const dialogRef = useDialog(onClose);
@@ -128,6 +128,14 @@ export default function PlanSelectionModal({ currentTier, busy, onSubscribe, onC
         .pp-plan-cta-ghost { background: transparent; color: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.12); cursor: default; }
         .pp-plan-cta:disabled { cursor: default; }
         .pp-plans-foot { text-align: center; font-size: 11.5px; color: rgba(255,255,255,0.4); margin-top: 28px; line-height: 1.6; }
+        .pp-plans-ref-badge {
+          display: inline-flex; align-items: center; gap: 6px;
+          font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+          color: rgba(255,255,255,0.45); background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.1); border-radius: 999px;
+          padding: 5px 12px;
+        }
+        .pp-plans-ref-badge svg { flex-shrink: 0; }
         @media (max-width: 560px) { .pp-plans-title { font-size: 28px; } }
       `}</style>
 
@@ -139,6 +147,20 @@ export default function PlanSelectionModal({ currentTier, busy, onSubscribe, onC
           Desbloquea reportes con IA, pulso del equipo y analítica avanzada.
           Cobro mensual en COP vía Mercado Pago. Cancela cuando quieras.
         </p>
+
+        {referralCode && (
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <span className="pp-plans-ref-badge" role="note" aria-label="Te recomendó un afiliado del programa de Soft a tu Medida">
+              {/* Sparkles icon — SVG inline, no dependencia externa */}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                <path d="M12 3 L13.5 8.5 L19 10 L13.5 11.5 L12 17 L10.5 11.5 L5 10 L10.5 8.5 Z" />
+                <path d="M5 3 L5.75 5.25 L8 6 L5.75 6.75 L5 9 L4.25 6.75 L2 6 L4.25 5.25 Z" />
+                <path d="M19 17 L19.75 19.25 L22 20 L19.75 20.75 L19 23 L18.25 20.75 L16 20 L18.25 19.25 Z" />
+              </svg>
+              Te recomendó un afiliado del programa de Soft a tu Medida.
+            </span>
+          </div>
+        )}
 
         <div className="pp-plans-grid">
           {ALL_PLANS.map((plan, i) => {

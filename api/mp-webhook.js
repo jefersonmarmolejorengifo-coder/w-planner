@@ -313,7 +313,11 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ ok: true, info: `evento ${type} ignorado` });
   } catch (err) {
-    console.error("[mp-webhook] error:", err);
-    return res.status(500).json({ error: err.message });
+    // Loguear el detalle real server-side (Vercel logs) sin exponerlo al caller.
+    // err.message puede contener connection strings, tokens parciales u otros
+    // datos internos; nunca debe llegar al body de respuesta que MP recibe
+    // y potencialmente loguea en su dashboard.
+    console.error("[mp-webhook] internal:", err);
+    return res.status(500).json({ error: "internal error" });
   }
 }

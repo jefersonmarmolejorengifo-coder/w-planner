@@ -1,7 +1,8 @@
 // Hook: useReferralCapture
 // Captura el parámetro `?ref=` de la URL al montar la SPA y lo persiste en
 // localStorage bajo la key `wplanner_ref_code`. Implementa lock-in lifetime
-// (el primer código que ve el browser gana) y expiración de 90 días.
+// (el primer código que ve el browser gana) y expiración de 30 días.
+// localStorage es cache pre-registro; la fuente de verdad es la DB (ver useReferralSync).
 //
 // Uso:
 //   import { useReferralCapture, getReferralCode } from './hooks/useReferralCapture';
@@ -16,11 +17,11 @@ import { useEffect } from "react";
 
 const STORAGE_KEY = "wplanner_ref_code";
 const REF_REGEX = /^[A-Z0-9]{8}$/;
-const EXPIRY_DAYS = 90;
+const EXPIRY_DAYS = 30;
 
 /**
  * Lee el código de referido de localStorage.
- * Devuelve el string del código si existe y no ha caducado (90 días desde
+ * Devuelve el string del código si existe y no ha caducado (30 días desde
  * captured_at). Devuelve null en cualquier otro caso, incluyendo cuando
  * localStorage no está disponible (Safari modo privado, etc.).
  *
@@ -84,7 +85,7 @@ export function useReferralCapture() {
         window.location.pathname +
         (newSearch ? "?" + newSearch : "") +
         window.location.hash;
-      window.history.replaceState(null, "", newUrl);
+      window.history.replaceState(window.history.state, "", newUrl);
     } catch {
       // Falla silenciosa — localStorage deshabilitado u otro error de entorno
     }

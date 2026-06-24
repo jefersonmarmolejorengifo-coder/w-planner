@@ -72,15 +72,28 @@ describe('mapStatus', () => {
 });
 
 describe('parseExternalReference', () => {
-  it('parsea el formato USERID:tier', () => {
+  it('parsea el formato legacy de 2 segmentos USERID:tier (backward-compatible)', () => {
     expect(parseExternalReference('user-uuid-123:pro_solo')).toEqual({
-      userId: 'user-uuid-123', tier: 'pro_solo',
+      userId: 'user-uuid-123', tier: 'pro_solo', referralCode: null,
+    });
+  });
+
+  it('parsea el formato extendido de 3 segmentos USERID:tier:refCode', () => {
+    expect(parseExternalReference('user-uuid-123:pro_solo:ABC123')).toEqual({
+      userId: 'user-uuid-123', tier: 'pro_solo', referralCode: 'ABC123',
+    });
+  });
+
+  it('parsea 3 segmentos con refCode vacío como referralCode null', () => {
+    expect(parseExternalReference('user-uuid-123:pro_solo:')).toEqual({
+      userId: 'user-uuid-123', tier: 'pro_solo', referralCode: null,
     });
   });
 
   it('retorna nulls ante referencia ausente o mal formada', () => {
-    expect(parseExternalReference(null)).toEqual({ userId: null, tier: null });
-    expect(parseExternalReference('sin_separador')).toEqual({ userId: null, tier: null });
-    expect(parseExternalReference('a:b:c')).toEqual({ userId: null, tier: null });
+    expect(parseExternalReference(null)).toEqual({ userId: null, tier: null, referralCode: null });
+    expect(parseExternalReference('sin_separador')).toEqual({ userId: null, tier: null, referralCode: null });
+    // Más de 3 segmentos: formato no reconocido
+    expect(parseExternalReference('a:b:c:d')).toEqual({ userId: null, tier: null, referralCode: null });
   });
 });

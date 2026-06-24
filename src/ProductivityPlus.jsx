@@ -26,6 +26,7 @@ import NameCaptureModal from './NameCaptureModal';
 import { DEFAULT_DIMENSIONS } from './lib/aporte';
 import { useProjectData } from './hooks/useProjectData';
 import { usePresence } from './hooks/usePresence';
+import { useReferralCapture, getReferralCode } from './hooks/useReferralCapture';
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 
@@ -1486,7 +1487,7 @@ function PlansLauncher({ variant = "header" }) {
     setBusy(true);
     try {
       const headers = await getAuthJsonHeaders();
-      const res = await fetch("/api/mp-subscribe", { method: "POST", headers, body: JSON.stringify({ tier }) });
+      const res = await fetch("/api/mp-subscribe", { method: "POST", headers, body: JSON.stringify({ tier, referral_code: getReferralCode() }) });
       const data = await res.json();
       if (!res.ok || !data.init_point) throw new Error(data.error || `HTTP ${res.status}`);
       window.location.assign(data.init_point);
@@ -1642,6 +1643,9 @@ function BillingReturnOverlay() {
 }
 
 export default function App() {
+  // Captura ?ref= de la URL al montar y lo persiste en localStorage.
+  useReferralCapture();
+
   const [activeTab, setActiveTab] = useState("board");
   const [forceTour, setForceTour] = useState(false);
   const [forceTourRole, setForceTourRole] = useState(null); // rol elegido en el selector de tours (null = mi rol)

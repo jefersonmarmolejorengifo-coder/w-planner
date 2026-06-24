@@ -7,6 +7,7 @@
 //   Eventos: subscription_preapproval, subscription_authorized_payment
 
 import { applyCors, createAdminClient, fetchWithTimeout } from "./_auth.js";
+import { notificarPagoAlHub } from "./_hub-client.js";
 import crypto from "node:crypto";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
@@ -75,13 +76,32 @@ export function mapStatus(mpStatus) {
   }
 }
 
-// Reverse: 'pro_solo:USERID' o 'USERID:pro_solo' (depende del orden que
-// hayamos usado en mp-subscribe.js — usamos USER:tier).
+// Parsea el external_reference que w-planner codifica en MP.
+//
+// Formatos soportados (backward-compatible):
+//   2 segmentos (preapprovals antiguas): "userId:tier"
+//   3 segmentos (nuevo formato):         "userId:tier:refCode"
+//     → refCode puede ser vacío ("userId:tier:") si no hubo atribución.
+//
+// Devuelve { userId, tier, referralCode } donde referralCode es null si:
+//   - formato de 2 segmentos (preapproval antigua)
+//   - tercer segmento presente pero vacío
+//
+// Devuelve { userId: null, tier: null, referralCode: null } si el formato
+// no es parseable (menos de 2 segmentos o más de 3).
 export function parseExternalReference(ref) {
-  if (!ref) return { userId: null, tier: null };
+  if (!ref) return { userId: null, tier: null, referralCode: null };
   const parts = String(ref).split(":");
-  if (parts.length !== 2) return { userId: null, tier: null };
-  return { userId: parts[0], tier: parts[1] };
+  if (parts.length === 2) {
+    // Formato antiguo: backward-compatible, sin referral.
+    return { userId: parts[0], tier: parts[1], referralCode: null };
+  }
+  if (parts.length === 3) {
+    const referralCode = parts[2].trim() || null;
+    return { userId: parts[0], tier: parts[1], referralCode };
+  }
+  // Más de 3 segmentos o 0-1: formato no reconocido.
+  return { userId: null, tier: null, referralCode: null };
 }
 
 export default async function handler(req, res) {
@@ -155,6 +175,8 @@ export default async function handler(req, res) {
   try {
     if (type === "subscription_preapproval" || type === "preapproval") {
       const pa = await fetchPreapproval(dataId, mpToken);
+      // referralCode del preapproval ya no se usa: la notificación al hub se
+      // difirió al evento subscription_authorized_payment (ver comentario abajo).
       const { userId, tier } = parseExternalReference(pa.external_reference);
       if (!userId) {
         console.warn("[mp-webhook] preapproval sin external_reference parseable:", pa.external_reference);
@@ -177,6 +199,14 @@ export default async function handler(req, res) {
       if (pa.date_created)           update.current_period_start = pa.date_created;
 
       await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
+
+      // NO se notifica al hub aquí. El preapproval es la "autorización" del usuario
+      // para el cobro, no un pago efectivo. Notificar aquí y también en
+      // subscription_authorized_payment generaba comisión doble porque ambos eventos
+      // usaban IDs distintos (pa_<preapprovalId> vs <payment.id>) que el UNIQUE del
+      // hub no deduplica. La primera comisión se registra al llegar el evento
+      // subscription_authorized_payment (primer cargo real confirmado por MP).
+
       return res.status(200).json({ ok: true, processed: "preapproval", user: userId, new_status: status });
     }
 
@@ -187,13 +217,26 @@ export default async function handler(req, res) {
       const preapprovalId = payment?.preapproval_id || payment?.metadata?.preapproval_id;
       const externalRef = payment?.external_reference;
       let userId = null;
-      if (externalRef) ({ userId } = parseExternalReference(externalRef));
+      let tier = null;
+      let referralCode = null;
 
-      if (preapprovalId && !userId) {
-        // Resolver el user via el preapproval
-        const pa = await fetchPreapproval(preapprovalId, mpToken);
-        ({ userId } = parseExternalReference(pa.external_reference));
+      if (externalRef) {
+        ({ userId, tier, referralCode } = parseExternalReference(externalRef));
       }
+
+      // Para subscription_authorized_payment (cobro recurrente), MP frecuentemente
+      // NO incluye external_reference en el payment. Hay que fetchear el preapproval
+      // para obtenerlo. Este es el extra API call identificado por infra-scalability.
+      let resolvedPa = null;
+      if (preapprovalId && (!userId || !referralCode)) {
+        resolvedPa = await fetchPreapproval(preapprovalId, mpToken);
+        const parsed = parseExternalReference(resolvedPa.external_reference);
+        if (!userId) userId = parsed.userId;
+        if (!tier)   tier   = parsed.tier;
+        // referralCode del preapproval solo se usa si el payment no traía ref propio
+        if (!referralCode) referralCode = parsed.referralCode;
+      }
+
       if (!userId) {
         console.warn("[mp-webhook] payment sin user resoluble:", dataId);
         return res.status(200).json({ ok: true, info: "no user resolvable" });
@@ -206,6 +249,65 @@ export default async function handler(req, res) {
         metadata: { last_event: "payment", payment_id: payment.id, mp_status: payment.status },
       };
       await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
+
+      // ── Notificación al hub (cobro recurrente) ───────────────────────────
+      // Notificamos en todo pago approved, sea el primero o una renovación.
+      // mp_payment_id UNIQUE en hub.transacciones absorbe duplicados si MP reintenta.
+      // Si el hub está caído, users_premium ya fue actualizado arriba.
+      if (payment.status === "approved") {
+        try {
+          const montoBase = payment.transaction_amount ?? 0;
+
+          // M-2: no notificar al hub si el monto es COP$0 o null — evita registrar
+          // comisiones de monto cero que podrían distorsionar el tablero de afiliados.
+          if (!(montoBase > 0)) {
+            console.warn("[mp-webhook] payment aprobado con monto <= 0; hub no notificado. payment_id:", payment.id);
+          } else {
+            // fee_mp_cop: algunos objetos payment incluyen marketplace_fee o charges_details.
+            // Si no está disponible, se envía 0 y el hub puede calcularlo con su propia lógica.
+            const feeMp = payment.fee_details
+              ? payment.fee_details.reduce((sum, f) => sum + (f.amount || 0), 0)
+              : 0;
+
+            // Nombre del plan: si tenemos tier del external_reference lo usamos;
+            // si no (preapproval muy antigua sin 3 segmentos), caemos a genérico.
+            const planLabel = tier
+              ? `Productivity Plus · ${tier}`
+              : "Productivity Plus";
+
+            const payerEmail =
+              payment.payer?.email ||
+              resolvedPa?.payer_email ||
+              "";
+
+            const hubResult = await notificarPagoAlHub({
+              mp_payment_id:   String(payment.id),
+              cliente_email:   payerEmail.toLowerCase(),
+              cliente_nombre:  payment.payer?.first_name
+                ? `${payment.payer.first_name} ${payment.payer.last_name || ""}`.trim()
+                : undefined,
+              plan_o_producto: planLabel,
+              monto_bruto_cop: montoBase,
+              fee_mp_cop:      feeMp,
+              monto_neto_cop:  montoBase - feeMp,
+              ref_code:        referralCode ?? undefined,
+              fecha_pago:      payment.date_approved || payment.date_created || new Date().toISOString(),
+            });
+            if (!hubResult.ok) {
+              console.warn("[mp-webhook] hub notificación payment falló (no-crítico):", hubResult.error);
+            } else {
+              console.log("[mp-webhook] hub notificado (payment):", hubResult.transaccion_id);
+            }
+          }
+        } catch {
+          // Fail-open: nunca propaga. El cobro ya fue confirmado.
+          // A-2: no capturamos ni logueamos el mensaje de la excepción del hub —
+          // puede contener el body del request saliente y exponer datos sensibles
+          // en los logs de Vercel.
+          console.error("[mp-webhook] hub error (omitido)");
+        }
+      }
+
       return res.status(200).json({ ok: true, processed: "payment", user: userId });
     }
 

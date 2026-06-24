@@ -1,4 +1,8 @@
-import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+// La versión que muestra el footer sale de package.json (fuente única de verdad).
+// Bumpéala ahí siguiendo SemVer (MAYOR.MENOR.PARCHE) y el footer se actualiza solo.
+// Named import → Vite hace tree-shaking y solo entra `version` al bundle.
+import { version as APP_VERSION } from "../package.json";
 import { supabase } from './supabaseClient';
 import { REPORT_TYPE_LABEL, STATUS_COLORS, STATUS_LIGHT, ESTADOS, DEFAULT_TASK_TYPES } from './constants';
 import { getAuthJsonHeaders } from './lib/authHeaders';
@@ -1858,6 +1862,43 @@ export default function App() {
     if (!TABS.find(t => t.id === activeTab)) setActiveTab(TABS[0].id);
   }, [TABS.length, activeTab]);
 
+  // ── Tabs responsivos: si la fila no cabe, colapsa a menú hamburguesa ──
+  // No usamos un breakpoint fijo de media query porque el nº de tabs varía por
+  // rol (owner ~14, participante ~5): medimos el desbordamiento real con un
+  // ResizeObserver. Mientras está expandida guardamos el ancho que necesita la
+  // fila (tabsNeedWidthRef); cuando está colapsada, re-expandimos si vuelve a caber.
+  const tabsWrapRef = useRef(null);
+  const tabsRowRef = useRef(null);
+  const tabsNeedWidthRef = useRef(0);
+  const TABS_WRAP_PADDING = 40; // padding horizontal del contenedor (20px + 20px)
+  const [tabsCollapsed, setTabsCollapsed] = useState(false);
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const wrap = tabsWrapRef.current;
+    if (!wrap) return;
+    const measure = () => {
+      const avail = wrap.clientWidth - TABS_WRAP_PADDING;
+      const row = tabsRowRef.current;
+      if (row) {
+        // Expandida: medimos el ancho real de la fila y colapsamos si no cabe.
+        tabsNeedWidthRef.current = row.scrollWidth;
+        if (row.scrollWidth > avail + 1) setTabsCollapsed(true);
+      } else if (avail >= tabsNeedWidthRef.current + 8) {
+        // Colapsada: si volvió a haber espacio (con 8px de histéresis), expandimos
+        // y cerramos el dropdown por si quedó abierto.
+        setTabsCollapsed(false);
+        setTabMenuOpen(false);
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [tabsCollapsed, TABS.length]);
+
+  const activeTabLabel = TABS.find(t => t.id === activeTab)?.label || "Menú";
+
   return (
     <>
       <BillingReturnOverlay />
@@ -2087,22 +2128,75 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ background: "#ffffff", borderBottom: "1px solid #e8e0f4", padding: "0 20px", display: "flex", gap: 0, boxShadow: "0 2px 8px rgba(84,44,156,0.06)" }}>
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            data-tour={`tab-${tab.id}`}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              background: "none", border: "none",
-              borderBottom: activeTab === tab.id ? "2.5px solid #542c9c" : "2.5px solid transparent",
-              color: activeTab === tab.id ? "#542c9c" : "#888888",
-              padding: "11px 18px", cursor: "pointer", fontSize: 13,
-              fontWeight: activeTab === tab.id ? 700 : 500,
-              transition: "all 0.15s", fontFamily: "inherit",
-            }}
-          >{tab.label}</button>
-        ))}
+      <div ref={tabsWrapRef} style={{ background: "#ffffff", borderBottom: "1px solid #e8e0f4", padding: "0 20px", boxShadow: "0 2px 8px rgba(84,44,156,0.06)", position: "relative" }}>
+        {tabsCollapsed ? (
+          // ── Colapsado: botón hamburguesa + dropdown vertical ──
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setTabMenuOpen(o => !o)}
+              aria-label="Abrir menú de secciones"
+              aria-expanded={tabMenuOpen}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                background: "none", border: "none", cursor: "pointer",
+                padding: "11px 4px", fontSize: 14, fontWeight: 700, color: "#542c9c",
+                fontFamily: "inherit",
+              }}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1 }}>☰</span>
+              <span>{activeTabLabel}</span>
+              <span style={{ fontSize: 10, color: "#969696", transform: tabMenuOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
+            </button>
+            {tabMenuOpen && (
+              <>
+                {/* overlay para cerrar al hacer clic fuera */}
+                <div onClick={() => setTabMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 61,
+                  background: "#fff", border: "1px solid #e8e0f4", borderRadius: 12,
+                  boxShadow: "0 8px 28px rgba(84,44,156,0.18)", padding: 6,
+                  minWidth: 220, maxHeight: "70vh", overflowY: "auto",
+                }}>
+                  {TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      data-tour={`tab-${tab.id}`}
+                      onClick={() => { setActiveTab(tab.id); setTabMenuOpen(false); }}
+                      style={{
+                        display: "block", width: "100%", textAlign: "left",
+                        background: activeTab === tab.id ? "#f3eefc" : "none", border: "none",
+                        borderLeft: activeTab === tab.id ? "3px solid #542c9c" : "3px solid transparent",
+                        color: activeTab === tab.id ? "#542c9c" : "#555",
+                        padding: "10px 14px", cursor: "pointer", fontSize: 13.5,
+                        fontWeight: activeTab === tab.id ? 700 : 500,
+                        borderRadius: 8, fontFamily: "inherit",
+                      }}
+                    >{tab.label}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          // ── Expandido: fila horizontal de tabs (comportamiento original) ──
+          <div ref={tabsRowRef} style={{ display: "flex", gap: 0 }}>
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                data-tour={`tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  background: "none", border: "none", whiteSpace: "nowrap",
+                  borderBottom: activeTab === tab.id ? "2.5px solid #542c9c" : "2.5px solid transparent",
+                  color: activeTab === tab.id ? "#542c9c" : "#888888",
+                  padding: "11px 18px", cursor: "pointer", fontSize: 13,
+                  fontWeight: activeTab === tab.id ? 700 : 500,
+                  transition: "all 0.15s", fontFamily: "inherit",
+                }}
+              >{tab.label}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: "20px 20px 40px" }}>
@@ -2210,8 +2304,8 @@ export default function App() {
         })()}
       </div>
       <div style={{ position: "fixed", bottom: 12, left: 16, display: "flex", flexDirection: "column", gap: 1, zIndex: 50 }}>
-        <span style={{ fontSize: 10, color: "#969696", fontWeight: 400, letterSpacing: "0.03em" }}>Desarrollado por Jeferson Marmolejo</span>
-        <span style={{ fontSize: 9, color: "#b0b0b0", letterSpacing: "0.05em" }}>Productivity-Plus v1.0.0</span>
+        <span style={{ fontSize: 10, color: "#969696", fontWeight: 400, letterSpacing: "0.03em" }}>Desarrollado por Soft a tu medida</span>
+        <span style={{ fontSize: 9, color: "#b0b0b0", letterSpacing: "0.05em" }}>Productivity-Plus v{APP_VERSION}</span>
       </div>
     </div>
       </div>

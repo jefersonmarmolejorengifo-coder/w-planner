@@ -13,7 +13,7 @@ export const AI_MODELS = {
   // Análisis mensual del equipo (api/generate-monthly-report.js).
   monthlyReport: { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   // Evolutivo bimensual (api/generate-evolution.js) — profundidad de análisis.
-  evolution:     { id: "claude-opus-4-7",   label: "Opus 4.7" },
+  evolution:     { id: "claude-opus-4-8",   label: "Opus 4.8" },
   // Chat IA en vivo (api/chat-stream.js).
   chat:          { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   // Reporte Scrum (api/generate-scrum-report.js) — Gemini, override por GEMINI_MODEL.

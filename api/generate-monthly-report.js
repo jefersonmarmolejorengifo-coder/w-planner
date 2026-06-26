@@ -312,6 +312,13 @@ export default async function handler(req) {
   if (!projectId || !isDateOnly(monthStart) || !isDateOnly(monthEnd)) {
     return jsonError("projectId, monthStart y monthEnd son requeridos", 400, headers);
   }
+  // Rechaza periodos sin duración o invertidos antes de consultar la DB
+  // o gastar tokens del LLM. monthStart y monthEnd vienen del body del
+  // request (no se calculan internamente), por eso el orden no está garantizado.
+  // La comparación lexicográfica es suficiente para fechas YYYY-MM-DD.
+  if (monthStart >= monthEnd) {
+    return jsonError("monthStart debe ser anterior a monthEnd", 400, headers);
+  }
 
   const internalSecret = req.headers.get("x-cron-secret");
   const isInternal = process.env.CRON_SECRET && internalSecret === process.env.CRON_SECRET;

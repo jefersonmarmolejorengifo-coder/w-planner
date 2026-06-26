@@ -17,6 +17,7 @@ describe('AI_MODELS (H-022)', () => {
   });
 
   it('el evolutivo se mantiene en Opus por profundidad de análisis', () => {
-    expect(AI_MODELS.evolution.id).toBe('claude-opus-4-7');
+    // O-07: bump de Opus 4.7 (legacy) -> Opus 4.8.
+    expect(AI_MODELS.evolution.id).toBe('claude-opus-4-8');
   });
 });

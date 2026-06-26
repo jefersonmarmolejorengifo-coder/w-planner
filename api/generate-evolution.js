@@ -327,6 +327,12 @@ export default async function handler(req) {
   if (!projectId || !isDateOnly(periodStart) || !isDateOnly(periodEnd)) {
     return jsonError("projectId, periodStart y periodEnd son requeridos", 400, headers);
   }
+  // Rechaza periodos sin duración o invertidos antes de gastar tokens del LLM
+  // o de ejecutar el upsert (cuya clave única es project_id + period_start + period_end).
+  // La comparación lexicográfica es suficiente para fechas YYYY-MM-DD.
+  if (periodStart >= periodEnd) {
+    return jsonError("periodStart debe ser anterior a periodEnd", 400, headers);
+  }
 
   const internalSecret = req.headers.get("x-cron-secret");
   const isInternal = process.env.CRON_SECRET && internalSecret === process.env.CRON_SECRET;

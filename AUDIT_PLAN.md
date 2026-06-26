@@ -256,6 +256,16 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 31 — B-3 (validación de periodos) + O-07 (modelo evolutivo) (2026-06-26)
+
+**B-3 (ALTO) `[backend]` ✅:** los endpoints del evolutivo/mensual validaban el formato de fecha pero NO el orden, así que un periodo invertido o de duración cero (fin ≤ inicio) gastaba tokens del LLM y podía sobrescribir histórico (el upsert del evolutivo usa `(project_id, period_start, period_end)` como clave única). Se agrega guard `start >= end → 400` ANTES de cualquier query/LLM en `api/generate-evolution.js`, `api/save-evolution.js` y `api/generate-monthly-report.js` (este último valida `monthStart`/`monthEnd` del body). Comparación lexicográfica (válida para `YYYY-MM-DD`).
+
+**O-07 (quick win) `[backend]` ✅:** `src/aiModels.js` — modelo del evolutivo `claude-opus-4-7` (legacy) → `claude-opus-4-8`; test de consistencia `src/aiModels.test.js` actualizado al nuevo id.
+
+Delegado a **backend-dev**, verificado por el líder (el test de modelo lo cazó el líder al correr la suite). `vitest` 44/44 ✅, `vite build` ✅, lint limpio. Sin migración. **Deuda anotada:** la validación de orden es inline (closures locales); extraer `requireDateRange()` a `_auth.js` + test en `_auth.validation.test.js` queda para un PR aparte.
+
+> Tanda 1: #1 R-01/R-02 ✅ · #2 B-3 ✅ · #3 O-07 ✅. Resta #4 (alert/confirm → Toast).
+
 ### Sprint 30 — R-01/R-02 menú responsivo (ResizeObserver) (2026-06-26)
 
 **R-01/R-02 (ALTO) `[frontend]` ✅:** el menú de tabs responsivo (`src/ProductivityPlus.jsx:1877`) tenía dos bugs del rebrand v1.1.0: (1) el ResizeObserver se reconectaba en cada colapso/expansión (dependía de `tabsCollapsed`) y `setTabsCollapsed` se llamaba dentro de su propio callback → loop + warning "ResizeObserver loop completed with undelivered notifications"; (2) `tabsNeedWidthRef` quedaba stale (=0) en el primer render estrecho → flip-flop/parpadeo. Fix (delegado al especialista **frontend**, verificado por el líder): RO **persistente** (deps solo `[TABS.length]`, lee `tabsCollapsed` vía ref espejo `tabsCollapsedRef`), todos los `setState` dentro de `requestAnimationFrame` con guards de igualdad (no dispara renders redundantes), y guard `needWidth > 0` antes de re-expandir. Behavior-preserving, sin tocar JSX ni estilos. `vite build` ✅, `vitest` 44/44 ✅, lint del bloque limpio (los 6 errores restantes de `ProductivityPlus.jsx` son preexistentes del monolito: `set-state-in-effect` en otros effects + el `_`). Sin migración.

@@ -48,6 +48,13 @@ export default async function handler(req, res) {
     if (!projectId || !isDateOnly(periodStart) || !isDateOnly(periodEnd) || !html) {
       return res.status(400).json({ error: "projectId, periodStart, periodEnd y html son requeridos" });
     }
+    // Rechaza periodos sin duración o invertidos: el upsert usa
+    // (project_id, period_start, period_end) como clave de conflicto,
+    // así que un periodo inválido podría sobrescribir un registro legítimo.
+    // La comparación lexicográfica es suficiente para fechas YYYY-MM-DD.
+    if (periodStart >= periodEnd) {
+      return res.status(400).json({ error: "periodStart debe ser anterior a periodEnd" });
+    }
 
     const token = getBearerToken(req);
     const user = await getAuthenticatedUser(token);

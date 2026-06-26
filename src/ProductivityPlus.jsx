@@ -1874,28 +1874,63 @@ export default function App() {
   const [tabsCollapsed, setTabsCollapsed] = useState(false);
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
 
+  // Ref que espeja tabsCollapsed para que el callback del ResizeObserver lo lea
+  // sin necesitar tabsCollapsed como dependencia del effect (evita reconexión del RO
+  // en cada colapso/expansión → fix R-01: loop del ResizeObserver).
+  const tabsCollapsedRef = useRef(false);
+  useEffect(() => { tabsCollapsedRef.current = tabsCollapsed; }, [tabsCollapsed]);
+
+  // Ref para el requestAnimationFrame pendiente; lo cancelamos si llega una nueva
+  // medición antes de que se ejecute el frame anterior.
+  const tabsRafRef = useRef(null);
+
   useEffect(() => {
     const wrap = tabsWrapRef.current;
     if (!wrap) return;
     const measure = () => {
-      const avail = wrap.clientWidth - TABS_WRAP_PADDING;
-      const row = tabsRowRef.current;
-      if (row) {
-        // Expandida: medimos el ancho real de la fila y colapsamos si no cabe.
-        tabsNeedWidthRef.current = row.scrollWidth;
-        if (row.scrollWidth > avail + 1) setTabsCollapsed(true);
-      } else if (avail >= tabsNeedWidthRef.current + 8) {
-        // Colapsada: si volvió a haber espacio (con 8px de histéresis), expandimos
-        // y cerramos el dropdown por si quedó abierto.
-        setTabsCollapsed(false);
-        setTabMenuOpen(false);
-      }
+      // Cancelamos el frame previo en vuelo para no acumular setState redundantes.
+      if (tabsRafRef.current !== null) cancelAnimationFrame(tabsRafRef.current);
+      tabsRafRef.current = requestAnimationFrame(() => {
+        tabsRafRef.current = null;
+        const avail = wrap.clientWidth - TABS_WRAP_PADDING;
+        const row = tabsRowRef.current;
+        if (row) {
+          // Expandida: guardamos el ancho real y colapsamos solo si desborda.
+          // Siempre actualizamos needWidth mientras la fila está montada, para
+          // que el valor nunca quede stale cuando se desmonte (fix R-02 parcial).
+          tabsNeedWidthRef.current = row.scrollWidth;
+          if (row.scrollWidth > avail + 1 && !tabsCollapsedRef.current) {
+            setTabsCollapsed(true);
+            tabsCollapsedRef.current = true;
+          }
+        } else {
+          // Colapsada: re-expandimos solo si hay espacio (histéresis 8 px) Y el
+          // ancho necesario ya fue medido al menos una vez (needWidth > 0).
+          // Sin la segunda condición, si la página cargó ya angosta (needWidth===0
+          // porque la fila nunca se montó), avail >= 0+8 sería siempre true → flip
+          // inmediato (fix R-02: stale needWidth en primer render estrecho).
+          if (
+            tabsNeedWidthRef.current > 0 &&
+            avail >= tabsNeedWidthRef.current + 8 &&
+            tabsCollapsedRef.current
+          ) {
+            setTabsCollapsed(false);
+            setTabMenuOpen(false);
+            tabsCollapsedRef.current = false;
+          }
+        }
+      });
     };
     measure();
+    // El RO solo se reconecta cuando cambia TABS.length (rol distinto), NO con cada
+    // colapso/expansión. tabsCollapsed se lee a través de tabsCollapsedRef.
     const ro = new ResizeObserver(measure);
     ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [tabsCollapsed, TABS.length]);
+    return () => {
+      ro.disconnect();
+      if (tabsRafRef.current !== null) cancelAnimationFrame(tabsRafRef.current);
+    };
+  }, [TABS.length]);
 
   const activeTabLabel = TABS.find(t => t.id === activeTab)?.label || "Menú";
 

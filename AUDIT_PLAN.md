@@ -256,6 +256,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 30 — R-01/R-02 menú responsivo (ResizeObserver) (2026-06-26)
+
+**R-01/R-02 (ALTO) `[frontend]` ✅:** el menú de tabs responsivo (`src/ProductivityPlus.jsx:1877`) tenía dos bugs del rebrand v1.1.0: (1) el ResizeObserver se reconectaba en cada colapso/expansión (dependía de `tabsCollapsed`) y `setTabsCollapsed` se llamaba dentro de su propio callback → loop + warning "ResizeObserver loop completed with undelivered notifications"; (2) `tabsNeedWidthRef` quedaba stale (=0) en el primer render estrecho → flip-flop/parpadeo. Fix (delegado al especialista **frontend**, verificado por el líder): RO **persistente** (deps solo `[TABS.length]`, lee `tabsCollapsed` vía ref espejo `tabsCollapsedRef`), todos los `setState` dentro de `requestAnimationFrame` con guards de igualdad (no dispara renders redundantes), y guard `needWidth > 0` antes de re-expandir. Behavior-preserving, sin tocar JSX ni estilos. `vite build` ✅, `vitest` 44/44 ✅, lint del bloque limpio (los 6 errores restantes de `ProductivityPlus.jsx` son preexistentes del monolito: `set-state-in-effect` en otros effects + el `_`). Sin migración.
+
+> Primer item de la **Tanda 1** del roadmap priorizado (quick wins de alto impacto). Siguientes: B-3 (validar periodos en evolutivo), O-07 (modelo opus-4-8), U-01/U-02/R-11 (alert/confirm → toast).
+
 ### Sprint 29 — críticos de la validación 2026-06-24 (H-030 race de chat + B-4 + H-033) (2026-06-25)
 
 > ⚠️ **Entorno sin git/node/npm en PATH.** Esta máquina no tiene git (no se pudo crear la rama `fix/superauditor-sprint-29` ni commitear): los cambios quedan en el árbol de trabajo de `main`. Las verificaciones se corrieron con el `node.exe` de Playwright (`v24`) invocando los binarios locales de `node_modules`.

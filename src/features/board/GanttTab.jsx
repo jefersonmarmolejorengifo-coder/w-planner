@@ -1,5 +1,6 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { STATUS_COLORS, ESTADOS, DEFAULT_TASK_TYPES } from "../../constants";
+import { useBreakpoint } from "../../hooks/useBreakpoint";
 
 // Diagrama de Gantt (timeline) de tareas con fechas. Dirigido por props.
 // Extraído del monolito (H-002, núcleo fase C).
@@ -11,6 +12,21 @@ export default function GanttTab({ tasks, participants, indicators, taskTypes })
   const [fType, setFType] = useState("");
   const [fIndicator, setFIndicator] = useState("");
   const [fParticipant, setFParticipant] = useState("");
+
+  const bp = useBreakpoint();
+
+  // ── Ancho fluido del area de grafico (RESP-02) ──
+  const chartContainerRef = useRef(null);
+  const [chartW, setChartW] = useState(0);
+
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      setChartW(Math.max(320, Math.floor(entries[0].contentRect.width)));
+    });
+    ro.observe(chartContainerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   const filtered = useMemo(() => tasks.filter((t) => {
     if (!t.startDate || !t.endDate) return false;
@@ -27,9 +43,17 @@ export default function GanttTab({ tasks, participants, indicators, taskTypes })
   const totalMs = Math.max(1, endMs - startMs);
   const [labelWidth, setLabelWidth] = useState(210);
   const isResizing = useRef(false);
-  const CHART_W = 660;
+
+  // RESP-02: labelWidth efectivo por breakpoint
+  const effectiveLabelW = bp === "mobile" ? 140 : labelWidth;
+
+  // RESP-02: chartW fluido (reemplaza la constante CHART_W = 660).
+  // chartW es el ancho del contenedor exterior; restamos effectiveLabelW para obtener
+  // el ancho real del area del SVG (panel derecho). Minimo 320 para no comprimir demasiado.
+  const CHART_W = chartW > 0 ? Math.max(320, chartW - effectiveLabelW) : 0;
+
   const HDR_H = 44;
-  const getRowH = (title) => title && title.length > (labelWidth / 8) ? 50 : 34;
+  const getRowH = (title) => title && title.length > (effectiveLabelW / 8) ? 50 : 34;
 
   const months = useMemo(() => {
     const ms = [];
@@ -44,7 +68,7 @@ export default function GanttTab({ tasks, participants, indicators, taskTypes })
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     }
     return ms;
-  }, [dateFrom, startMs, endMs, totalMs]);
+  }, [dateFrom, startMs, endMs, totalMs, CHART_W]);
 
   const fmtShort = (d) => { if (!d) return ""; const [, m, day] = d.split("-"); return `${day}/${m}`; };
   const fmtFull  = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${day}/${m}/${y}`; };
@@ -66,7 +90,7 @@ export default function GanttTab({ tasks, participants, indicators, taskTypes })
       cur = new Date(nextMs);
     }
     return result;
-  }, [dateFrom, dateTo, startMs, totalMs]);
+  }, [dateFrom, dateTo, startMs, totalMs, CHART_W]);
 
   const todayX = ((new Date(today).getTime() - startMs) / totalMs) * CHART_W;
   const bx = (s) => Math.max(0, ((new Date(s).getTime() - startMs) / totalMs) * CHART_W);
@@ -106,133 +130,135 @@ export default function GanttTab({ tasks, participants, indicators, taskTypes })
         </select>
       </div>
 
-      {filtered.length === 0 ? (
-        <div style={{ textAlign: "center", color: "var(--color-text-secondary)", padding: "40px 0", fontSize: 13 }}>
-          No hay tareas con fechas de inicio y fin en el rango seleccionado.
-        </div>
-      ) : (
-        <div style={{ overflowX: "auto", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 10, background: "var(--color-background-primary)" }}>
-          <div style={{ display: "flex", minWidth: labelWidth + CHART_W }}>
-            <div style={{ position: "relative", width: labelWidth, flexShrink: 0, borderRight: "0.5px solid var(--color-border-tertiary)" }}>
-              <div
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  isResizing.current = true;
-                  const startX = e.clientX;
-                  const startW = labelWidth;
-                  const onMove = (ev) => {
-                    if (!isResizing.current) return;
-                    const newW = Math.max(120, Math.min(400, startW + ev.clientX - startX));
-                    setLabelWidth(newW);
-                  };
-                  const onUp = () => {
-                    isResizing.current = false;
-                    window.removeEventListener("mousemove", onMove);
-                    window.removeEventListener("mouseup", onUp);
-                  };
-                  window.addEventListener("mousemove", onMove);
-                  window.addEventListener("mouseup", onUp);
-                }}
-                style={{ position: "absolute", top: 0, right: 0, width: 6, height: "100%", cursor: "col-resize", background: "transparent", zIndex: 10, transition: "background 0.15s" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(236,108,4,0.35)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              />
-              <div style={{ height: HDR_H, borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "6px 10px" }}>
-                <span style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tarea</span>
-              </div>
-              {filtered.map((t, i) => (
-                <div key={t.id} style={{
-                  height: getRowH(t.title), display: "flex", alignItems: "center", padding: "0 10px",
-                  borderBottom: "0.5px solid var(--color-border-tertiary)",
-                  background: i % 2 === 0 ? "transparent" : "var(--color-background-secondary)",
-                }}>
-                  <span style={{ fontSize: 10, color: "var(--color-text-secondary)", marginRight: 6, flexShrink: 0 }}>#{t.id}</span>
-                  <span style={{
-                    fontSize: 12,
-                    color: "var(--color-text-primary)",
-                    wordBreak: "break-word",
-                    whiteSpace: "normal",
-                    lineHeight: 1.35,
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden",
-                    maxWidth: labelWidth - 40,
-                  }}>{t.title}</span>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ flex: 1, overflowX: "auto" }}>
-              <svg width={CHART_W} height={svgH} style={{ display: "block" }}>
-                {/* ── Nivel superior: meses (0–22 px) ── */}
-                {months.map((m, i) => (
-                  <g key={i}>
-                    <rect x={m.x} y={0} width={m.w} height={22} fill={i % 2 === 0 ? "#fafafa" : "#f4f0fb"} />
-                    <text x={m.x + m.w / 2} y={14} textAnchor="middle" fontSize={10} fontWeight="600" fill="#542c9c">{m.label}</text>
-                    <line x1={m.x} y1={0} x2={m.x} y2={22} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
-                  </g>
-                ))}
-                <line x1={0} y1={22} x2={CHART_W} y2={22} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
-                {/* ── Nivel inferior: días (22–44 px) ── */}
-                {days.map((d, i) => (
-                  <g key={i}>
-                    <rect x={d.x} y={22} width={d.w} height={22} fill={d.fill} />
-                    {d.w > 14 && (
-                      <text x={d.x + d.w / 2} y={36} textAnchor="middle" fontSize={8} fill="#888888">{d.label}</text>
-                    )}
-                    <line x1={d.x} y1={22} x2={d.x} y2={svgH} stroke="var(--color-border-tertiary)" strokeWidth={0.3} opacity={0.4} />
-                  </g>
-                ))}
-                <line x1={0} y1={HDR_H} x2={CHART_W} y2={HDR_H} stroke="var(--color-border-secondary)" strokeWidth={0.5} />
-
-                {(() => {
-                  const elements = [];
-                  let yOffset = HDR_H;
-                  for (let i = 0; i < filtered.length; i++) {
-                    const t = filtered[i];
-                    const rowH = getRowH(t.title);
-                    const rx = bx(t.startDate);
-                    const rw = bw(t.startDate, t.endDate);
-                    const ry = yOffset + 6;
-                    const rh = rowH - 12;
-                    const col = STATUS_COLORS[t.status] || "#888";
-                    const prog = Math.min(100, t.progressPercent || 0) / 100;
-                    const showDates = rw > 120;
-                    elements.push(
-                      <g key={t.id}>
-                        {!showDates && (
-                          <title>{`#${t.id} · ${t.title} · inicio: ${fmtFull(t.startDate)} → fin: ${fmtFull(t.endDate)} · progreso: ${Number(t.progressPercent || 0).toFixed(0)}%`}</title>
-                        )}
-                        <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill={col} opacity={0.25} stroke={col} strokeWidth={1.5} />
-                        <rect x={rx} y={ry} width={rw * prog} height={rh} rx={3} fill={col} opacity={1} />
-                        {showDates ? (
-                          <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fontSize={9} fontWeight="700" fill="#ffffff" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
-                            {fmtShort(t.startDate)} → {fmtShort(t.endDate)}
-                          </text>
-                        ) : rw > 30 ? (
-                          <text x={rx + 5} y={ry + rh / 2 + 4} fontSize={9} fontWeight="500" fill={col}>
-                            {Number(t.progressPercent || 0).toFixed(0)}%
-                          </text>
-                        ) : null}
-                        <line x1={0} y1={yOffset + rowH} x2={CHART_W} y2={yOffset + rowH} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
-                      </g>
-                    );
-                    yOffset += rowH;
-                  }
-                  return elements;
-                })()}
-
-                {todayX >= 0 && todayX <= CHART_W && (
-                  <g>
-                    <line x1={todayX} y1={0} x2={todayX} y2={svgH} stroke="#ec6c04" strokeWidth={1.5} strokeDasharray="4,3" />
-                    <rect x={todayX - 12} y={2} width={24} height={14} rx={3} fill="#ec6c04" />
-                    <text x={todayX} y={12} textAnchor="middle" fontSize={8} fontWeight="700" fill="#fff">HOY</text>
-                  </g>
-                )}
-              </svg>
-            </div>
+      {/* El div con ref siempre esta montado para que el ResizeObserver funcione
+          incluso cuando filtered cambia de 0 a >0 tareas. */}
+      <div ref={chartContainerRef} style={{ overflowX: "auto", border: filtered.length > 0 ? "0.5px solid var(--color-border-tertiary)" : "none", borderRadius: 10, background: filtered.length > 0 ? "var(--color-background-primary)" : "transparent" }}>
+        {filtered.length === 0 ? (
+          <div style={{ textAlign: "center", color: "var(--color-text-secondary)", padding: "40px 0", fontSize: 13 }}>
+            No hay tareas con fechas de inicio y fin en el rango seleccionado.
           </div>
+        ) : (
+          <>
+          {/* No renderizar el SVG hasta que chartW > 0 para evitar parpadeo */}
+          {CHART_W > 0 && (
+            <div style={{ display: "flex", minWidth: effectiveLabelW + 320 }}>
+              <div style={{ position: "relative", width: effectiveLabelW, flexShrink: 0, borderRight: "0.5px solid var(--color-border-tertiary)" }}>
+                {/* Resizer — oculto en mobile (labelWidth fijo 140 via effectiveLabelW) */}
+                {bp !== "mobile" && (
+                  <div
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      isResizing.current = true;
+                      const startX = e.clientX;
+                      const startW = labelWidth;
+                      const onMove = (ev) => { if (!isResizing.current) return; setLabelWidth(Math.max(120, Math.min(400, startW + ev.clientX - startX))); };
+                      const onUp = () => { isResizing.current = false; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+                      window.addEventListener("pointermove", onMove);
+                      window.addEventListener("pointerup", onUp);
+                    }}
+                    style={{ position: "absolute", top: 0, right: 0, width: 12, height: "100%", cursor: "col-resize", background: "transparent", zIndex: 10, transition: "background 0.15s" }}
+                    onPointerEnter={(e) => (e.currentTarget.style.background = "rgba(236,108,4,0.35)")}
+                    onPointerLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  />
+                )}
+                <div style={{ height: HDR_H, borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "6px 10px" }}>
+                  <span style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tarea</span>
+                </div>
+                {filtered.map((t, i) => (
+                  <div key={t.id} style={{
+                    height: getRowH(t.title), display: "flex", alignItems: "center", padding: "0 10px",
+                    borderBottom: "0.5px solid var(--color-border-tertiary)",
+                    background: i % 2 === 0 ? "transparent" : "var(--color-background-secondary)",
+                  }}>
+                    <span style={{ fontSize: 10, color: "var(--color-text-secondary)", marginRight: 6, flexShrink: 0 }}>#{t.id}</span>
+                    <span style={{
+                      fontSize: 12,
+                      color: "var(--color-text-primary)",
+                      wordBreak: "break-word",
+                      whiteSpace: "normal",
+                      lineHeight: 1.35,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                      maxWidth: effectiveLabelW - 40,
+                    }}>{t.title}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ flex: 1, overflowX: "auto" }}>
+                <svg width={CHART_W} height={svgH} style={{ display: "block" }}>
+                  {/* ── Nivel superior: meses (0–22 px) ── */}
+                  {months.map((m, i) => (
+                    <g key={i}>
+                      <rect x={m.x} y={0} width={m.w} height={22} fill={i % 2 === 0 ? "#fafafa" : "#f4f0fb"} />
+                      <text x={m.x + m.w / 2} y={14} textAnchor="middle" fontSize={10} fontWeight="600" fill="#542c9c">{m.label}</text>
+                      <line x1={m.x} y1={0} x2={m.x} y2={22} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
+                    </g>
+                  ))}
+                  <line x1={0} y1={22} x2={CHART_W} y2={22} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
+                  {/* ── Nivel inferior: días (22–44 px) ── */}
+                  {days.map((d, i) => (
+                    <g key={i}>
+                      <rect x={d.x} y={22} width={d.w} height={22} fill={d.fill} />
+                      {d.w > 14 && (
+                        <text x={d.x + d.w / 2} y={36} textAnchor="middle" fontSize={8} fill="#888888">{d.label}</text>
+                      )}
+                      <line x1={d.x} y1={22} x2={d.x} y2={svgH} stroke="var(--color-border-tertiary)" strokeWidth={0.3} opacity={0.4} />
+                    </g>
+                  ))}
+                  <line x1={0} y1={HDR_H} x2={CHART_W} y2={HDR_H} stroke="var(--color-border-secondary)" strokeWidth={0.5} />
+
+                  {(() => {
+                    const elements = [];
+                    let yOffset = HDR_H;
+                    for (let i = 0; i < filtered.length; i++) {
+                      const t = filtered[i];
+                      const rowH = getRowH(t.title);
+                      const rx = bx(t.startDate);
+                      const rw = bw(t.startDate, t.endDate);
+                      const ry = yOffset + 6;
+                      const rh = rowH - 12;
+                      const col = STATUS_COLORS[t.status] || "#888";
+                      const prog = Math.min(100, t.progressPercent || 0) / 100;
+                      const showDates = rw > 120;
+                      elements.push(
+                        <g key={t.id}>
+                          {!showDates && (
+                            <title>{`#${t.id} · ${t.title} · inicio: ${fmtFull(t.startDate)} → fin: ${fmtFull(t.endDate)} · progreso: ${Number(t.progressPercent || 0).toFixed(0)}%`}</title>
+                          )}
+                          <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill={col} opacity={0.25} stroke={col} strokeWidth={1.5} />
+                          <rect x={rx} y={ry} width={rw * prog} height={rh} rx={3} fill={col} opacity={1} />
+                          {showDates ? (
+                            <text x={rx + rw / 2} y={ry + rh / 2 + 3} textAnchor="middle" fontSize={9} fontWeight="700" fill="#ffffff" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
+                              {fmtShort(t.startDate)} → {fmtShort(t.endDate)}
+                            </text>
+                          ) : rw > 30 ? (
+                            <text x={rx + 5} y={ry + rh / 2 + 4} fontSize={9} fontWeight="500" fill={col}>
+                              {Number(t.progressPercent || 0).toFixed(0)}%
+                            </text>
+                          ) : null}
+                          <line x1={0} y1={yOffset + rowH} x2={CHART_W} y2={yOffset + rowH} stroke="var(--color-border-tertiary)" strokeWidth={0.5} />
+                        </g>
+                      );
+                      yOffset += rowH;
+                    }
+                    return elements;
+                  })()}
+
+                  {todayX >= 0 && todayX <= CHART_W && (
+                    <g>
+                      <line x1={todayX} y1={0} x2={todayX} y2={svgH} stroke="#ec6c04" strokeWidth={1.5} strokeDasharray="4,3" />
+                      <rect x={todayX - 12} y={2} width={24} height={14} rx={3} fill="#ec6c04" />
+                      <text x={todayX} y={12} textAnchor="middle" fontSize={8} fontWeight="700" fill="#fff">HOY</text>
+                    </g>
+                  )}
+                </svg>
+              </div>
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "10px 14px", borderTop: "0.5px solid var(--color-border-tertiary)" }}>
             {ESTADOS.map((s) => (
@@ -242,8 +268,9 @@ export default function GanttTab({ tasks, participants, indicators, taskTypes })
               </div>
             ))}
           </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

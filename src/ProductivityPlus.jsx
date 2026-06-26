@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useBreakpoint } from './hooks/useBreakpoint';
 // La versión que muestra el footer sale de package.json (fuente única de verdad).
 // Bumpéala ahí siguiendo SemVer (MAYOR.MENOR.PARCHE) y el footer se actualiza solo.
 // Named import → Vite hace tree-shaking y solo entra `version` al bundle.
@@ -1513,6 +1514,14 @@ function PlansLauncher({ variant = "header" }) {
     }}>
       ✨ Ver planes y desbloquear la IA
     </button>
+  ) : variant === "icon" ? (
+    <button onClick={() => setOpen(true)} aria-label="Planes" title="Ver planes y mejorar" style={{
+      background: "linear-gradient(135deg, #ec6c04, #f5a623)", color: "#fff",
+      border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer",
+      fontSize: 14, fontWeight: 700, lineHeight: 1, boxShadow: "0 2px 10px rgba(236,108,4,0.35)",
+      display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit",
+      minHeight: 40, minWidth: 40,
+    }}>✨</button>
   ) : (
     <button onClick={() => setOpen(true)} title="Ver planes y mejorar" style={{
       background: "linear-gradient(135deg, #ec6c04, #f5a623)", color: "#fff",
@@ -1655,6 +1664,20 @@ function BillingReturnOverlay() {
 export default function App() {
   // Captura ?ref= de la URL al montar y lo persiste en localStorage.
   useReferralCapture();
+
+  const bp = useBreakpoint();
+  const [showOverflow, setShowOverflow] = useState(false);
+  const overflowRef = useRef(null);
+
+  // Cerrar overflow con click-fuera y Escape — mismo patron que notificaciones
+  useEffect(() => {
+    if (!showOverflow) return;
+    const onPointer = (e) => { if (overflowRef.current && !overflowRef.current.contains(e.target)) setShowOverflow(false); };
+    const onKey = (e) => { if (e.key === "Escape") setShowOverflow(false); };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onPointer); document.removeEventListener("keydown", onKey); };
+  }, [showOverflow]);
 
   const [activeTab, setActiveTab] = useState("board");
   const [forceTour, setForceTour] = useState(false);
@@ -2050,90 +2073,179 @@ export default function App() {
         body { background: #fff !important; }
         .print-page { page-break-after: always; }
       }
+      .pp-header-btn:focus-visible { outline: 2px solid #ec6c04; outline-offset: 2px; }
     `}</style>
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #f8f4ff 0%, #e6f7f8 50%, #fff3ea 100%)", color: "var(--color-text-primary)", fontFamily: "var(--font-sans)" }}>
-      <div style={{ background: "linear-gradient(90deg, #1a1a2e 0%, #2d1b4e 100%)", boxShadow: "0 2px 0 #ec6c04", padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 800, fontSize: 18, display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ background: "linear-gradient(135deg, #ec6c04, #f07d1e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Productivity</span>
-          <span style={{ color: "#ffffff", fontWeight: 300, fontSize: 16 }}>-Plus</span>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ec6c04", marginLeft: 2, animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
-        </div>
-        {project && (
+      {/* ── HEADER responsive (RESP-01) ── */}
+      <div style={{ background: "linear-gradient(90deg, #1a1a2e 0%, #2d1b4e 100%)", boxShadow: "0 2px 0 #ec6c04", padding: bp === "mobile" ? "8px 12px" : "10px 20px", display: "flex", alignItems: "center", gap: bp === "mobile" ? 8 : 14, position: "relative" }}>
+
+        {/* ── Logo ── */}
+        {bp === "mobile" ? (
+          <div aria-label="Productivity-Plus" style={{ fontWeight: 800, fontSize: 14, display: "flex", alignItems: "center", gap: 4, minHeight: 40 }}>
+            <span style={{ background: "linear-gradient(135deg, #ec6c04, #f07d1e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>P+</span>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ec6c04", animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
+          </div>
+        ) : (
+          <div style={{ fontWeight: 800, fontSize: bp === "tablet" ? 16 : 18, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ background: "linear-gradient(135deg, #ec6c04, #f07d1e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Productivity</span>
+            <span style={{ color: "#ffffff", fontWeight: 300, fontSize: bp === "tablet" ? 14 : 16 }}>-Plus</span>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ec6c04", marginLeft: 2, animation: "pulse 2s ease-in-out infinite", display: "inline-block" }} />
+          </div>
+        )}
+
+        {/* ── Proyecto + boton cambiar (desktop+tablet); mobile: solo boton al overflow) ── */}
+        {bp !== "mobile" && project && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", letterSpacing: 1 }}>|</span>
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: 500 }}>{project.name}</span>
+            {bp === "tablet" ? (
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: 500, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</span>
+            ) : (
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: 500 }}>{project.name}</span>
+            )}
             <button
+              className="pp-header-btn"
               onClick={() => { const pid = localStorage.getItem('pp_project_id'); if (pid) localStorage.setItem('pp_last_project_id', pid); localStorage.removeItem('pp_project_id'); setProject(null); setProjectId(null); setShowProjectLanding(true); setActiveUser(null); }}
-              title="Cambiar proyecto"
-              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontSize: 10, fontWeight: 500 }}
+              aria-label="Cambiar proyecto"
+              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", borderRadius: 5, padding: "2px 7px", cursor: "pointer", fontSize: 10, fontWeight: 500, minHeight: 28 }}
             >↩</button>
           </div>
         )}
-        <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)" }} />
-        {/* Active users indicator */}
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {activeUsers.map((u) => {
-            const color = getUserColor(u.name);
-            return (
-              <div key={u.userId} title={u.name} style={{ position: "relative" }}>
-                <div style={{
-                  width: 30, height: 30, borderRadius: "50%",
-                  background: `linear-gradient(135deg, ${color}, ${color}cc)`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 10, fontWeight: 800, color: "#fff",
-                  border: u.userId === activeUser?.id ? "2px solid #ec6c04" : "2px solid rgba(255,255,255,0.2)",
-                  transition: "border 0.3s",
-                }}>{getInitials(u.name)}</div>
-                <div style={{
-                  position: "absolute", bottom: -1, right: -1,
-                  width: 9, height: 9, borderRadius: "50%",
-                  background: "#27ae60", border: "2px solid #1a1a2e",
-                }} />
-              </div>
-            );
-          })}
-          {activeUsers.length === 0 && (
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontStyle: "italic" }}>Sin usuarios activos</span>
-          )}
-        </div>
-        <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)" }} />
-        {/* Current user + change */}
-        {activeUser && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>Sesión:</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{activeUser.name}</span>
-            {currentUser?.isSuperUser && (
-              <span style={{ fontSize: 9, background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#fff", padding: "2px 7px", borderRadius: 8, fontWeight: 700 }}>SUPER</span>
-            )}
-            <button onClick={handleChangeUser} style={{
-              background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)",
-              color: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "3px 10px",
-              cursor: "pointer", fontSize: 10, fontWeight: 500, transition: "all 0.2s",
-            }}>Cambiar</button>
+
+        {/* ── Divisor vertical 1 (desktop+tablet) ── */}
+        {bp !== "mobile" && (
+          <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)", flexShrink: 0 }} />
+        )}
+
+        {/* ── Presencia (avatares) ── */}
+        {bp === "mobile" ? (
+          <span style={{ background: "rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.7)", fontSize: 10, borderRadius: 12, padding: "2px 8px", whiteSpace: "nowrap", minHeight: 40, display: "flex", alignItems: "center" }}>
+            {activeUsers.length} activos
+          </span>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {(() => {
+              const usersToShow = bp === "tablet" ? activeUsers.slice(0, 3) : activeUsers;
+              const hidden = bp === "tablet" ? activeUsers.length - 3 : 0;
+              return (
+                <>
+                  {usersToShow.map((u) => {
+                    const color = getUserColor(u.name);
+                    return (
+                      <div key={u.userId} title={u.name} style={{ position: "relative" }}>
+                        <div style={{
+                          width: 30, height: 30, borderRadius: "50%",
+                          background: `linear-gradient(135deg, ${color}, ${color}cc)`,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 800, color: "#fff",
+                          border: u.userId === activeUser?.id ? "2px solid #ec6c04" : "2px solid rgba(255,255,255,0.2)",
+                          transition: "border 0.3s",
+                        }}>{getInitials(u.name)}</div>
+                        <div style={{
+                          position: "absolute", bottom: -1, right: -1,
+                          width: 9, height: 9, borderRadius: "50%",
+                          background: "#27ae60", border: "2px solid #1a1a2e",
+                        }} />
+                      </div>
+                    );
+                  })}
+                  {hidden > 0 && (
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "2px 6px", fontWeight: 700 }}>+{hidden}</span>
+                  )}
+                  {activeUsers.length === 0 && (
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontStyle: "italic" }}>Sin usuarios activos</span>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
-        {authUser && (
+
+        {/* ── Divisor vertical 2 (desktop+tablet) ── */}
+        {bp !== "mobile" && (
+          <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.15)", flexShrink: 0 }} />
+        )}
+
+        {/* ── Sesion (usuario activo) ── */}
+        {activeUser && (
+          bp === "mobile" ? (
+            /* Mobile: avatar circular con punto SUPER */
+            <div style={{ position: "relative" }}>
+              <button
+                className="pp-header-btn"
+                onClick={handleChangeUser}
+                aria-label={`Sesión: ${activeUser.name} — Cambiar usuario`}
+                style={{ width: 24, height: 24, borderRadius: "50%", background: `linear-gradient(135deg, ${getUserColor(activeUser.name)}, ${getUserColor(activeUser.name)}cc)`, border: "2px solid rgba(255,255,255,0.2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "#fff", padding: 0, minHeight: 24, minWidth: 24 }}
+              >
+                {getInitials(activeUser.name)}
+              </button>
+              {currentUser?.isSuperUser && (
+                <span style={{ position: "absolute", top: -2, right: -2, width: 8, height: 8, borderRadius: "50%", background: "#ec6c04", border: "1.5px solid #1a1a2e", display: "block" }} />
+              )}
+            </div>
+          ) : (
+            /* Desktop + Tablet */
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {bp === "desktop" && <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>Sesión:</span>}
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#fff", maxWidth: bp === "tablet" ? 64 : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {activeUser.name}
+              </span>
+              {currentUser?.isSuperUser && (
+                <span style={{ fontSize: 9, background: "linear-gradient(135deg, #ec6c04, #f07d1e)", color: "#fff", padding: "2px 7px", borderRadius: 8, fontWeight: 700 }}>SUPER</span>
+              )}
+              <button
+                className="pp-header-btn"
+                onClick={handleChangeUser}
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 10, fontWeight: 500, transition: "all 0.2s", minHeight: 28 }}
+              >Cambiar</button>
+            </div>
+          )
+        )}
+
+        {/* ── TourMenu + Salir (desktop: completo; tablet: completo; mobile: al overflow) ── */}
+        {authUser && bp !== "mobile" && (
           <>
             <TourMenu onPick={(r) => { setForceTourRole(r); setForceTour(true); }} />
-            <button onClick={() => supabase.auth.signOut()} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.4)", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontSize:10, fontWeight:500 }}>
-              Salir
-            </button>
+            {bp === "desktop" ? (
+              <button
+                className="pp-header-btn"
+                onClick={() => supabase.auth.signOut()}
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 10, fontWeight: 500, minHeight: 28 }}
+              >Salir</button>
+            ) : (
+              /* tablet: icono de salida */
+              <button
+                className="pp-header-btn"
+                onClick={() => supabase.auth.signOut()}
+                title="Cerrar sesión"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 14, minHeight: 28 }}
+              >⏻</button>
+            )}
           </>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Resumen del tablero activo (pastilla) */}
-          {authUser && projectId && <BoardSummaryPill projectId={projectId} projectName={project?.name} />}
-          {/* Planes / mejorar (a la izquierda de las notificaciones) */}
-          {authUser && <PlansLauncher variant="header" />}
-          {/* Notifications bell */}
+
+        {/* ── Spacer mobile (reemplaza marginLeft:auto) ── */}
+        {bp === "mobile" && <div style={{ flex: 1 }} />}
+
+        {/* ── Grupo derecho ── */}
+        <div style={{ marginLeft: bp === "mobile" ? undefined : "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {/* BoardSummaryPill: visible en desktop; oculta en tablet y mobile (va al overflow) */}
+          {authUser && projectId && bp === "desktop" && (
+            <BoardSummaryPill projectId={projectId} projectName={project?.name} />
+          )}
+          {/* PlansLauncher: desktop=completo; tablet=solo icono (el componente gestiona su modal); mobile=overflow */}
+          {authUser && bp !== "mobile" && (
+            <PlansLauncher variant={bp === "desktop" ? "header" : "icon"} />
+          )}
+          {/* Campana de notificaciones — siempre visible */}
           <div style={{ position: "relative" }}>
             <button
-              onClick={() => setShowNotifPanel(p => !p)}
-              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: visibleAlerts.length > 0 ? "#f87171" : "rgba(255,255,255,0.5)", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 14, lineHeight: 1, position: "relative" }}
+              className="pp-header-btn"
+              onClick={() => { setShowNotifPanel(p => !p); setShowOverflow(false); }}
+              style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: visibleAlerts.length > 0 ? "#f87171" : "rgba(255,255,255,0.5)", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 14, lineHeight: 1, position: "relative", overflow: "visible", minHeight: 40, minWidth: 40 }}
             >
               🔔
               {visibleAlerts.length > 0 && (
-                <span style={{ position: "absolute", top: 0, right: 0, transform: "translate(40%,-40%)", background: "#c0392b", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{visibleAlerts.length}</span>
+                <span style={{ position: "absolute", top: 0, right: 0, transform: "translate(40%,-40%)", background: "#c0392b", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>{visibleAlerts.length}</span>
               )}
             </button>
             {showNotifPanel && (
@@ -2150,18 +2262,100 @@ export default function App() {
               </div>
             )}
           </div>
-          {/* PDF export */}
-          <button onClick={() => window.print()} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 500 }}>
-            🖨 PDF
-          </button>
-          <button onClick={exportCSV} style={{
-            background: "rgba(20,156,172,0.2)",
-            border: "1px solid rgba(20,156,172,0.5)",
-            color: "#4dd8e8",
-            borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 500,
-          }}>
-            ↓ Exportar CSV
-          </button>
+
+          {/* PDF + CSV: desktop=visible; tablet+mobile=overflow */}
+          {bp === "desktop" && (
+            <>
+              <button
+                className="pp-header-btn"
+                onClick={() => window.print()}
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.5)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 500, minHeight: 40 }}
+              >🖨 PDF</button>
+              <button
+                className="pp-header-btn"
+                onClick={exportCSV}
+                style={{ background: "rgba(20,156,172,0.2)", border: "1px solid rgba(20,156,172,0.5)", color: "#4dd8e8", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 500, minHeight: 40 }}
+              >↓ Exportar CSV</button>
+            </>
+          )}
+
+          {/* ── Boton overflow "⋯" (tablet y mobile) ── */}
+          {bp !== "desktop" && (
+            <div ref={overflowRef} style={{ position: "relative" }}>
+              <button
+                className="pp-header-btn"
+                onClick={() => { setShowOverflow(p => !p); setShowNotifPanel(false); }}
+                aria-label="Mas opciones"
+                aria-expanded={showOverflow}
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 16, minWidth: 40, minHeight: 40, display: "flex", alignItems: "center", justifyContent: "center" }}
+              >⋯</button>
+              {showOverflow && (
+                <div role="menu" style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#1a1a2e", borderRadius: 12, border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", minWidth: 200, zIndex: 9998, overflow: "hidden" }}>
+                  {/* Tablet: PDF y CSV */}
+                  {bp === "tablet" && (
+                    <>
+                      <button role="menuitem" onClick={() => { window.print(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                        onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                        onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <span>🖨</span><span>PDF</span>
+                      </button>
+                      <button role="menuitem" onClick={() => { exportCSV(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                        onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                        onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <span>↓</span><span>Exportar CSV</span>
+                      </button>
+                    </>
+                  )}
+                  {/* Mobile: Cambiar proyecto, Tour, Salir, Planes, BoardSummaryPill, PDF, CSV */}
+                  {bp === "mobile" && (
+                    <>
+                      {project && (
+                        <button role="menuitem" onClick={() => { const pid = localStorage.getItem('pp_project_id'); if (pid) localStorage.setItem('pp_last_project_id', pid); localStorage.removeItem('pp_project_id'); setProject(null); setProjectId(null); setShowProjectLanding(true); setActiveUser(null); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                          onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                          onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <span>↩</span><span>Cambiar proyecto</span>
+                        </button>
+                      )}
+                      {authUser && (
+                        <button role="menuitem" onClick={() => { setForceTourRole(null); setForceTour(true); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                          onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                          onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <span>🎓</span><span>Tour</span>
+                        </button>
+                      )}
+                      {authUser && (
+                        <button role="menuitem" onClick={() => { supabase.auth.signOut(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                          onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                          onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <span>⏻</span><span>Salir</span>
+                        </button>
+                      )}
+                      {authUser && (
+                        <div role="menuitem" style={{ padding: "10px 16px" }}>
+                          <PlansLauncher variant="header" />
+                        </div>
+                      )}
+                      {authUser && projectId && (
+                        <div role="menuitem" style={{ padding: "10px 16px" }}>
+                          <BoardSummaryPill projectId={projectId} projectName={project?.name} />
+                        </div>
+                      )}
+                      <button role="menuitem" onClick={() => { window.print(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                        onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                        onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <span>🖨</span><span>PDF</span>
+                      </button>
+                      <button role="menuitem" onClick={() => { exportCSV(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                        onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
+                        onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <span>↓</span><span>Exportar CSV</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

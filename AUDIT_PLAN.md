@@ -256,6 +256,16 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 35 — RESP-01/RESP-02: header y Gantt responsive (2026-06-26)
+
+**RESP-01 + RESP-02 (eje responsive 4.5/10) `[ui-ux + frontend]` ✅:** diseño de **ui-ux**, implementación de **frontend**, verificado por el líder.
+- Hook nuevo `src/hooks/useBreakpoint.js` (matchMedia → mobile<480 / tablet<768 / desktop).
+- **Header** (`ProductivityPlus.jsx`): se quitó `flexWrap:wrap` (causa del solapamiento en <480) y se colapsa por breakpoint: logo→"P+", presencia→badge "N activos", sesión→avatar circular, y un **menú overflow "⋯"** (`role=menu`) que absorbe Tour/Salir/Planes/PDF/CSV/cambiar-proyecto según el tamaño. Estado del overflow separado del de notificaciones; spacer flex en móvil; `:focus-visible` vía clase `.pp-header-btn`.
+- **Gantt** (`GanttTab.jsx`): ancho fijo 660px → **fluido** (ResizeObserver mide el contenedor; `CHART_W = chartW − effectiveLabelW`, mín 320 + scroll horizontal); resizer solo-mouse → **Pointer Events** (táctil) con `setPointerCapture`, oculto en móvil (labelWidth fijo 140).
+Behavior-preserving. `vitest` 53/53 ✅, build ✅, lint de archivos nuevos/Gantt limpio (ProductivityPlus queda en su base preexistente de 6 errores del monolito, sin nuevos). Sin migración.
+
+> ⏳ **Pendiente de validación visual** en 320/480/768px (recomendación de ui-ux). Quedan en Tanda 3: O-08 (manualChunks), A-02/A-05 (lazy), O-03/05/06 (over-fetch). Luego Tanda 4 (olas de validación).
+
 ### Sprint 34 — B-5 (retro atómico) + cierre de deuda de tests de validación (2026-06-26)
 
 **B-5 (ALTO) `[backend-dev]` ✅ + migración 039 aplicada:** `api/submit-retro.js` hacía hasta 5 operaciones sin transacción (SELECT → UPDATE|INSERT del retro → DELETE de señales → INSERT de señales), y el error del INSERT de señales solo logueaba `console.warn` devolviendo 200 → corrupción silenciosa (señales borradas sin reinsertar). Ahora es UNA RPC transaccional: `migrations/039_submit_retro_atomic.sql` crea `submit_sprint_retro(...)` (PL/pgSQL, **SECURITY INVOKER** → respeta las RLS existentes de migración 020; `respondent_user_id = auth.uid()` nunca del cliente; upsert ON CONFLICT + DELETE/INSERT de señales todo-o-nada). El endpoint llama la RPC y devuelve 500 con el error real (sin pérdida silenciosa). El UNIQUE(period_id, respondent_user_id) ya existía (020).

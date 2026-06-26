@@ -140,18 +140,55 @@ export default async function handler(req) {
       return jsonError("Tu plan no incluye chat. Requiere Enterprise.", 402, headers);
     }
 
-    // Cuota mensual: bloquea cuando se agotan los 100 mensajes/mes/proyecto.
+  } catch (err) {
+    return jsonError(err.message, err.status || 500, headers);
+  }
+
+  // Cuota mensual con RESERVA ATÓMICA (H-030). Antes esto era leer-y-luego-
+  // insertar: dos requests concurrentes veían el mismo "remaining", pasaban
+  // ambos y quemaban DOBLE token contando uno. Ahora reservamos 1 mensaje en
+  // una sola sentencia SQL guardada por la cuota (service_role, ya validado el
+  // acceso al proyecto arriba). `releaseQuota` devuelve la reserva si el LLM
+  // falla antes de generar nada.
+  const admin = createAdminClient();
+  let reserved = false;
+  const releaseQuota = async () => {
+    if (!reserved || !admin) return;
+    reserved = false;
+    try { await admin.rpc("project_chat_release_quota", { p_project_id: Number(projectId) }); }
+    catch (e) { console.warn("[chat] release quota falló:", e?.message); }
+  };
+
+  if (admin) {
+    const { data: consume, error: consumeErr } = await admin.rpc(
+      "project_chat_consume_quota", { p_project_id: Number(projectId) });
+    // 42883 = RPC ausente (migración 036 sin aplicar): caemos al check no
+    // atómico de abajo. Otros errores: fail-closed (la cuota controla costo).
+    if (consumeErr && consumeErr.code !== "42883") {
+      return jsonError("No se pudo verificar la cuota del chat.", 503, headers);
+    }
+    if (consume) {
+      if (!consume.allowed) {
+        return jsonResponse({
+          error: "Cuota mensual del chat alcanzada",
+          quota: consume.quota, used: consume.used,
+          renews_on: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().slice(0, 10),
+        }, 429, headers);
+      }
+      reserved = true;
+    }
+  }
+  // Fallback (dev sin service_role, o migración 036 aún sin aplicar): check no
+  // atómico — degradado, pero no peor que el comportamiento previo.
+  if (!reserved) {
     const { data: quotaInfo } = await supabase.rpc("project_chat_quota_remaining", { p_project_id: Number(projectId) });
     if (quotaInfo && Number(quotaInfo.remaining) <= 0) {
       return jsonResponse({
         error: "Cuota mensual del chat alcanzada",
-        quota: quotaInfo.quota,
-        used: quotaInfo.used,
+        quota: quotaInfo.quota, used: quotaInfo.used,
         renews_on: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().slice(0, 10),
       }, 429, headers);
     }
-  } catch (err) {
-    return jsonError(err.message, err.status || 500, headers);
   }
 
   // Resuelve o crea sesión activa para (project, user).
@@ -197,10 +234,8 @@ export default async function handler(req) {
   const context = await loadContext(supabase, projectId);
 
   // Persiste el mensaje del user usando service_role (la tabla bloquea
-  // INSERT a authenticated por diseño). createAdminClient devuelve null si
-  // faltan las variables admin.
-  const admin = createAdminClient();
-
+  // INSERT a authenticated por diseño). `admin` ya se creó arriba (cuota);
+  // es null si faltan las variables admin.
   if (admin) {
     await admin.from("chat_messages").insert({
       session_id: session.id, role: "user", content: userMessageClean,
@@ -208,6 +243,7 @@ export default async function handler(req) {
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
+    await releaseQuota();
     return jsonError("ANTHROPIC_API_KEY no esta configurada", 500, headers);
   }
 
@@ -228,7 +264,7 @@ export default async function handler(req) {
       : "Continúa la conversación con base en el contexto cargado."
   }`;
 
-  const anthropicRes = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+  const anthropicReq = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -245,11 +281,20 @@ export default async function handler(req) {
       ],
       messages,
     }),
-  }, 55000); // streaming LLM: timeout largo
+  };
+
+  let anthropicRes;
+  try {
+    anthropicRes = await fetchWithTimeout("https://api.anthropic.com/v1/messages", anthropicReq, 55000); // streaming LLM: timeout largo
+  } catch {
+    await releaseQuota(); // no se generó nada: devolver la reserva
+    return jsonError("No se pudo contactar al generador de IA.", 502, headers);
+  }
 
   if (!anthropicRes.ok) {
     let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
     try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep */ }
+    await releaseQuota(); // el turno no se cobró: liberar la reserva
     return jsonError(errMsg, 502, headers);
   }
 

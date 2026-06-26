@@ -248,6 +248,15 @@ export default async function handler(req, res) {
         status: payment.status === "approved" ? "active" : "past_due",
         metadata: { last_event: "payment", payment_id: payment.id, mp_status: payment.status },
       };
+      // B-4: el cobro recurrente debe FIJAR el tier pagado. Antes este upsert solo
+      // tocaba status, así que si el evento de payment llegaba antes (o sin) el de
+      // preapproval-activo, el usuario pagaba y quedaba en 'free'. Solo promovemos
+      // el tier en pagos aprobados y con tier resoluble del external_reference; en
+      // past_due no tocamos el tier (el trigger de tableros ya limita por status,
+      // y MP puede reintentar el cobro).
+      if (payment.status === "approved" && tier) {
+        update.tier = tier;
+      }
       await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
 
       // ── Notificación al hub (cobro recurrente) ───────────────────────────

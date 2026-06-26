@@ -11,38 +11,36 @@
 
 - **Proyecto:** `w-planner` (Productivity-Plus)
 - **Stack:** SPA Vite + React 19 · Supabase (Postgres + RLS) · Funciones Vercel (Node) · Mercado Pago · Resend · Anthropic/Gemini
-- **Última auditoría:** `2026-06-22`
-- **Auditores:** Claude (A) en `claude-opus-4-8` + Codex (B) en `gpt-5.5` *(xhigh)* + Gemini (C) en `Gemini 3.1 Pro (High)`.
-- **Modo:** `COMPLETO` — los tres auditores concluyeron (triple contraste válido).
-- **Commits cubiertos:** `1a90dc1..52ca539` (trabajo de esta sesión) sobre el estado completo del repo.
-- **Foco solicitado:** escalabilidad/concurrencia (muchas personas creando tarjetas a la vez), calidad, uso, UX.
+- **Última auditoría:** `2026-06-24`
+- **Auditores:** Claude (A) en `claude-opus-4-8` (orquestó 5 subagentes especialistas) + Codex (B) en `gpt-5.5` *(xhigh)*. Gemini (C) **OMITIDO** (CLI `agy` sin auth/red).
+- **Modo:** `DUAL` (A+B) — Gemini no concluyó esta ronda.
+- **Commits cubiertos:** `7681794..HEAD` (hub integration + admin plans migración 035 + rebrand/responsive v1.1.0).
+- **Foco solicitado:** estructura, optimización, funcionamiento pleno, UX/responsive, integridad de datos en producción.
 
-### Veredicto de producción
-**Funcionalmente listo, pero con un cuello de botella de concurrencia que conviene cerrar antes de escalar usuarios.** El hallazgo dominante para "muchas personas a la vez" es **H-014 (`claim_task_id` global)** — exclusivo de Auditor A. No hay bloqueadores de seguridad nuevos sin mitigación, pero sí varios fail-open y un IDOR de chat a corregir.
+### Veredicto de producción (ronda 2026-06-24)
+**El núcleo es sólido pero hay 3 CRÍTICOS y la seguridad no pasa el gate 9.5 (8.4/10).** Dominantes: secretos de producción en `.env.local` (riesgo aceptado por el dueño por ahora), race condition de cuota de chat (doble gasto de tokens), y bug del trigger de límite de tableros (status no-activo no degrada). Codex aporta señal nueva sobre la **fragilidad de la integración del hub** (comisiones sin reintento durable). El menú responsive recién desplegado tiene un bug latente de ResizeObserver con fix de alta confianza.
 
-### Estado actual
+### Estado actual (ronda 2026-06-24, modo DUAL)
 
 | Métrica | Valor |
 |---|---|
-| Consenso fuerte `[A+B+C]` | 2 |
-| Consenso de pares `[A+B]/[A+C]/[B+C]` | 2 |
-| Solo Claude `[A]` | 6 |
-| Solo Codex `[B]` | 7 |
-| Solo Gemini `[C]` | 2 |
-| Discrepancias de severidad | 3 |
-| **Cerrados esta ronda** | **3** |
-| Críticos abiertos | 0 (1 condicional) |
-| Altos abiertos | 6 |
-| Medios abiertos | 8 |
-| Bajos abiertos | 3 |
+| Consenso de pares `[A+B]` | 1 (monolito) |
+| Solo Claude `[A]` | 18 (A26-A28, A30, A32-A46) |
+| Solo Codex `[B]` | 8 (sus H-002..H-009) |
+| **Verificado OK** | migración 035 (admin plans) — no filtra emails ni permite auto-upgrade |
+| Críticos abiertos | 3 (H-028 secretos, H-030 race chat, H-033 trigger) |
+| Altos abiertos | ~9 |
+| Medios/Bajos abiertos | ~15 |
 
-<!-- Divergencia: alta dispersión de hallazgos solo-uno (15 de 19). Esperable: A buscó concurrencia, B seguridad de pago/IDOR, C arquitectura/bundle. Revisar los tres lados. -->
+> ⚠️ **Baja coincidencia A↔B esperada por alcance distinto, no por contradicción:** Codex (B) auditó SOLO el diff `7681794..HEAD` (hub/referidos/billing); Claude (A) auditó todo el código. Los críticos de A (race de chat, trigger) viven en código previo al diff, por eso B no los vio. Tratar los `[A]` y `[B]` como complementarios.
 
 ### Top 3 prioridades inmediatas
 
-1. **`claim_task_id` serializa la creación de tarjetas a nivel global** `[A]` `ALTO` — el contador vive en `app_config` con un `nextId` por proyecto y el UPDATE no filtra por proyecto → cada creación bloquea las filas de TODOS los tableros y empeora con la escala. Reemplazar por un `SEQUENCE` nativo. (H-014) **← responde directo a tu pregunta de concurrencia.**
-2. **Webhook MP fail-open si falta el secreto** `[A+B+C]` `ALTO`/`CRÍTICO` — hacer fail-closed (rechazar sin firma válida). (H-013)
-3. **IDOR de `sessionId` en el chat IA** `[B]` `ALTO` — filtrar la sesión por `project_id`+owner para evitar contaminación entre proyectos y bypass de cuota. (H-017)
+1. **Race condition de cuota de chat** `[A]` `CRÍTICO` — `api/chat-stream.js:144-208`: el check de cuota es lectura y el insert va después; dos requests simultáneos queman doble token contando uno. Increment atómico en Postgres. (H-030)
+2. **Trigger de límite de tableros no degrada con status no-activo** `[A]` `CRÍTICO` — `migrations/027:45`: un checkout `pending` puede crear tableros. Degradar a free ante cualquier status != active. (H-033)
+3. **Notificación de comisión al hub sin reintento durable** `[B]` `ALTO` — `api/mp-webhook.js:253`: un 5xx transitorio del hub pierde la comisión aunque el cobro fue aprobado. Outbox + retry con backoff. (H-048)
+
+> **Nota operativa heredada:** las migraciones **029** (SEQUENCE de task id, H-014) y **030** (roles en RLS, H-007) siguen marcadas como pendientes de aplicar en prod. Verificar su estado.
 
 ---
 
@@ -197,12 +195,87 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-06-19 | DEGRADADO (sin C) | — | 5 (A+B) | 3 | 3 | — | 1 | 0 | 96 (repo) |
 | 2026-06-22 | COMPLETO (A+B+C) | 2 | 2 | 6 | 7 | 2 | 3 | 3 | 1a90dc1..52ca539 |
+| 2026-06-24 | DUAL (sin C) | — | 1 (A+B) | 18 | 8 | — | 0 | 0 | 7681794..HEAD |
+
+---
+
+## 🆕 Hallazgos nuevos — ronda 2026-06-24 (modo DUAL A+B) 🤖
+
+> Gemini (C) omitido esta ronda. IDs continúan desde H-025. Detalle completo en `VALIDACION_W-PLANNER.md` y `.superauditor/audit-claude.md` / `audit-codex.md`.
+
+### 🤝 Consenso de pares `[A+B]`
+
+- **H-002 (re-confirmado)** `[A+B]` `ALTO` Arquitectura — el orquestador `ProductivityPlus.jsx` (~2.300 líneas) sigue creciendo con billing/referidos. A: `:536-680,:1302-1431,:682-1236`. B: `:1478,:1550,:1653,:2131`. Sigue ÉPICO/incremental.
+
+### 🔴 CRÍTICOS
+
+- **H-028** `[A]` CRÍTICO Seguridad — secretos de producción en `.env.local:3-16` (service-role, MP, Resend, etc.). *Riesgo aceptado por el dueño (repo privado), rotación diferida.*
+- **H-030** `[A]` CRÍTICO Pentest — race condition de cuota de chat: `api/chat-stream.js:144-208` (check de lectura + insert posterior) → doble gasto de tokens. Fix: increment atómico.
+- **H-033** `[A]` CRÍTICO Conexión/datos — `migrations/027:45`: status no-activo (`pending`) no degrada a free → tableros sin pagar. Fix: `IF v_status <> 'active' THEN v_tier := 'free'`.
+
+### 🟠 ALTOS
+
+- **H-026** `[A]` Arquitectura — sin `manualChunks`; supabase-js (196kB) en el chunk pesado. `vite.config.js`.
+- **H-031** `[A]` Pentest — endpoints IA no validan `periodStart < periodEnd`: `generate-evolution.js:327`, `save-evolution.js:48`, `generate-monthly-report.js:312`, `generate-scrum-report.js:243`.
+- **H-034** `[A]` Conexión — pago recurrente no setea `tier`: `api/mp-webhook.js:251` → usuario paga y queda free. Fix: `tier: tier || 'free'`.
+- **H-035** `[A]` Datos — señales de retro DELETE+INSERT no atómico: `api/submit-retro.js:57,63,86`. Fix: RPC transaccional / ON CONFLICT.
+- **H-038** `[A]` Responsive — header sin colapso: `ProductivityPlus.jsx:2018` → en <480px explota.
+- **H-039** `[A]` Frontend — bug latente ResizeObserver del menú responsive (cambio reciente): `ProductivityPlus.jsx:1887,1898` (deps + ref stale). Fix de alta confianza (30 min).
+- **H-040** `[A]` Responsive — Gantt ancho fijo 660px + resizer solo-mouse: `GanttTab.jsx:30`.
+- **H-048** `[B]` Conexión ⭐ — notificación de comisión al hub sin reintento durable: `api/mp-webhook.js:253` → 5xx transitorio pierde la comisión. Fix: outbox + backoff.
+
+### 🟡 MEDIOS
+
+- **H-027** `[A]` PlansLauncher llama RPC en cada apertura sin caché (`:1478-1543`).
+- **H-029** `[A]` verificar grant residual a `anon` en `user_can_use_ia_on_project` (migr. 016 vs 031) en prod.
+- **H-032** `[A]` `open-retro.js:99` reenvía emails con `trigger=manual` saltando idempotencia (sin rate limit).
+- **H-036** `[A]` over-fetch `select('*')` + N+1 key_results en `useProjectData.js:48,86`.
+- **H-037** `[A]` chat fail-open si `createAdminClient()` es null: `chat-stream.js:203-208`.
+- **H-041** `[A]` `alert()`/`confirm()` nativos: `useTasks.js:36,77,139,155`. (Relacionado a H-008.)
+- **H-042** `[A]` notif + dropdown hamburguesa sin clamp al viewport: `ProductivityPlus.jsx:2103,2155`.
+- **H-043** `[A]` tooltip del tour se desborda <440px: `Onboarding.jsx:579,588`.
+- **H-046** `[B]` `_hub-client.js:137` puede loguear PII/datos financieros del upstream.
+- **H-047** `[B]` `/api/capture-referral` sin rate limit (`capture-referral.js`).
+- **H-049** `[B]` vars `HUB_*` no documentadas en `.env.example` / docs.
+- **H-050** `[B]` falta de migración `user_referrals` se reporta como éxito (200) → frontend deja de reintentar: `capture-referral.js:79`, `useReferralSync.js:64`.
+- **H-051** `[B]` checkout cierra el modal antes de mostrar "Redirigiendo…": `PlanSelectionModal.jsx:32`.
+
+### 🟢 BAJOS
+
+- **H-044** `[A]` guard huérfano de rebrand: `ConfigTab.jsx:190`.
+- **H-045** `[B]` `referral_code` sin `CHECK` en BD (`migrations/034:13`).
+- **H-052** `[B]` botón cierre del modal 38px < 44px táctil: `PlanSelectionModal.jsx:56`.
+
+### Verificado OK esta ronda
+
+- **migración 035** (admin_user_plans): vista y función con REVOKE correcto a anon/authenticated; NO filtra emails ni permite auto-upgrade. Service-role NO llega al cliente.
 
 ---
 
 ## 💬 Comentarios del equipo (editable manualmente)
 
 > Esta sección NO es sobrescrita por SuperAuditor.
+
+### Sprint 29 — críticos de la validación 2026-06-24 (H-030 race de chat + B-4 + H-033) (2026-06-25)
+
+> ⚠️ **Entorno sin git/node/npm en PATH.** Esta máquina no tiene git (no se pudo crear la rama `fix/superauditor-sprint-29` ni commitear): los cambios quedan en el árbol de trabajo de `main`. Las verificaciones se corrieron con el `node.exe` de Playwright (`v24`) invocando los binarios locales de `node_modules`.
+
+**H-030 `[A]` CRÍTICO — race condition de la cuota mensual de chat (✅ código listo · ⏳ migración 036 pendiente de aplicar):**
+- Antes `api/chat-stream.js` leía `project_chat_quota_remaining` (un `COUNT` sobre `chat_messages`) y luego insertaba el mensaje: el consumo era implícito, así que dos requests concurrentes veían el mismo `remaining`, pasaban ambos y quemaban **doble token contando uno**.
+- `migrations/036_chat_quota_atomic.sql`: tabla `chat_monthly_usage` (contador por proyecto/mes, RLS on + sin grants) como **fuente de verdad única** del consumo, sembrada (backfill) desde `chat_messages` del mes en curso. RPC `project_chat_consume_quota()` reserva 1 mensaje en una sola sentencia `INSERT .. ON CONFLICT DO UPDATE .. WHERE used < quota` (atómica: Postgres serializa la fila). RPC `project_chat_release_quota()` devuelve la reserva si el LLM falla antes de generar. `project_chat_quota_remaining()` se reescribe para leer el contador (el display del frontend sigue cuadrando). Consume/release solo `service_role`.
+- `api/chat-stream.js`: la reserva se hace con el cliente admin tras validar el acceso (ownerOnly); fallback no-atómico si falta `service_role` (dev) o la migración 036 (código `42883`). Se libera la reserva en los 3 paths pre-gasto (sin API key, fallo de red/timeout, respuesta no-ok del LLM).
+
+**B-4 `[A]` ALTO — el cobro recurrente no fijaba el tier (✅ listo, solo código):**
+- `api/mp-webhook.js` (`subscription_authorized_payment`): el upsert seteaba `status='active'` pero **no** `tier`, teniéndolo resuelto del `external_reference`. Si el evento de payment llegaba antes/sin el de preapproval-activo, el usuario pagaba y quedaba en `free`. Fix: en pago aprobado con tier resoluble, el upsert ahora fija `update.tier = tier` (en `past_due` no se toca; el trigger ya limita por status).
+
+**H-033 / B-1 `[A]` — VERIFICADO / NO REPRODUCIBLE (✅ + ⏳ migración 037 de saneamiento pendiente):**
+- El trigger `enforce_project_limit` (027:45) **ya degrada** a `free` cualquier `tier!='free' AND status!='active'`. Además `users_premium.status` es `NOT NULL CHECK IN (active,pending,past_due,cancelled)` (016:56) → no puede ser NULL en una fila existente, y `mp-subscribe` escribe `tier='free'` para los `pending`. No hay camino donde un no-pagador termine con `tier!='free' AND status='active'`: la "creación de tableros sin pagar" **no es reproducible**. El auditor razonó sobre el trigger en aislamiento.
+- `migrations/037_tier_status_sanitation.sql` (segura, idempotente): normaliza residuos históricos (`tier!='free'` en `pending`/`cancelled` → `free`; `past_due` se deja, MP puede reactivar) + queries de auditoría comentadas para inspeccionar a mano posibles víctimas de B-4 (pagaron pero quedaron en `free`; su tier real no es deducible en SQL, se corrige con `admin_set_user_plan`).
+
+**S-001 / H-028 `[A]` CRÍTICO — secretos de producción en `.env.local`: PENDIENTE DE JEFER.** Rotar TODAS las llaves (service-role, MP, Resend, OpenAI, etc.) desde los dashboards. El equipo no tiene acceso; es una PARADA.
+
+**Verificación:** `vitest run` **44/44 ✅**, `vite build` ✅, `eslint api/chat-stream.js api/mp-webhook.js` limpio.
+**Operativo:** migraciones **036**, **037** (y las previas **029/030/032/033**) **aplicadas por Jefer el 2026-06-26** ✅. Resta: rotar secretos de producción (**S-001 / H-028**), acción exclusiva de Jefer.
 
 ### Sprint 28 — monolito fase 23 · núcleo, fase D.5 / FINAL (useProjectData — consolidación) (rama `fix/superauditor-sprint-28`)
 
@@ -501,5 +574,6 @@ Se introdujo **Vitest** (`npm test`). Cobertura inicial de la lógica de mayor r
 
 ---
 
-*Generado por SuperAuditor — Orquestado por Claude Code (A=Opus 4.8). Motor B: Codex CLI (gpt-5.5 xhigh). Motor C: Antigravity CLI (Gemini 3.1 Pro).*
+*Generado por SuperAuditor — Orquestado por Claude Code (A=Opus 4.8, orquestó 5 especialistas). Motor B: Codex CLI (gpt-5.5 xhigh). Motor C: Antigravity CLI (Gemini) — OMITIDO esta ronda (sin auth/red).*
+*Última ronda: 2026-06-24, modo DUAL. Para regenerar con Gemini: hacé `agy` interactivo → login OAuth, y reintentá `/superauditor`.*
 *Para regenerar: `/superauditor` en Claude Code.*

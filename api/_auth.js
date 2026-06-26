@@ -127,6 +127,27 @@ export const requireEnum = (value, name, allowed) => {
   return value;
 };
 
+// Valida que un string tenga formato date-only YYYY-MM-DD.
+// Centralizado aquí para que no se duplique como closure local en los endpoints.
+export const isDateOnly = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v ?? "");
+
+// Exige dos fechas YYYY-MM-DD con start estrictamente anterior a end.
+// Lanza BadRequestError 400 si:
+//   - alguna tiene formato inválido (no YYYY-MM-DD)
+//   - start === end  (rango de duración cero — siempre inválido para ventanas)
+//   - start > end    (rango invertido)
+//
+// La comparación lexicográfica es suficiente para fechas ISO en formato fijo.
+// Uso: requireDateRange(periodStart, periodEnd, { startName: 'periodStart', endName: 'periodEnd' })
+export const requireDateRange = (start, end, { startName = "start", endName = "end" } = {}) => {
+  if (!isDateOnly(start)) throw new BadRequestError(`${startName} debe ser una fecha YYYY-MM-DD`);
+  if (!isDateOnly(end))   throw new BadRequestError(`${endName} debe ser una fecha YYYY-MM-DD`);
+  if (start >= end) {
+    throw new BadRequestError(`${startName} debe ser anterior a ${endName}`);
+  }
+  return { start, end };
+};
+
 export const getBearerToken = (req) => {
   const auth =
     typeof req.headers?.get === "function"

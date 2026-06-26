@@ -5,6 +5,16 @@
 //   peerCouldGiveMore: "Nombre"|null,
 //   peerHadItTough: "Nombre"|null
 // }
+//
+// CAMBIO B-5: todo el ciclo select+update/insert+delete+insert fue reemplazado
+// por una única llamada RPC `submit_sprint_retro` (migración 039). La función
+// PL/pgSQL ejecuta el upsert del retro + el reemplazo de señales en una sola
+// transacción Postgres. Si cualquier paso falla, Postgres hace ROLLBACK de todo:
+// nunca queda un estado con señales borradas y sin insertar.
+//
+// Antes del fix: 5 operaciones independientes → posible corrupción silenciosa
+//   (DELETE de señales → INSERT de señales fallaba → console.warn → 200 OK).
+// Después del fix: 1 llamada RPC → error real → 500 con mensaje → sin pérdida.
 
 import {
   applyCors,
@@ -29,6 +39,7 @@ export default async function handler(req, res) {
       peerStrategic, peerCouldGiveMore, peerHadItTough,
     } = req.body || {};
 
+    // ── Validación de entrada (sin cambios respecto al código anterior) ───────
     if (!periodId) return res.status(400).json({ error: "periodId requerido" });
     if (!ALLOWED_EMOJIS.includes(emoji)) return res.status(400).json({ error: "emoji invalido" });
     if (!liked || liked.trim().length === 0) return res.status(400).json({ error: "liked vacio" });
@@ -39,56 +50,40 @@ export default async function handler(req, res) {
     const user = await getAuthenticatedUser(token);
     const supabase = createSupabase(token);
 
+    // El nombre se resuelve aquí (igual que antes) y se pasa a la función.
+    // La función NO lo acepta del cliente; siempre usa auth.uid() como id.
     const respondentName = user.user_metadata?.full_name || user.email || "Anónimo";
 
-    // Upsert: si ya respondió, actualiza.
-    const { data: existing, error: exErr } = await supabase
-      .from("sprint_retros")
-      .select("id")
-      .eq("period_id", periodId)
-      .eq("respondent_user_id", user.id)
-      .maybeSingle();
-    if (exErr) return res.status(500).json({ error: exErr.message });
+    // ── Llamada RPC atómica (reemplaza las 5 operaciones anteriores) ──────────
+    // La función PL/pgSQL (migración 039) ejecuta en una transacción única:
+    //   1. UPSERT de sprint_retros (INSERT ON CONFLICT DO UPDATE).
+    //   2. DELETE de sprint_retro_peer_signals donde retro_id = v_retro_id.
+    //   3. INSERT de cada señal no nula.
+    // Si cualquier paso falla → ROLLBACK completo → error propagado aquí → 500.
+    // Nunca se devuelve 200 si alguna escritura falló.
+    //
+    // Los campos peer* se pasan trimmeados: la función también hace TRIM en
+    // PL/pgSQL, pero recibir el valor ya limpio evita que un espacio solo
+    // cuente como señal no nula desde el lado del cliente.
+    const { data, error } = await supabase.rpc("submit_sprint_retro", {
+      p_period_id:            Number(periodId),
+      p_respondent_name:      respondentName,
+      p_emoji:                emoji,
+      p_liked:                liked.trim(),
+      p_disliked:             disliked.trim(),
+      p_peer_strategic:       peerStrategic   ? String(peerStrategic).trim()   : null,
+      p_peer_could_give_more: peerCouldGiveMore ? String(peerCouldGiveMore).trim() : null,
+      p_peer_had_it_tough:    peerHadItTough  ? String(peerHadItTough).trim()  : null,
+    });
 
-    let retroId;
-    if (existing) {
-      const { error: upErr } = await supabase
-        .from("sprint_retros")
-        .update({ emoji, liked: liked.trim(), disliked: disliked.trim() })
-        .eq("id", existing.id);
-      if (upErr) return res.status(500).json({ error: upErr.message });
-      retroId = existing.id;
-
-      // Limpiar señales anteriores para reescribirlas
-      await supabase.from("sprint_retro_peer_signals").delete().eq("retro_id", retroId);
-    } else {
-      const { data: inserted, error: insErr } = await supabase
-        .from("sprint_retros")
-        .insert({
-          period_id: periodId,
-          respondent_user_id: user.id,
-          respondent_name: respondentName,
-          emoji,
-          liked: liked.trim(),
-          disliked: disliked.trim(),
-        })
-        .select("id")
-        .single();
-      if (insErr) return res.status(500).json({ error: insErr.message });
-      retroId = inserted.id;
+    if (error) {
+      // Error real de Postgres o de la RLS: la transacción ya fue revertida.
+      // No hay estado corrupto. Propagamos el error al cliente con 500.
+      return res.status(500).json({ error: error.message });
     }
 
-    // Insertar señalizaciones (si vienen)
-    const signals = [];
-    if (peerStrategic) signals.push({ retro_id: retroId, signal_type: "strategic_contributor", signaled_name: String(peerStrategic).trim() });
-    if (peerCouldGiveMore) signals.push({ retro_id: retroId, signal_type: "could_give_more", signaled_name: String(peerCouldGiveMore).trim() });
-    if (peerHadItTough) signals.push({ retro_id: retroId, signal_type: "had_it_tough", signaled_name: String(peerHadItTough).trim() });
-    if (signals.length > 0) {
-      const { error: sigErr } = await supabase.from("sprint_retro_peer_signals").insert(signals);
-      if (sigErr) console.warn("[submit-retro] No pude guardar señales:", sigErr.message);
-    }
-
-    return res.status(200).json({ ok: true, retro_id: retroId, signals_count: signals.length });
+    // data es el JSONB que devuelve la función: { retro_id, signals_count }
+    return res.status(200).json({ ok: true, retro_id: data.retro_id, signals_count: data.signals_count });
   } catch (err) {
     return handleApiError(err, res);
   }

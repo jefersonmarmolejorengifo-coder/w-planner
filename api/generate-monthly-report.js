@@ -9,6 +9,7 @@ import {
   getBearerToken,
   getOrigin,
   jsonResponse,
+  requireDateRange,
 } from "./_auth.js";
 import { AI_MODELS } from "../src/aiModels.js";
 
@@ -21,8 +22,6 @@ export const config = { runtime: "edge" };
 function jsonError(msg, status, headers) {
   return jsonResponse({ error: msg }, status, headers);
 }
-
-const isDateOnly = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || "");
 
 // Analiza una ventana mensual y produce métricas estructurales: ejes,
 // aportes reales, lead times, complejidad gestionada, repetitividad,
@@ -309,15 +308,17 @@ export default async function handler(req) {
   try { body = await req.json(); } catch { return jsonError("Body inválido", 400, headers); }
 
   const { monthStart, monthEnd, projectId } = body;
-  if (!projectId || !isDateOnly(monthStart) || !isDateOnly(monthEnd)) {
+  if (!projectId) {
     return jsonError("projectId, monthStart y monthEnd son requeridos", 400, headers);
   }
+  // requireDateRange valida formato YYYY-MM-DD y que start < end (lexicográfico).
   // Rechaza periodos sin duración o invertidos antes de consultar la DB
   // o gastar tokens del LLM. monthStart y monthEnd vienen del body del
   // request (no se calculan internamente), por eso el orden no está garantizado.
-  // La comparación lexicográfica es suficiente para fechas YYYY-MM-DD.
-  if (monthStart >= monthEnd) {
-    return jsonError("monthStart debe ser anterior a monthEnd", 400, headers);
+  try {
+    requireDateRange(monthStart, monthEnd, { startName: "monthStart", endName: "monthEnd" });
+  } catch (e) {
+    return jsonError(e.message, 400, headers);
   }
 
   const internalSecret = req.headers.get("x-cron-secret");

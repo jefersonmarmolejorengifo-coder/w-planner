@@ -8,6 +8,7 @@ import {
   getAuthenticatedUser,
   getBearerToken,
   handleApiError,
+  requireDateRange,
 } from "./_auth.js";
 import { sanitizeRichHtml } from "./_email.js";
 import { AI_MODELS } from "../src/aiModels.js";
@@ -31,8 +32,6 @@ function htmlToPlainText(html) {
     .trim();
 }
 
-const isDateOnly = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || "");
-
 export default async function handler(req, res) {
   applyCors(req, res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -45,16 +44,14 @@ export default async function handler(req, res) {
       truncated = false,
     } = req.body || {};
 
-    if (!projectId || !isDateOnly(periodStart) || !isDateOnly(periodEnd) || !html) {
+    if (!projectId || !html) {
       return res.status(400).json({ error: "projectId, periodStart, periodEnd y html son requeridos" });
     }
+    // requireDateRange valida formato YYYY-MM-DD y que start < end (lexicográfico).
     // Rechaza periodos sin duración o invertidos: el upsert usa
     // (project_id, period_start, period_end) como clave de conflicto,
     // así que un periodo inválido podría sobrescribir un registro legítimo.
-    // La comparación lexicográfica es suficiente para fechas YYYY-MM-DD.
-    if (periodStart >= periodEnd) {
-      return res.status(400).json({ error: "periodStart debe ser anterior a periodEnd" });
-    }
+    requireDateRange(periodStart, periodEnd, { startName: "periodStart", endName: "periodEnd" });
 
     const token = getBearerToken(req);
     const user = await getAuthenticatedUser(token);

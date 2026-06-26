@@ -256,6 +256,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 34 — B-5 (retro atómico) + cierre de deuda de tests de validación (2026-06-26)
+
+**B-5 (ALTO) `[backend-dev]` ✅ + migración 039 aplicada:** `api/submit-retro.js` hacía hasta 5 operaciones sin transacción (SELECT → UPDATE|INSERT del retro → DELETE de señales → INSERT de señales), y el error del INSERT de señales solo logueaba `console.warn` devolviendo 200 → corrupción silenciosa (señales borradas sin reinsertar). Ahora es UNA RPC transaccional: `migrations/039_submit_retro_atomic.sql` crea `submit_sprint_retro(...)` (PL/pgSQL, **SECURITY INVOKER** → respeta las RLS existentes de migración 020; `respondent_user_id = auth.uid()` nunca del cliente; upsert ON CONFLICT + DELETE/INSERT de señales todo-o-nada). El endpoint llama la RPC y devuelve 500 con el error real (sin pérdida silenciosa). El UNIQUE(period_id, respondent_user_id) ya existía (020).
+
+**#7 deuda de tests `[backend-dev]` ✅:** se extrajo `isDateOnly` + `requireDateRange(start,end,{startName,endName})` a `api/_auth.js` (junto a los otros `require*`, lanzan `BadRequestError` 400) y se reemplazaron los checks inline de B-3 en los 3 endpoints. +9 tests en `api/_auth.validation.test.js` (rango válido, start===end, start>end, formato inválido start/end, status 400).
+
+Implementación de **backend-dev**, verificado por el líder + **migración 039 aplicada en prod** (función SECURITY INVOKER confirmada). `vitest` **53/53** ✅, build ✅, lint limpio.
+
+> Nota de comportamiento: el upsert ON CONFLICT evalúa la policy INSERT WITH CHECK (período abierto), así que editar un retro tras cerrar el período ahora se bloquea por RLS — más correcto, y la UI ya gatea el form al período abierto.
+
+> **Tanda 2 COMPLETA** (#5 H-048 · #6 B-5 · #7 tests). Siguiente: **Tanda 3** (RESP-01/02 responsive + optimizaciones de carga).
+
 ### Sprint 33 — H-048: outbox durable para la comisión al hub (2026-06-26)
 
 **H-048 (ALTO — dinero) `[infra-scalability + backend-dev]` ✅ + migración 038 aplicada:** la notificación de comisión al hub era fire-and-forget — un 5xx o timeout transitorio del hub perdía la comisión aunque el cobro entró. Ahora hay durabilidad con **outbox + reintento**: `migrations/038_hub_outbox.sql` (tabla `hub_outbox` con UNIQUE `mp_payment_id`, RLS service_role-only, índices parciales para el drain, RPC `hub_outbox_claim` con `FOR UPDATE SKIP LOCKED`). `api/mp-webhook.js` ahora **encola siempre** (upsert idempotente) y hace un envío inmediato best-effort (marca `sent` o `failed`). `api/cron.js` (horario) **drena** los pendientes con backoff exponencial (2^intento min, máx 5 intentos → `dead` con log de alerta), usando `service_role`. Idempotente en 4 capas (dedup de eventos MP + UNIQUE outbox + dedup del hub por payment_id + guards de estado). Diseño de **infra-scalability**, implementación de **backend-dev**, verificado por el líder (corrigió el `next_attempt_at` NOT NULL en el branch `dead`). `vitest` 44/44 ✅, build ✅, lint limpio. **Migración 038 aplicada en prod por el líder** (tabla + función + 4 índices verificados, 0 filas). El cobro nunca se bloquea (fail-open preservado).

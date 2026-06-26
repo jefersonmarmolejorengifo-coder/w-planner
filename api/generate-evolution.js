@@ -18,6 +18,7 @@ import {
   getBearerToken,
   getOrigin,
   jsonResponse,
+  requireDateRange,
 } from "./_auth.js";
 import { AI_MODELS } from "../src/aiModels.js";
 
@@ -26,7 +27,6 @@ export const config = { runtime: "edge" };
 function jsonError(msg, status, headers) {
   return jsonResponse({ error: msg }, status, headers);
 }
-const isDateOnly = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || "");
 
 const MIN_DAYS = 60;
 
@@ -324,14 +324,16 @@ export default async function handler(req) {
   try { body = await req.json(); } catch { return jsonError("Body inválido", 400, headers); }
 
   const { periodStart, periodEnd, projectId } = body;
-  if (!projectId || !isDateOnly(periodStart) || !isDateOnly(periodEnd)) {
+  if (!projectId) {
     return jsonError("projectId, periodStart y periodEnd son requeridos", 400, headers);
   }
+  // requireDateRange valida formato YYYY-MM-DD y que start < end (lexicográfico).
   // Rechaza periodos sin duración o invertidos antes de gastar tokens del LLM
   // o de ejecutar el upsert (cuya clave única es project_id + period_start + period_end).
-  // La comparación lexicográfica es suficiente para fechas YYYY-MM-DD.
-  if (periodStart >= periodEnd) {
-    return jsonError("periodStart debe ser anterior a periodEnd", 400, headers);
+  try {
+    requireDateRange(periodStart, periodEnd, { startName: "periodStart", endName: "periodEnd" });
+  } catch (e) {
+    return jsonError(e.message, 400, headers);
   }
 
   const internalSecret = req.headers.get("x-cron-secret");

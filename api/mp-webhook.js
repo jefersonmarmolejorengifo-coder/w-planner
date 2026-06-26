@@ -259,61 +259,125 @@ export default async function handler(req, res) {
       }
       await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
 
-      // ── Notificación al hub (cobro recurrente) ───────────────────────────
-      // Notificamos en todo pago approved, sea el primero o una renovación.
-      // mp_payment_id UNIQUE en hub.transacciones absorbe duplicados si MP reintenta.
-      // Si el hub está caído, users_premium ya fue actualizado arriba.
+      // ── Notificación al hub (cobro recurrente) — H-048 outbox ───────────
+      // Flujo de durabilidad de dos pasos:
+      //   1. Encolar en hub_outbox (persistencia ANTES de llamar al hub).
+      //   2. Intentar envío inmediato best-effort; actualizar el estado del registro.
+      //
+      // El hub deduplica por mp_payment_id (UNIQUE), por lo que reintentar es
+      // idempotente. Si el hub está caído ahora, el cron drena los pendientes con
+      // backoff exponencial. El cobro (users_premium) ya fue confirmado arriba;
+      // este bloque NUNCA bloquea el return 200 a MP.
       if (payment.status === "approved") {
-        try {
-          const montoBase = payment.transaction_amount ?? 0;
+        const montoBase = payment.transaction_amount ?? 0;
 
-          // M-2: no notificar al hub si el monto es COP$0 o null — evita registrar
-          // comisiones de monto cero que podrían distorsionar el tablero de afiliados.
-          if (!(montoBase > 0)) {
-            console.warn("[mp-webhook] payment aprobado con monto <= 0; hub no notificado. payment_id:", payment.id);
-          } else {
-            // fee_mp_cop: algunos objetos payment incluyen marketplace_fee o charges_details.
-            // Si no está disponible, se envía 0 y el hub puede calcularlo con su propia lógica.
-            const feeMp = payment.fee_details
-              ? payment.fee_details.reduce((sum, f) => sum + (f.amount || 0), 0)
-              : 0;
+        // M-2: no encolar al hub si el monto es COP$0 o null — evita registrar
+        // comisiones de monto cero que podrían distorsionar el tablero de afiliados.
+        if (!(montoBase > 0)) {
+          console.warn("[mp-webhook] payment aprobado con monto <= 0; hub no notificado. payment_id:", payment.id);
+        } else {
+          // fee_mp_cop: algunos objetos payment incluyen fee_details.
+          // Si no está disponible, se envía 0 y el hub puede calcularlo con su lógica.
+          const feeMp = payment.fee_details
+            ? payment.fee_details.reduce((sum, f) => sum + (f.amount || 0), 0)
+            : 0;
 
-            // Nombre del plan: si tenemos tier del external_reference lo usamos;
-            // si no (preapproval muy antigua sin 3 segmentos), caemos a genérico.
-            const planLabel = tier
-              ? `Productivity Plus · ${tier}`
-              : "Productivity Plus";
+          // Nombre del plan: si tenemos tier del external_reference lo usamos;
+          // si no (preapproval muy antigua sin 3 segmentos), caemos a genérico.
+          const planLabel = tier
+            ? `Productivity Plus · ${tier}`
+            : "Productivity Plus";
 
-            const payerEmail =
-              payment.payer?.email ||
-              resolvedPa?.payer_email ||
-              "";
+          const payerEmail =
+            payment.payer?.email ||
+            resolvedPa?.payer_email ||
+            "";
 
-            const hubResult = await notificarPagoAlHub({
-              mp_payment_id:   String(payment.id),
-              cliente_email:   payerEmail.toLowerCase(),
-              cliente_nombre:  payment.payer?.first_name
-                ? `${payment.payer.first_name} ${payment.payer.last_name || ""}`.trim()
-                : undefined,
-              plan_o_producto: planLabel,
-              monto_bruto_cop: montoBase,
-              fee_mp_cop:      feeMp,
-              monto_neto_cop:  montoBase - feeMp,
-              ref_code:        referralCode ?? undefined,
-              fecha_pago:      payment.date_approved || payment.date_created || new Date().toISOString(),
-            });
-            if (!hubResult.ok) {
-              console.warn("[mp-webhook] hub notificación payment falló (no-crítico):", hubResult.error);
+          const mpPaymentId = String(payment.id);
+          const hubPayload = {
+            mp_payment_id:   mpPaymentId,
+            cliente_email:   payerEmail.toLowerCase(),
+            cliente_nombre:  payment.payer?.first_name
+              ? `${payment.payer.first_name} ${payment.payer.last_name || ""}`.trim()
+              : undefined,
+            plan_o_producto: planLabel,
+            monto_bruto_cop: montoBase,
+            fee_mp_cop:      feeMp,
+            monto_neto_cop:  montoBase - feeMp,
+            ref_code:        referralCode ?? undefined,
+            fecha_pago:      payment.date_approved || payment.date_created || new Date().toISOString(),
+          };
+
+          // Paso 1: encolar en hub_outbox (fail-open — no bloquea el cobro).
+          // ignoreDuplicates: true → si MP reintenta el webhook y el registro ya
+          // existe, no sobreescribe (idempotente). El admin client ya fue creado
+          // al inicio del handler con createAdminClient() (service_role).
+          let enqueued = false;
+          try {
+            const { error: upsertErr } = await admin
+              .from("hub_outbox")
+              .upsert(
+                { mp_payment_id: mpPaymentId, payload: hubPayload, status: "pending" },
+                { onConflict: "mp_payment_id", ignoreDuplicates: true },
+              );
+            if (upsertErr) {
+              // No propagamos: el cobro ya fue registrado, la notificación al hub
+              // es auxiliar. El cron no puede drenar lo que no se encoló, pero es
+              // mejor eso que bloquear la respuesta a MP.
+              console.error("[mp-webhook] hub_outbox upsert error:", upsertErr.message);
             } else {
-              console.log("[mp-webhook] hub notificado (payment):", hubResult.transaccion_id);
+              enqueued = true;
+            }
+          } catch (enqEx) {
+            console.error("[mp-webhook] hub_outbox upsert excepción:", enqEx?.message);
+          }
+
+          // Paso 2: intentar envío inmediato best-effort (solo si el encolado fue ok).
+          // Si falla, el registro queda en 'pending' para que el cron lo reintente.
+          if (enqueued) {
+            try {
+              const r = await notificarPagoAlHub(hubPayload);
+              if (r.ok || r.duplicado) {
+                // Envío exitoso: marcar como sent. Guard .eq("status","pending") evita
+                // sobrescribir si el cron ya lo procesó en paralelo (edge case).
+                const { error: sentErr } = await admin
+                  .from("hub_outbox")
+                  .update({ status: "sent", sent_at: new Date().toISOString(), attempts: 1 })
+                  .eq("mp_payment_id", mpPaymentId)
+                  .eq("status", "pending");
+                if (sentErr) {
+                  console.warn("[mp-webhook] hub_outbox marcar sent falló:", sentErr.message);
+                } else {
+                  console.log("[mp-webhook] hub notificado y outbox marcado sent. mp_payment_id:", mpPaymentId, "txn:", r.transaccion_id);
+                }
+              } else {
+                // Hub respondió con error: dejar en failed para reintento del cron.
+                // next_attempt_at = ahora + 2 min (primer backoff).
+                const nextAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+                const { error: failErr } = await admin
+                  .from("hub_outbox")
+                  .update({
+                    status: "failed",
+                    attempts: 1,
+                    last_error: String(r.error ?? "hub respondió !ok").slice(0, 500),
+                    next_attempt_at: nextAt,
+                  })
+                  .eq("mp_payment_id", mpPaymentId)
+                  .eq("status", "pending");
+                if (failErr) {
+                  console.warn("[mp-webhook] hub_outbox marcar failed falló:", failErr.message);
+                } else {
+                  console.warn("[mp-webhook] hub no respondió ok; outbox en failed para reintento. mp_payment_id:", mpPaymentId, "error:", r.error);
+                }
+              }
+            } catch {
+              // Fail-open: la excepción de red/timeout del hub no propaga.
+              // El registro sigue en 'pending' y el cron lo reintentará.
+              // No logueamos el mensaje de la excepción (puede contener payload
+              // con datos del pagador — A-2).
+              console.error("[mp-webhook] hub envío inmediato excepción (omitida); outbox queda pending para cron.");
             }
           }
-        } catch {
-          // Fail-open: nunca propaga. El cobro ya fue confirmado.
-          // A-2: no capturamos ni logueamos el mensaje de la excepción del hub —
-          // puede contener el body del request saliente y exponer datos sensibles
-          // en los logs de Vercel.
-          console.error("[mp-webhook] hub error (omitido)");
         }
       }
 

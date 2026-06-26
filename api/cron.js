@@ -1,5 +1,6 @@
-import { createSupabase, fetchWithTimeout } from "./_auth.js";
+import { createSupabase, createAdminClient, fetchWithTimeout } from "./_auth.js";
 import { getResendConfig, normalizeRecipients, sanitizeReportHtml } from "./_email.js";
+import { notificarPagoAlHub } from "./_hub-client.js";
 
 // ─── Helpers de tiempo en Colombia ─────────────────────────
 const DAY_MAP = {
@@ -279,6 +280,108 @@ export default async function handler(req, res) {
   const authHeader = req.headers.authorization;
   if (authHeader !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // ── H-048: Drain del outbox de notificaciones al hub ────────────────────
+  // Se ejecuta ANTES de los jobs de reportes. Usa service_role (createAdminClient)
+  // porque hub_outbox tiene RLS activado y revoca el acceso a todos los roles
+  // excepto service_role. El bloque está envuelto en su propio try/catch para que
+  // un fallo del drain NUNCA interrumpa los jobs de reportes que siguen.
+  try {
+    const adminHub = createAdminClient();
+    if (!adminHub) {
+      console.warn("[cron:hub_drain] createAdminClient devolvió null (faltan vars de entorno); drain omitido.");
+    } else {
+      // hub_outbox_claim bloquea las filas con FOR UPDATE SKIP LOCKED para que
+      // dos invocaciones del cron solapadas no procesen el mismo registro.
+      const { data: items, error: claimErr } = await adminHub.rpc("hub_outbox_claim", { p_limit: 5 });
+      if (claimErr) {
+        // 42883 = función no existe (migración 038 aún no aplicada): silencioso.
+        if (claimErr.code !== "42883") {
+          console.error("[cron:hub_drain] hub_outbox_claim error:", claimErr.message);
+        }
+      } else if (Array.isArray(items) && items.length > 0) {
+        for (const item of items) {
+          const newAttempts = item.attempts + 1;
+          let r;
+          try {
+            r = await notificarPagoAlHub(item.payload);
+          } catch {
+            // notificarPagoAlHub ya captura todas las excepciones internamente y
+            // devuelve { ok: false }. Este catch es defensa extra ante cambios futuros.
+            r = { ok: false, error: "excepción no esperada en notificarPagoAlHub" };
+          }
+
+          if (r.ok || r.duplicado) {
+            // Envío exitoso (o el hub ya lo tenía: duplicado idempotente).
+            const label = r.duplicado ? "duplicado" : String(r.transaccion_id ?? "ok");
+            const { error: sentErr } = await adminHub
+              .from("hub_outbox")
+              .update({
+                status: "sent",
+                attempts: newAttempts,
+                sent_at: new Date().toISOString(),
+                last_error: null,
+              })
+              .eq("id", item.id)
+              .in("status", ["pending", "failed"]);
+            if (sentErr) {
+              console.warn("[cron:hub_drain] marcar sent falló mp_payment_id=" + item.mp_payment_id + ":", sentErr.message);
+            } else {
+              console.log("[cron:hub_drain] sent mp_payment_id=" + item.mp_payment_id + " txn=" + label);
+            }
+          } else {
+            // Hub falló: aplicar backoff exponencial 2^attempts minutos.
+            const isDead = newAttempts >= item.max_attempts;
+            const lastErrStr = String(r.error ?? "hub !ok").slice(0, 500);
+
+            if (isDead) {
+              // Estado terminal: no se vuelve a intentar. OJO: NO incluir
+              // next_attempt_at en el update (columna NOT NULL; null la rompe).
+              // Queda con el valor previo, lo que es aceptable porque el filtro
+              // de hub_outbox_claim exige status IN ('pending','failed').
+              const { error: deadErr } = await adminHub
+                .from("hub_outbox")
+                .update({
+                  status: "dead",
+                  attempts: newAttempts,
+                  last_error: lastErrStr,
+                })
+                .eq("id", item.id)
+                .in("status", ["pending", "failed"]);
+              if (deadErr) {
+                console.warn("[cron:hub_drain] marcar dead falló mp_payment_id=" + item.mp_payment_id + ":", deadErr.message);
+              } else {
+                // Error prominente: debe activar alerta en Vercel / Datadog.
+                console.error("[cron:hub_drain] DEAD mp_payment_id=" + item.mp_payment_id + " intentos=" + newAttempts + "/" + item.max_attempts + " error=" + lastErrStr);
+              }
+            } else {
+              // Reintento diferido: backoff 2^attempts minutos.
+              const backoffMs = Math.pow(2, newAttempts) * 60 * 1000;
+              const nextAt = new Date(Date.now() + backoffMs).toISOString();
+              const { error: failErr } = await adminHub
+                .from("hub_outbox")
+                .update({
+                  status: "failed",
+                  attempts: newAttempts,
+                  last_error: lastErrStr,
+                  next_attempt_at: nextAt,
+                })
+                .eq("id", item.id)
+                .in("status", ["pending", "failed"]);
+              if (failErr) {
+                console.warn("[cron:hub_drain] marcar failed falló mp_payment_id=" + item.mp_payment_id + ":", failErr.message);
+              } else {
+                console.warn("[cron:hub_drain] failed mp_payment_id=" + item.mp_payment_id + " intento " + newAttempts + "/" + item.max_attempts + " próximo=" + nextAt);
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (drainErr) {
+    // NUNCA propaga: el drain es auxiliar, no puede cortar los reportes.
+    console.error("[cron:hub_drain] excepción no esperada (drain abortado):", drainErr?.message);
   }
 
   try {

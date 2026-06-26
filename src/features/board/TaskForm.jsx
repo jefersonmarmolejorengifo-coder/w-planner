@@ -5,6 +5,7 @@ import { calcAporte, calcProgressFromSubtasks, DEFAULT_DIMENSIONS } from "../../
 import { parseDeps } from "../../lib/deps";
 import { CustomFieldsRenderer } from "../../lib/CustomFieldsRenderer";
 import { inp, readonlyInp } from "../../lib/formStyles";
+import { useConfirm } from "../../ui/ConfirmDialog";
 
 // Estados que cuentan como "cierre" de una tarjeta. Privado de TaskForm.
 const CLOSE_STATES = ["Finalizada", "Cancelada"];
@@ -241,6 +242,7 @@ const commentColorOf = (name) => {
 // con autor + timestamp. Cualquier miembro del proyecto puede comentar.
 // El autor puede editar o borrar el suyo. Realtime via Supabase channel.
 function TaskCommentsThread({ taskId, projectId }) {
+  const confirm = useConfirm();
   const [comments, setComments] = useState([]);
   const [draft, setDraft] = useState("");
   const [authUser, setAuthUser] = useState(null);
@@ -322,7 +324,7 @@ function TaskCommentsThread({ taskId, projectId }) {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("¿Borrar este comentario?")) return;
+    if (!(await confirm("¿Borrar este comentario?", { title: 'Borrar comentario', confirmText: 'Borrar', danger: true }))) return;
     const { error: err } = await supabase
       .from('task_comments')
       .update({ deleted_at: new Date().toISOString() })

@@ -256,6 +256,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 32 — U-01/U-02/R-11: alert/confirm nativos → Toast + diálogo accesible (2026-06-26)
+
+**U-01/U-02/R-11 (consenso ui-ux + frontend) `[frontend]` ✅:** se eliminaron TODOS los `alert()`/`confirm()` nativos (bloqueantes, sin estilo, sin a11y) — 18 sitios en 8 archivos. Nuevos componentes en `src/ui/`: `ToastProvider`/`useToast()` (notificaciones no bloqueantes, apilables, auto-dismiss, `aria-live`) y `ConfirmProvider`/`useConfirm()` (diálogo de confirmación **async** que devuelve `Promise<boolean>`, reutiliza el hook accesible `useDialog` — foco/Esc/trampa, botón rojo `danger` para destructivos). Providers montados en `src/main.jsx` sobre `<App/>`. Los `confirm` pasaron a `await confirm(...)` (handlers async). Delegado a **frontend** (con criterio ui-ux), verificado por el líder (corrigió 3 lint nuevos: `useRef` muerto + `react-refresh/only-export-components` en los dos archivos provider+hook). `vitest` 44/44 ✅, `vite build` ✅, lint de archivos nuevos/tocados limpio (los 17 restantes de `src` son preexistentes del monolito). Grep final: 0 `alert(`/`confirm(` nativos en `src`. Sin migración.
+
+> **Tanda 1 del roadmap COMPLETA** (#1 R-01/R-02 · #2 B-3 · #3 O-07 · #4 alert/confirm→Toast). Siguiente: **Tanda 2 — #5 H-048** (reintento durable de comisión al hub, ALTO/dinero).
+
 ### Sprint 31 — B-3 (validación de periodos) + O-07 (modelo evolutivo) (2026-06-26)
 
 **B-3 (ALTO) `[backend]` ✅:** los endpoints del evolutivo/mensual validaban el formato de fecha pero NO el orden, así que un periodo invertido o de duración cero (fin ≤ inicio) gastaba tokens del LLM y podía sobrescribir histórico (el upsert del evolutivo usa `(project_id, period_start, period_end)` como clave única). Se agrega guard `start >= end → 400` ANTES de cualquier query/LLM en `api/generate-evolution.js`, `api/save-evolution.js` y `api/generate-monthly-report.js` (este último valida `monthStart`/`monthEnd` del body). Comparación lexicográfica (válida para `YYYY-MM-DD`).

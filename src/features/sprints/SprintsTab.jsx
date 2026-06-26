@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { supabase } from "../../supabaseClient";
 import { STATUS_COLORS } from "../../constants";
+import { useToast } from "../../ui/Toast";
+import { useConfirm } from "../../ui/ConfirmDialog";
 
 // Tab de Sprints (planificación + activo + cerrados, con burndown). Extraído del
 // monolito (H-002), cargado con React.lazy. SprintCard y los estilos puros viven
@@ -98,6 +100,8 @@ function SprintCard({ sprint, tasks, today, onStart, onCloseSprint, onDelete }) 
 }
 
 export default function SprintsTab({ projectId, sprints, setSprints, tasks }) {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', goal: '', start_date: '', end_date: '' });
   const today = new Date().toISOString().split('T')[0];
@@ -113,7 +117,7 @@ export default function SprintsTab({ projectId, sprints, setSprints, tasks }) {
   };
 
   const startSprint = async (id) => {
-    if (activeSprint) { alert('Ya hay un sprint activo. Ciérralo antes de iniciar otro.'); return; }
+    if (activeSprint) { toast('Ya hay un sprint activo. Ciérralo antes de iniciar otro.', { type: 'info' }); return; }
     await supabase.from('sprints').update({ status: 'active' }).eq('id', id).eq('project_id', projectId);
     setSprints(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
   };
@@ -124,7 +128,7 @@ export default function SprintsTab({ projectId, sprints, setSprints, tasks }) {
   };
 
   const deleteSprint = async (id) => {
-    if (!confirm('¿Eliminar este sprint?')) return;
+    if (!(await confirm('¿Eliminar este sprint?', { title: 'Eliminar sprint', confirmText: 'Eliminar', danger: true }))) return;
     await supabase.from('sprints').delete().eq('id', id).eq('project_id', projectId);
     setSprints(prev => prev.filter(s => s.id !== id));
   };

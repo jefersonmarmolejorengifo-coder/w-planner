@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AUTO_FIELD_SOURCE_LABELS, slugifyKey } from "../../lib/customFields";
+import { useConfirm } from "../../ui/ConfirmDialog";
 
 // Owner-only editor for the per-project custom card schema (task_field_defs).
 // Soft-deletes on remove to preserve historical values inside tasks.custom_fields.
@@ -25,6 +26,7 @@ const FIELD_TYPE_HINTS = {
 };
 
 export default function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, onReorder }) {
+  const confirm = useConfirm();
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState({ label: '', type: 'text', required: false, show_on_card: false, show_in_presentation: false, options: '', source: 'created_at' });
   const [editingId, setEditingId] = useState(null);
@@ -124,7 +126,7 @@ export default function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, o
   };
 
   const handleDelete = async (def) => {
-    if (!window.confirm(`¿Eliminar el campo "${def.label}"? Los valores ya capturados quedarán archivados.`)) return;
+    if (!(await confirm(`¿Eliminar el campo "${def.label}"? Los valores ya capturados quedarán archivados.`, { title: 'Eliminar campo', confirmText: 'Eliminar', danger: true }))) return;
     setBusy(true);
     const { error: err } = await onDelete(def.id);
     setBusy(false);

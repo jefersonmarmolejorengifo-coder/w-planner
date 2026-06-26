@@ -6,6 +6,8 @@ import { calcAporte } from "../../lib/aporte";
 import { getColombiaNow } from "../../lib/format";
 import { readCustomFieldValue } from "../../lib/customFields";
 import TaskForm from "./TaskForm";
+import { useToast } from "../../ui/Toast";
+import { useConfirm } from "../../ui/ConfirmDialog";
 
 const emptyTask = (id) => ({
   id,
@@ -215,6 +217,8 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 // (Modal + TaskForm). Dirigido 100% por props. Extraído del monolito
 // (H-002, núcleo fase C).
 export default function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, nextId, keyResults = [], sprints = [], taskFieldDefs = [] }) {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
   const [taskHistory, setTaskHistory] = useState([]);
@@ -262,7 +266,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   }, [editTaskFromDep, onDepEditDone, projectId]);
 
   const save = async () => {
-    if (!form.title.trim()) { alert("El título es obligatorio"); return; }
+    if (!form.title.trim()) { toast("El título es obligatorio", { type: 'error' }); return; }
     setModal(null);
     if (modal === "new") {
       // Reservar el id atómicamente recién ahora (lock-free vía SEQUENCE, H-014).
@@ -290,7 +294,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   };
 
   const del = async () => {
-    if (!confirm(`¿Eliminar la tarea #${form.id}?`)) return;
+    if (!(await confirm(`¿Eliminar la tarea #${form.id}?`, { title: 'Eliminar tarea', confirmText: 'Eliminar', danger: true }))) return;
     setModal(null);
     await deleteTask(form.id);
   };

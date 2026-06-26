@@ -32,6 +32,7 @@ import { useProjectData } from './hooks/useProjectData';
 import { usePresence } from './hooks/usePresence';
 import { useReferralCapture, getReferralCode } from './hooks/useReferralCapture';
 import { useReferralSync } from './hooks/useReferralSync';
+import { useToast } from './ui/Toast';
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 
@@ -1476,6 +1477,7 @@ function TourMenu({ onPick }) {
 // (antes de crear un tablero). Encapsula el estado del modal, el tier actual y
 // el disparo del pago, para que la compra viva fuera de Configuración.
 function PlansLauncher({ variant = "header" }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [currentTier, setCurrentTier] = useState("free");
   const [busy, setBusy] = useState(false);
@@ -1498,7 +1500,7 @@ function PlansLauncher({ variant = "header" }) {
       window.location.assign(data.init_point);
     } catch (err) {
       setBusy(false);
-      alert("No se pudo iniciar el pago: " + err.message);
+      toast("No se pudo iniciar el pago: " + err.message, { type: 'error' });
     }
   };
 

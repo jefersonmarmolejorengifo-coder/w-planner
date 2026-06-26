@@ -7,12 +7,14 @@ import DimensionEditor from "./DimensionEditor";
 import FieldDefEditor from "./FieldDefEditor";
 import PremiumPanel from "./PremiumPanel";
 import ReportsConfigSection from "./ReportsConfigSection";
+import { useConfirm } from "../../ui/ConfirmDialog";
 
 // Pestaña de configuración del proyecto (owner-only): datos del proyecto,
 // invitaciones, roles, PIN, participantes, indicadores, tipos de tarea,
 // dimensiones de aporte, campos personalizados, panel premium y reportes IA.
 // Extraída del monolito y cargada con React.lazy (H-002, fase final de ConfigTab).
 export default function ConfigTab({ participants, setParticipants, indicators, setIndicators, taskTypes, setTaskTypes, dimensions, setDimensions, project, onChangePin, taskFieldDefs = [], addTaskFieldDef, updateTaskFieldDef, deleteTaskFieldDef, reorderTaskFieldDefs }) {
+  const confirm = useConfirm();
   const [newI, setNewI] = useState("");
   const [newType, setNewType] = useState("");
   const [typeMsg, setTypeMsg] = useState("");
@@ -193,7 +195,7 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
       return { ...p, isSuperUser: false };
     }));
   };
-  const removeP = (id) => { if (confirm("¿Eliminar participante?")) setParticipants((prev) => prev.filter((p) => p.id !== id)); };
+  const removeP = async (id) => { if (await confirm("¿Eliminar participante?", { title: 'Eliminar participante', confirmText: 'Eliminar', danger: true })) setParticipants((prev) => prev.filter((p) => p.id !== id)); };
 
   const addI = () => {
     const name = newI.trim();
@@ -201,7 +203,7 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
     setIndicators((prev) => [...prev, { id: Date.now(), name }]);
     setNewI("");
   };
-  const removeI = (id) => { if (confirm("¿Eliminar indicador?")) setIndicators((prev) => prev.filter((i) => i.id !== id)); };
+  const removeI = async (id) => { if (await confirm("¿Eliminar indicador?", { title: 'Eliminar indicador', confirmText: 'Eliminar', danger: true })) setIndicators((prev) => prev.filter((i) => i.id !== id)); };
 
   const addType = () => {
     const name = newType.trim();
@@ -211,8 +213,8 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
     setTypeMsg("Tipo agregado correctamente");
     setTimeout(() => setTypeMsg(""), 3000);
   };
-  const removeType = (id) => {
-    if (!confirm("¿Eliminar tipo de tarea?")) return;
+  const removeType = async (id) => {
+    if (!(await confirm("¿Eliminar tipo de tarea?", { title: 'Eliminar tipo de tarea', confirmText: 'Eliminar', danger: true }))) return;
     setTaskTypes((prev) => prev.filter((t) => t.id !== id));
   };
 

@@ -4,6 +4,7 @@ import { calcAporte } from "../lib/aporte";
 import { getColombiaNow } from "../lib/format";
 import { readCustomFieldValue } from "../lib/customFields";
 import { dbToTask, taskToDb } from "../lib/taskMapping";
+import { useToast } from "../ui/Toast";
 
 // Estado + CRUD de tareas (tasks/nextId) extraído del orquestador App
 // (H-002, núcleo fase D). Recibe del App el contexto que necesita
@@ -11,6 +12,7 @@ import { dbToTask, taskToDb } from "../lib/taskMapping";
 // expone setTasks/setNextId porque el spine (loadAllForProject + canal realtime,
 // que siguen en App) los sigue poblando. Lógica verbatim: comportamiento idéntico.
 export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeUser, taskFieldDefs }) {
+  const toast = useToast();
   const [tasks, setTasks] = useState([]);
   const [nextId, setNextId] = useState(1);
 
@@ -33,7 +35,7 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
       setTasks(prev => [...prev, task]);
     } else {
       console.error('Error creando tarea:', error);
-      alert('Error al guardar la tarea: ' + error.message);
+      toast('Error al guardar la tarea: ' + error.message, { type: 'error' });
     }
   };
 
@@ -74,10 +76,10 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
       if (freshRow) {
         const fresh = dbToTask(freshRow);
         setTasks(prev => prev.map(t => t.id === task.id ? fresh : t));
-        alert('Esta tarjeta fue modificada por otra persona mientras la editabas. Se recargó con la versión más reciente; vuelve a abrirla para reaplicar tus cambios.');
+        toast('Esta tarjeta fue modificada por otra persona mientras la editabas. Se recargó con la versión más reciente; vuelve a abrirla para reaplicar tus cambios.', { type: 'info' });
       } else {
         setTasks(prev => prev.filter(t => t.id !== task.id));
-        alert('Esta tarjeta fue eliminada por otra persona mientras la editabas.');
+        toast('Esta tarjeta fue eliminada por otra persona mientras la editabas.', { type: 'error' });
       }
       return;
     }
@@ -136,7 +138,7 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
       setTasks(prev => prev.map(t => t.id === task.id ? merged : t));
     } else {
       console.error('Error actualizando tarea:', error);
-      alert('Error al actualizar la tarea: ' + error.message);
+      toast('Error al actualizar la tarea: ' + error.message, { type: 'error' });
     }
   };
 
@@ -152,7 +154,7 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
   };
 
   const exportCSV = () => {
-    if (tasks.length === 0) { alert("No hay tareas para exportar."); return; }
+    if (tasks.length === 0) { toast("No hay tareas para exportar.", { type: 'info' }); return; }
     // Compute custom-field columns from the active defs so each tenant gets
     // exactly its schema. Soft-deleted defs are skipped; their values stay
     // in tasks.custom_fields for audit but aren't exported.

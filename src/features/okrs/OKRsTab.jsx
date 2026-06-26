@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { supabase } from "../../supabaseClient";
+import { useToast } from "../../ui/Toast";
+import { useConfirm } from "../../ui/ConfirmDialog";
 
 // Tab de OKRs (Objetivos y Resultados Clave). Prop-driven: recibe okrs/keyResults
 // y sus setters desde el orquestador. Extraído del monolito (H-002), cargado con
 // React.lazy.
 export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyResults, tasks }) {
+  const toast = useToast();
+  const confirm = useConfirm();
   // Default: hoy → +90 días (un trimestre aprox). El usuario puede ajustar.
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const in90ISO = () => { const d = new Date(); d.setDate(d.getDate() + 90); return d.toISOString().slice(0, 10); };
@@ -23,8 +27,8 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
 
   const saveOkr = async () => {
     if (!form.title.trim()) return;
-    if (!form.start_date || !form.end_date) { alert('Define fecha de inicio y fin'); return; }
-    if (form.end_date < form.start_date) { alert('La fecha fin debe ser mayor o igual a la fecha inicio'); return; }
+    if (!form.start_date || !form.end_date) { toast('Define fecha de inicio y fin', { type: 'error' }); return; }
+    if (form.end_date < form.start_date) { toast('La fecha fin debe ser mayor o igual a la fecha inicio', { type: 'error' }); return; }
     const payload = { title: form.title, description: form.description, start_date: form.start_date, end_date: form.end_date };
     if (editId) {
       await supabase.from('okrs').update(payload).eq('id', editId).eq('project_id', projectId);
@@ -37,7 +41,7 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
   };
 
   const deleteOkr = async (id) => {
-    if (!confirm('¿Eliminar este objetivo y todos sus resultados clave?')) return;
+    if (!(await confirm('¿Eliminar este objetivo y todos sus resultados clave?', { title: 'Eliminar objetivo', confirmText: 'Eliminar', danger: true }))) return;
     await supabase.from('okrs').delete().eq('id', id).eq('project_id', projectId);
     setOkrs(prev => prev.filter(o => o.id !== id));
     setKeyResults(prev => prev.filter(kr => kr.okr_id !== id));

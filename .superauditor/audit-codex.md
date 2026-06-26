@@ -1,173 +1,147 @@
-# Auditoría Codex — 1a90dc1..52ca539
+# Auditoría Codex — 7681794..HEAD
 
 ## Metadatos
 - Auditor: Codex (OpenAI)
-- Fecha: 2026-06-22
+- Fecha: 2026-06-24
 - Modelo: GPT-5 (Codex)
 - Proyecto: C:/Users/jefer/proyectos/w-planner
 
 ## Resumen
-El proyecto es una app Vite/React con funciones serverless en `api/*`, Supabase como BD/Auth, Mercado Pago para suscripciones, Resend para email y Anthropic/Gemini para IA. El rango auditado endurece varias áreas, pero todavía deja riesgos relevantes en pagos, webhooks, RPCs `SECURITY DEFINER` y aislamiento de sesiones de chat. La mayor deuda arquitectónica sigue concentrada en un frontend monolítico que mezcla onboarding, billing, dashboard, IA, proyectos y configuración. No detecté secretos reales versionados; sí placeholders y documentación.
+El rango introduce captura de referidos, persistencia previa al pago, notificación de pagos aprobados a un hub externo y ajustes de checkout/UX. El flujo de pago principal valida JWT, firma de Mercado Pago y `service_role` antes de cobrar (`api/mp-subscribe.js:47`, `api/mp-webhook.js:138`, `api/mp-subscribe.js:55`). Los riesgos relevantes están en robustez operativa: la comisión al hub es best-effort sin reintentos durables, las variables `HUB_*` no están documentadas y hay caminos que marcan éxito aunque la base aún no tenga la migración. No detecté secretos reales en el diff; el único match de búsqueda fue una integridad de `package-lock.json`.
 
 ## Hallazgos
 
 ### Eje 1 — Arquitectura
 
-### H-001 | ALTO | Arquitectura | `ProductivityPlus.jsx` concentra dominios críticos no relacionados
+### H-001 | [MEDIO] | Arquitectura | Billing, referidos y navegación siguen creciendo dentro del componente raíz
 
-**Evidencia:** `src/ProductivityPlus.jsx:2535`, `src/ProductivityPlus.jsx:4518`, `src/ProductivityPlus.jsx:7204`, `src/ProductivityPlus.jsx:8155`
+**Evidencia:** `src/ProductivityPlus.jsx:1478`, `src/ProductivityPlus.jsx:1550`, `src/ProductivityPlus.jsx:1653`, `src/ProductivityPlus.jsx:2131`
 
-**Descripción:** El mismo archivo contiene billing/premium, landing de proyectos, evolutivo IA, chat IA y selección de planes. Esto mezcla flujos de negocio, UI, llamadas a Supabase y lógica de pago en una sola unidad.
+**Descripción:** El componente raíz contiene `PlansLauncher`, `BillingReturnOverlay`, activación de hooks de referidos y lógica de navegación responsive. Son responsabilidades de billing, integración de pagos y shell UI mezcladas en el mismo archivo raíz.
 
-**Impacto:** Aumenta el blast radius de cambios, dificulta pruebas focalizadas y hace más probable romper billing o IA al tocar UI.
+**Impacto:** Dificulta pruebas aisladas del checkout y del retorno de Mercado Pago, aumenta riesgo de regresiones en la app shell y complica revisar cambios críticos de pagos sin leer un archivo grande.
 
-**Recomendación:** Separar por dominios: `features/billing`, `features/projects`, `features/ai-reports`, `features/chat`, con hooks de datos y componentes pequeños.
-
-**Esfuerzo estimado:** ALTO
-
-### H-002 | MEDIO | Arquitectura | Planes y límites viven en dos fuentes de verdad
-
-**Evidencia:** `src/plans.js:5`, `src/plans.js:13`, `api/mp-subscribe.js:44`, `migrations/028_chat_to_pro_power.sql:14`
-
-**Descripción:** El cobro usa `src/plans.js`, pero el gating real depende de `tier_limits` y RPCs en Supabase. El propio comentario advierte que cambiar límites en código exige una migración manual.
-
-**Impacto:** Un despliegue con código y migraciones desalineadas puede cobrar un plan que no desbloquea sus features, o mostrar límites distintos a los aplicados.
-
-**Recomendación:** Usar una fuente canónica server-side para precio, límites y features, o agregar verificación automática de consistencia en build/deploy.
+**Recomendación:** Extraer `PlansLauncher`, `BillingReturnOverlay` y `TabsNav` a módulos de `src/features/billing/` y `src/features/navigation/`, con tests unitarios de estados principales.
 
 **Esfuerzo estimado:** MEDIO
 
-### Eje 2 — Seguridad
+### H-002 | [MEDIO] | Arquitectura | El formato de `referral_code` está duplicado y no existe como restricción de datos
 
-### H-003 | ALTO | Seguridad | Webhook de Mercado Pago procesa eventos sin firma si falta el secreto
+**Evidencia:** `src/hooks/useReferralCapture.js:19`, `api/capture-referral.js:34`, `api/mp-subscribe.js:71`, `migrations/034_referral_capture.sql:13`
 
-**Evidencia:** `api/mp-webhook.js:22`, `api/mp-webhook.js:119`, `api/mp-webhook.js:124`, `api/mp-webhook.js:175`
+**Descripción:** El mismo invariante de 8 caracteres alfanuméricos en mayúscula se define en frontend y en dos endpoints, pero la tabla guarda `referral_code TEXT NOT NULL` sin `CHECK`.
 
-**Descripción:** Si `MP_WEBHOOK_SECRET` no está configurado, `verifyMpSignature` devuelve `null` y el handler continúa procesando eventos, incluyendo escrituras en `users_premium` con service role.
+**Impacto:** Si un script admin, migración futura o endpoint nuevo escribe con `service_role`, puede persistir valores que el resto del flujo no espera y enviar datos inválidos al hub.
 
-**Impacto:** Un error de configuración deja abierto un endpoint que modifica estado de suscripción. Aunque consulta MP, la superficie queda expuesta a abuso y replay no autenticado.
-
-**Recomendación:** Fail-closed: en producción rechazar todo webhook sin secreto o firma válida. Validar `MP_WEBHOOK_SECRET` al arranque/deploy.
+**Recomendación:** Agregar `CHECK (referral_code ~ '^[A-Z0-9]{8}$')`, centralizar el validador compartido y cubrir el caso con tests.
 
 **Esfuerzo estimado:** BAJO
 
-### H-004 | MEDIO | Seguridad | RPCs `SECURITY DEFINER` exponen estado de features/cuotas a `anon`
+### Eje 2 — Seguridad
 
-**Evidencia:** `migrations/017_pricing_and_features.sql:30`, `migrations/017_pricing_and_features.sql:46`, `migrations/023_enterprise_price_and_chat_quota.sql:22`, `migrations/023_enterprise_price_and_chat_quota.sql:57`
+### H-003 | [MEDIO] | Seguridad | El cliente del hub puede registrar PII/metadata financiera en logs
 
-**Descripción:** `project_has_feature`, `project_can_use_chat` y `project_chat_quota_remaining` corren como `SECURITY DEFINER` y algunas están concedidas a `anon` sin validar membresía del proyecto.
+**Evidencia:** `api/mp-webhook.js:278`, `api/mp-webhook.js:283`, `api/mp-webhook.js:285`, `api/_hub-client.js:137`
 
-**Impacto:** Con IDs de proyecto, un cliente anónimo puede inferir estado premium, features activas y uso mensual del chat.
+**Descripción:** El webhook construye un payload con email del pagador y datos de pago para el hub. Si el hub responde error con JSON, `_hub-client` registra `data?.error ?? data`, lo que puede incluir eco del payload o detalles sensibles.
 
-**Recomendación:** Revocar grants a `anon` y validar `auth.uid()` como owner/miembro dentro de cada RPC antes de devolver datos.
+**Impacto:** Exposición de PII y datos financieros en logs de servidor, con riesgo operativo y de cumplimiento.
 
-**Esfuerzo estimado:** MEDIO
-
-### H-005 | MEDIO | Seguridad | Chat IA no limita tamaño de `userMessage`
-
-**Evidencia:** `api/chat-stream.js:112`, `api/chat-stream.js:113`, `api/chat-stream.js:185`, `api/chat-stream.js:202`
-
-**Descripción:** Solo se valida que `userMessage` exista y no esté vacío. Luego se persiste completo y se envía al LLM.
-
-**Impacto:** Permite abuso de costo, latencia y almacenamiento con mensajes excesivos.
-
-**Recomendación:** Definir límite de caracteres/tokens por mensaje, rechazar con 413 y aplicar conteo antes de persistir o llamar a Anthropic.
+**Recomendación:** Loguear solo `status`, `mp_payment_id` hasheado/parcial y un `request_id`; redactar emails y nunca imprimir el body completo del upstream.
 
 **Esfuerzo estimado:** BAJO
 
 ### Eje 3 — Pentesting interno
 
-### H-006 | ALTO | Seguridad/Pentesting | `sessionId` de chat permite contaminación entre proyectos y bypass de cuota
+### H-004 | [MEDIO] | Seguridad/Pentesting | `/api/capture-referral` permite abuso autenticado sin rate limit
 
-**Tipo de vulnerabilidad:** IDOR / lógica de negocio
+**Tipo de vulnerabilidad:** Abuso de endpoint / consumo de recursos
 
-**Superficie:** `POST /api/chat-stream`
+**Superficie:** `POST /api/capture-referral`
 
-**Evidencia:** `api/chat-stream.js:122`, `api/chat-stream.js:146`, `api/chat-stream.js:170`, `api/chat-stream.js:185`
+**Evidencia:** `api/capture-referral.js:18`, `api/capture-referral.js:56`, `api/capture-referral.js:67`, `api/_auth.js:280`
 
-**Vector intentado (resumido):** Un owner puede enviar `projectId` de un proyecto y `sessionId` de otro proyecto propio. El código valida acceso al `projectId`, pero carga la sesión solo por `id` y persiste mensajes en esa sesión.
-
-**Resultado:** VULNERABLE
-
-**Fix recomendado:** Al buscar sesión, filtrar también por `project_id` y `owner_user_id`; si no coincide, devolver 403. La cuota debe cobrarse sobre la sesión/proyecto donde se persiste.
-
-**Esfuerzo estimado:** BAJO
-
-### H-007 | MEDIO | Seguridad/Pentesting | Inyección HTML en correos de retrospectiva vía nombre de sprint
-
-**Tipo de vulnerabilidad:** HTML injection / phishing interno
-
-**Superficie:** `/api/open-retro` → email Resend
-
-**Evidencia:** `api/open-retro.js:25`, `api/open-retro.js:32`, `api/open-retro.js:36`, `api/open-retro.js:144`
-
-**Vector intentado (resumido):** El nombre del sprint se interpola en HTML y asunto sin escape previo. Un sprint con marcado HTML controlado por usuario puede alterar el correo enviado a participantes.
+**Vector intentado (resumido):** Una sesión autenticada puede repetir llamadas con códigos sintácticamente válidos; cada request llega a validación de JWT y a una escritura/upsert con cliente admin, sin usar el helper `enforceRateLimit`.
 
 **Resultado:** VULNERABLE
 
-**Fix recomendado:** Escapar `sprint.name` antes de insertarlo en HTML y normalizarlo para asunto de correo.
+**Fix recomendado:** Importar `enforceRateLimit`, aplicar una cuota por usuario antes del upsert y registrar 429 para abuso. Ejemplo conceptual: bucket `capture-referral:${user.id}` con ventana horaria baja.
 
 **Esfuerzo estimado:** BAJO
 
 ### Eje 4 — Conexiones
 
-### H-008 | ALTO | Conexión | Checkout puede iniciar aunque Supabase admin no pueda reconciliar el pago
+### H-005 | [ALTO] | Conexión | La notificación al hub de comisiones no tiene reintento durable
 
-**Conexión afectada:** C-002 Mercado Pago + C-001 Supabase
+**Conexión afectada:** C-001 Hub financiero de Soft a tu Medida
 
-**Evidencia:** `api/mp-subscribe.js:52`, `api/mp-subscribe.js:93`, `api/mp-subscribe.js:95`, `api/mp-webhook.js:98`
+**Evidencia:** `api/mp-webhook.js:253`, `api/mp-webhook.js:256`, `api/mp-webhook.js:283`, `api/mp-webhook.js:296`, `api/_hub-client.js:87`
 
-**Síntoma:** `mp-subscribe` exige `MP_ACCESS_TOKEN`, pero si falta `SUPABASE_SERVICE_ROLE_KEY` solo omite guardar el estado pending y aun devuelve `init_point`.
+**Síntoma:** En pagos aprobados se actualiza `users_premium` y luego se llama al hub. Si el hub falla, solo se emite `console.warn`; no hay outbox, reintento posterior ni estado persistido de notificación pendiente.
 
-**Impacto:** El usuario puede pagar y quedar sin upgrade si el webhook tampoco puede escribir en Supabase.
+**Impacto:** Un timeout o 5xx transitorio del hub puede perder una comisión aunque el cobro real haya sido aprobado.
 
-**Recomendación:** Validar Supabase admin antes de crear la preapproval en MP. Si falta, responder 503 y no iniciar cobro.
+**Recomendación:** Persistir un outbox `hub_payment_notifications` con `mp_payment_id`, estado, intentos y próximo retry; procesarlo con cron/backoff. Mantener idempotencia por `mp_payment_id`.
+
+**Esfuerzo estimado:** MEDIO
+
+### H-006 | [MEDIO] | Conexión | Las variables `HUB_*` requeridas no están documentadas en el manifiesto de entorno
+
+**Conexión afectada:** C-001 Hub financiero de Soft a tu Medida
+
+**Evidencia:** `api/_hub-client.js:29`, `api/_hub-client.js:33`, `.env.example:29`, `.env.example:45`, `docs/mercadopago-setup.md:17`
+
+**Síntoma:** El cliente exige `HUB_WEBHOOK_URL`, `HUB_WEBHOOK_SECRET` y `HUB_APP_SLUG`, pero `.env.example` y la guía de Mercado Pago solo documentan variables de MP y `APP_BASE_URL`.
+
+**Impacto:** El deploy puede quedar “verde” para pagos pero sin comisiones al hub; el fallo queda reducido a logs.
+
+**Recomendación:** Agregar `HUB_WEBHOOK_URL`, `HUB_WEBHOOK_SECRET` y `HUB_APP_SLUG` a `.env.example`, `docs/deployment.md` y `docs/mercadopago-setup.md`, marcando cuáles son secretos.
 
 **Esfuerzo estimado:** BAJO
 
-### H-009 | BAJO | Conexión | Metadata de modelo IA inconsistente
+### H-007 | [MEDIO] | Conexión | La falta de migración de `user_referrals` se reporta como éxito y bloquea reintentos
 
-**Conexión afectada:** C-004 Anthropic
+**Conexión afectada:** C-002 Supabase Postgres / tabla `user_referrals`
 
-**Evidencia:** `api/generate-report.js:409`, `api/generate-report.js:489`, `src/ProductivityPlus.jsx:2721`
+**Evidencia:** `api/capture-referral.js:79`, `api/capture-referral.js:81`, `src/hooks/useReferralSync.js:64`, `src/hooks/useReferralSync.js:66`
 
-**Síntoma:** El endpoint semanal llama `claude-sonnet-4-6`, pero responde header `X-Wplanner-Model: claude-opus-4-7` y la UI declara “Opus 4.7”.
+**Síntoma:** Si la tabla no existe, el endpoint devuelve 200 con `tabla_pendiente`; el frontend marca `wplanner_ref_synced=true` ante cualquier `res.ok`.
 
-**Impacto:** Costos, auditoría de modelos e historial quedan incorrectos.
+**Impacto:** En un despliegue con código antes que migración, el browser deja de reintentar y la atribución pre-pago puede perderse silenciosamente.
 
-**Recomendación:** Centralizar constantes de modelo y reutilizarlas en request, headers y UI.
+**Recomendación:** Devolver 503 cuando falte la tabla, o hacer que el frontend solo marque sincronizado con `{ ok: true }` sin `info: "tabla_pendiente"`; desplegar migración antes del código.
 
 **Esfuerzo estimado:** BAJO
 
 ### Eje 5 — UX/UI
 
-### H-010 | MEDIO | UX | Modales principales no declaran semántica de diálogo ni foco accesible
+### H-008 | [MEDIO] | UX | El checkout cierra el modal antes de mostrar estado de redirección
 
-**Pantalla / componente afectado:** Planes, captura de nombre, tour guiado, confirmación de borrado
+**Pantalla / componente afectado:** Modal de planes / checkout Mercado Pago
 
-**Evidencia:** `src/ProductivityPlus.jsx:8183`, `src/ProductivityPlus.jsx:8276`, `src/NameCaptureModal.jsx:50`, `src/Onboarding.jsx:591`
+**Evidencia:** `src/ProductivityPlus.jsx:1536`, `src/features/billing/PlanSelectionModal.jsx:32`, `src/features/billing/PlanSelectionModal.jsx:35`
 
-**Descripción:** Los overlays son `div` sin `role="dialog"`, sin `aria-modal`, sin trampa de foco y sin manejo visible de `Esc`.
+**Descripción:** El botón tiene estado `busy` y texto “Redirigiendo…”, pero el padre desmonta el modal con `setOpen(false)` antes de iniciar `subscribe`. En latencia de API, el usuario queda sin feedback hasta que navegue o falle con `alert`.
 
-**Criterio violado:** WCAG / patrón estándar de modal accesible
+**Criterio violado:** Estado de carga visible en acciones que dependen de red.
 
-**Recomendación:** Usar un componente modal común con `role="dialog"`, `aria-modal="true"`, foco inicial, retorno de foco, cierre por `Esc` y bloqueo de tabulación fuera.
+**Recomendación:** Mantener el modal abierto durante `subscribe`, deshabilitar CTAs y mostrar “Redirigiendo…” hasta recibir `init_point`; cerrar solo al navegar o al cancelar.
 
-**Esfuerzo estimado:** MEDIO
+**Esfuerzo estimado:** BAJO
 
-### H-011 | MEDIO | UX | Foco visible eliminado en inputs críticos
+### H-009 | [BAJO] | UX | El botón de cierre del modal queda por debajo del tamaño táctil esperado
 
-**Pantalla / componente afectado:** Login/onboarding/proyectos
+**Pantalla / componente afectado:** Modal de planes
 
-**Evidencia:** `src/NameCaptureModal.jsx:73`, `src/NameCaptureModal.jsx:84`, `src/ProductivityPlus.jsx:4818`, `src/ProductivityPlus.jsx:4935`
+**Evidencia:** `src/features/billing/PlanSelectionModal.jsx:56`, `src/features/billing/PlanSelectionModal.jsx:57`, `src/features/billing/PlanSelectionModal.jsx:143`
 
-**Descripción:** Inputs críticos usan `outline: "none"` y no se observa reemplazo de foco equivalente en el mismo estilo.
+**Descripción:** El cierre mide 38×38 px. La guía de UX usada para esta auditoría pide targets móviles mínimos de 44×44 px.
 
-**Criterio violado:** WCAG 2.4.7 — foco visible
+**Criterio violado:** Touch target mínimo para móvil.
 
-**Recomendación:** Definir estilo `:focus-visible` común para inputs, selects, textareas y botones, con contraste suficiente.
+**Recomendación:** Subir el área interactiva a mínimo 44×44 px sin reducir el affordance visual.
 
 **Esfuerzo estimado:** BAJO
 
 ## Notas para el orquestador
-Auditoría estática, limitada al código del proyecto y al rango solicitado. No ejecuté pentest contra servicios externos ni llamé APIs de terceros. `npm audit` y `npm run lint` fueron bloqueados por la política del entorno, por lo que no reporto resultados dinámicos de dependencias o lint. El worktree ya tenía `.superauditor/audit-codex.md` modificado antes de esta revisión; no hice cambios.
+La revisión fue estática y limitada al código local del rango `7681794..HEAD`; no llamé a Mercado Pago, Supabase ni al hub externo. No modifiqué archivos. El árbol ya tenía cambios locales en `.superauditor/audit-codex.md`, `.superauditor/audit-gemini.md` y `VALIDACION_W-PLANNER.md`; los ignoré por estar fuera del alcance del diff auditado.

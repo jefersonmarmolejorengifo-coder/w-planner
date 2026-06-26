@@ -1,127 +1,146 @@
-# Auditoría Claude — 1a90dc1..52ca539
+# Auditoría A — Claude (Opus 4.8)
 
-## Metadatos
-- Auditor: Claude (Anthropic) — Auditor A / orquestador
-- Fecha: 2026-06-22
-- Modelo: claude-opus-4-8 (el mejor de la línea CLAUDE — calidad máxima)
-- Proyecto: C:/Users/jefer/proyectos/w-planner
-- Foco solicitado: escalabilidad y concurrencia (muchas personas creando tarjetas a la vez), calidad, uso, UX.
+**Proyecto:** w-planner (Productivity-Plus)
+**Rango:** `7681794..HEAD` (hub integration + admin plans migración 035 + rebrand/responsive v1.1.0)
+**Fecha:** 2026-06-24
+**Modelo Auditor A:** claude-opus-4-8 (el mejor de la línea — sin advertencia de fallback)
+**Método:** orquestación de 5 subagentes especialistas (infra-scalability, ui-ux, security, backend-dev, frontend) sobre los 5 ejes.
 
-## Resumen
-La app es sólida en su funcionalidad y ha endurecido seguridad de pagos/webhooks en rondas previas. El riesgo dominante para "salir a producción con muchos usuarios" NO es de seguridad sino de **escalabilidad por concurrencia**: el mecanismo de reserva de IDs de tarjeta (`claim_task_id`) es un punto de serialización global que empeora con el número de proyectos. A esto se suma la falta total de pruebas automatizadas, un frontend monolítico de ~9.7k líneas, y agregaciones de datos hechas en el cliente sin paginación. Estos son los hallazgos diferenciales de Auditor A; los hallazgos de seguridad de pago/IDOR los aportan con más detalle B (Codex) y C (Gemini).
+> Nota: esta ronda audita PRINCIPALMENTE el código nuevo desde la última auditoría, pero re-verifica los hallazgos abiertos previos (H-007/H-013/H-014/H-017/H-019 dependen de migraciones 029/030 aún pendientes de aplicar).
 
-## Hallazgos
+---
 
-### Eje 1 — Arquitectura / Escalabilidad
+## Eje 1 — Arquitectura
 
-### H-A01 | ALTO | Escalabilidad/Concurrencia | `claim_task_id()` serializa la creación de tarjetas a nivel GLOBAL y empeora con cada proyecto
+### A26 | ALTO | El orquestador sigue con ~2.300 líneas y 7-8 componentes de peso embebidos
+**Evidencia:** `src/ProductivityPlus.jsx:536-680` (BoardSummaryPill 145 líneas), `:1302-1431` (TeamPulseTab+PulseList 130 líneas, NO lazy), `:682-1236` (ProjectLandingScreen 554 líneas), `:317-519` (IntroScreen 202 líneas, siempre cargada).
+**Impacto:** estos componentes entran al chunk inicial. TeamPulseTab e IntroScreen deberían ser lazy.
+**Esfuerzo:** BAJO (extraer a features/ + React.lazy).
 
-**Evidencia:** `migrations/006_security_hardening.sql:65-92` (función), `src/ProductivityPlus.jsx:1445` (se invoca al ABRIR el formulario de nueva tarjeta), `migrations/002_multiproject.sql:29` (app_config pasó a tener `project_id`, hay un `nextId` por proyecto).
+### A27 | ALTO | Bundle inicial sin manualChunks: supabase-js (196 kB) en el chunk pesado
+**Evidencia:** `vite.config.js` (sin `build.rollupOptions.output.manualChunks`); `dist/assets/index-*.js` 334 kB / 100 kB gz.
+**Recomendación:** separar `@supabase/supabase-js` en vendor chunk para cachearlo entre deploys.
+**Esfuerzo:** BAJO (5 líneas).
 
-**Descripción:** `claim_task_id()` ejecuta `UPDATE app_config SET value = value+1 WHERE key = 'nextId' RETURNING ... INTO current_value` **sin filtrar por `project_id`**. Como migración 002 creó una fila `nextId` por proyecto, este UPDATE toca **todas** las filas `nextId` de **todos** los proyectos en cada llamada, y devuelve un valor arbitrario. Consecuencias:
-1. **Contención cross-tenant:** cada creación de tarjeta en CUALQUIER proyecto toma lock de escritura sobre las filas `nextId` de todos los proyectos. Dos personas creando tarjetas en proyectos distintos igualmente se serializan entre sí.
-2. **Empeora con la escala:** el costo de cada `claim_task_id` es O(#proyectos). Cuantos más tableros existan en la plataforma, más lento y más contencioso se vuelve crear una tarjeta.
-3. **Se dispara al ABRIR el formulario**, no al guardar (`src/ProductivityPlus.jsx:1445`): cada "nueva tarjeta" que alguien abre (aunque no guarde) ejecuta este write global multi-fila + su broadcast realtime, amplificando la contención y quemando IDs (huecos).
+### A28 | MEDIO | PlansLauncher llama RPC user_ia_capacity en cada apertura del modal
+**Evidencia:** `src/ProductivityPlus.jsx:1478-1543` (useEffect `[open]` sin caché).
+**Esfuerzo:** BAJO.
 
-**Impacto:** Es exactamente el escenario que preocupa: "¿muchas personas pueden crear tarjetas a la vez sin bloquearse?". Hoy funciona a baja escala (los locks duran microsegundos y los IDs siguen siendo únicos porque `tasks.id` es PK global), pero bajo concurrencia real y con muchos tableros la creación de tarjetas se vuelve un cuello de botella global, no aislado por proyecto.
+---
 
-**Recomendación:** Reemplazar el contador en `app_config` por un **SEQUENCE nativo de PostgreSQL** (`CREATE SEQUENCE`, `DEFAULT nextval(...)` o `GENERATED ALWAYS AS IDENTITY`). `nextval()` es lock-free, MVCC-safe, tolerante a huecos y diseñado para alta concurrencia: elimina la serialización y el costo O(#proyectos). Migración: crear el sequence sincronizado a `MAX(id)+1`, apuntar el default de `tasks.id`, y dejar `claim_task_id` como `SELECT nextval('tasks_id_seq')`. Alternativa: reservar el ID al guardar y no al abrir el formulario.
+## Eje 2 — Seguridad
 
-**Esfuerzo estimado:** MEDIO
+### A29 | CRÍTICO | Secretos de producción reales en `.env.local`
+**Evidencia:** `.env.local:3-16` — `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `GOOGLE_API_KEY`, `VERCEL_OIDC_TOKEN`.
+**Impacto:** no comiteado (`.gitignore` cubre `*.local`), pero existe en disco en texto claro. La service-role bypassa toda RLS. Decisión del dueño: riesgo aceptado por ahora (repo privado), rotación diferida.
+**Recomendación:** rotar todas; en local usar solo keys sandbox; pre-commit hook anti-secretos.
+**Esfuerzo:** BAJO (rotación) — requiere acción del dueño en dashboards.
 
-### H-A02 | ALTO | Arquitectura/Calidad | Cero pruebas automatizadas
+### A30 | ALTO | Posible grant residual a `anon` en `user_can_use_ia_on_project`
+**Evidencia:** `migrations/016_premium_system.sql:149` (`GRANT ... TO authenticated, anon`); `migrations/031` revoca, pero el estado en prod depende de que 031 se aplicara. (Carry-forward parcial de H-020.)
+**Recomendación:** verificar en prod `SELECT grantee FROM information_schema.routine_privileges WHERE routine_name='user_can_use_ia_on_project' AND grantee='anon'`; si hay fila → migración de saneamiento.
+**Esfuerzo:** BAJO.
 
-**Evidencia:** no existe ningún `*.test.*` / `*.spec.*` ni carpeta `tests/` en el repo (verificado); `package.json` sin script de test real.
+### A31 | OK-verificado | Migración 035 (admin_user_plans) bien blindada
+**Evidencia:** `migrations/035_admin_user_plans.sql:35` (REVOKE vista a anon/authenticated), `:75` (REVOKE función), `:40` (search_path fijado).
+**Veredicto:** NO filtra emails ni permite auto-upgrade. La service-role NO llega al cliente (`src/supabaseClient.js:4` usa solo anon key; grep de SERVICE_ROLE en src/ = 0; bundle inspeccionado limpio).
 
-**Descripción:** No hay tests unitarios, de integración ni e2e. Toda verificación es manual.
+---
 
-**Impacto:** Para producción es deuda de alto riesgo: cada cambio en un monolito de 9.7k líneas puede romper billing, IA, RLS o cálculo de aporte sin red de seguridad. Refactors (como el de H-A01) son peligrosos sin tests.
+## Eje 3 — Pentesting interno (defensivo)
 
-**Recomendación:** Empezar por las piezas de mayor riesgo y lógica pura: cálculo de aporte (`calcAporte`), gating de planes (`user_ia_capacity`/`project_can_use_*`), y los endpoints de pago/webhook (firma, idempotencia). CI que los corra en cada push.
+### A32 | CRÍTICO | Race condition de cuota de chat (doble gasto de tokens)
+**Evidencia:** `api/chat-stream.js:144-151` (check de cuota es lectura) + `:205-208` (insert del mensaje después). Dos requests simultáneos pasan el check con el mismo `remaining`.
+**Impacto:** quema 2 turnos contando 1; con varias pestañas el usuario excede la cuota y multiplica costo IA.
+**Recomendación:** increment atómico en Postgres (insert + count en misma transacción/RPC).
+**Esfuerzo:** MEDIO.
 
-**Esfuerzo estimado:** ALTO
+### A33 | ALTO | Endpoints de generación IA no validan `periodStart < periodEnd`
+**Evidencia:** `api/generate-evolution.js:327`, `api/save-evolution.js:48`, `api/generate-monthly-report.js:312`, `api/generate-scrum-report.js:243` (solo `generate-report.js:318` lo hace).
+**Impacto:** gasto de tokens con rango inválido + posible sobrescritura de histórico con un evolutivo vacío (upsert).
+**Esfuerzo:** BAJO.
 
-### H-A03 | MEDIO | Escalabilidad | El dashboard consolidado agrega en el cliente sin paginación
+### A34 | MEDIO | `open-retro` reenvía emails con `trigger="manual"` saltando idempotencia
+**Evidencia:** `api/open-retro.js:99-100` (`if (notifications_sent && trigger !== "manual")`), sin rate limit en el endpoint.
+**Impacto:** owner puede spamear emails de retro a todo el equipo.
+**Esfuerzo:** BAJO.
 
-**Evidencia:** `src/ProductivityPlus.jsx` (ConsolidatedDashboard) — `supabase.from("tasks").select(...).in("project_id", ids)` trae TODAS las tareas de TODOS los tableros del dueño al navegador para agregarlas en JS. Mismo patrón en `loadAllForProject`.
+---
 
-**Descripción:** La Visión consolidada descarga el universo de tareas del dueño y computa KPIs en el cliente. Para un dueño con muchos tableros grandes el payload y el cómputo crecen sin techo.
+## Eje 4 — Integridad de conexiones / datos
 
-**Impacto:** Latencia y memoria crecientes justo para los usuarios de pago (que más tableros tienen).
+### A35 | CRÍTICO | Trigger de límite de tableros: status no-activo no degrada bien
+**Evidencia:** `migrations/027_project_limit_enforcement.sql:45` (condición de degradado). Un usuario con `status=pending` (checkout sin pagar) puede no caer a free.
+**Recomendación:** degradar a free ante CUALQUIER status != 'active' (`IF v_status <> 'active' THEN v_tier := 'free'`).
+**Esfuerzo:** BAJO (migración de saneamiento).
 
-**Recomendación:** Mover la agregación a una RPC server-side (`SECURITY DEFINER` con check de owner) que devuelva los KPIs por tablero ya calculados. Paginar/virtualizar listas largas por tablero.
+### A36 | ALTO | Pago recurrente no setea `tier` → usuario paga y queda en free
+**Evidencia:** `api/mp-webhook.js:251` (upsert del evento `subscription_authorized_payment` sin `tier`); `migrations/016:51-56` (DEFAULT 'free'). Si no hubo evento preapproval previo, el usuario queda free con status active.
+**Recomendación:** incluir `tier: tier || 'free'` con el tier parseado del external_reference (ya disponible).
+**Esfuerzo:** BAJO.
 
-**Esfuerzo estimado:** MEDIO
+### A37 | ALTO | Señales de retro: DELETE+INSERT no atómico → corrupción silenciosa
+**Evidencia:** `api/submit-retro.js:57` (UPDATE) + `:63` (DELETE) + `:86-88` (INSERT). Si el proceso muere entre DELETE e INSERT, las señales quedan vacías sin error.
+**Recomendación:** RPC transaccional o reordenar (INSERT antes de DELETE / ON CONFLICT).
+**Esfuerzo:** MEDIO.
 
-### Eje 2 — Seguridad
+### A38 | ALTO | Over-fetch y N+1 en la carga del proyecto
+**Evidencia:** `src/hooks/useProjectData.js:48` (`select('*')` sobre tasks/participants/etc.), `:86` (N+1 key_results tras OKRs); `src/features/board/TaskForm.jsx:264` y `BoardTab.jsx:241` (`task_history.select('*')`).
+**Recomendación:** proyectar columnas; embedded select `okrs(*, key_results(*))`.
+**Esfuerzo:** BAJO-MEDIO.
 
-### H-A04 | ALTO | Seguridad | Webhook de Mercado Pago procesa eventos aunque falte el secreto (fail-open)
+### A39 | MEDIO | Chat fail-open si `createAdminClient()` es null
+**Evidencia:** `api/chat-stream.js:203-208` (`if (admin) {...}` envuelve el persist, pero el LLM se llama igual). Sin admin, se gastan tokens y la cuota nunca avanza.
+**Recomendación:** fail-closed: validar `admin` al inicio del handler.
+**Esfuerzo:** BAJO.
 
-**Evidencia:** `api/mp-webhook.js:21-26` (`verifyMpSignature` devuelve `null` si no hay `MP_WEBHOOK_SECRET`), `api/mp-webhook.js:124-126` (con `sigOk === null` solo `console.warn` y continúa), `api/mp-webhook.js:175` (escribe `users_premium` con service_role).
+---
 
-**Descripción:** Si `MP_WEBHOOK_SECRET` no está configurado, la verificación se omite y el handler concede/renueva premium. Coincide con Codex (B/H-003) y Gemini (C/H-002).
+## Eje 5 — UX / UI técnico (incluye RESPONSIVE)
 
-**Impacto:** Un error de configuración en producción abre un endpoint que eleva privilegios de facturación a peticiones no firmadas. El usuario ya configuró el secreto, pero el código no es fail-closed: un redeploy sin la var reabriría el hueco silenciosamente.
+### A40 | ALTO | Header principal sin colapso responsive
+**Evidencia:** `src/ProductivityPlus.jsx:2018` (`flexWrap:"wrap"` sin control). En <480px los 10+ controles explotan en filas solapadas; PDF/CSV con `marginLeft:auto` quedan sueltos.
+**Esfuerzo:** MEDIO.
 
-**Recomendación:** Fail-closed: si no hay secreto o firma válida, responder 401/503 y NO procesar. Validar `MP_WEBHOOK_SECRET` al arranque en producción.
+### A41 | ALTO | Bug latente del menú responsive (ResizeObserver) — CAMBIO RECIENTE
+**Evidencia:** `src/ProductivityPlus.jsx:1887` (`tabsNeedWidthRef` arranca en 0 → expande mal en primer render estrecho) + `:1898` (effect con `tabsCollapsed` en deps → loop de reconexión disconnect/observe).
+**Impacto:** parpadeo del menú en resize continuo / móvil; flash en primer render estrecho.
+**Recomendación:** sacar `tabsCollapsed` de deps; espejo del estado en ref; inicializar `tabsNeedWidthRef` en useLayoutEffect.
+**Esfuerzo:** BAJO (30 min, fix de alta confianza).
 
-**Esfuerzo estimado:** BAJO
+### A42 | ALTO | Gantt ancho fijo 660px + resizer solo-mouse → inservible en táctil/<870px
+**Evidencia:** `src/features/board/GanttTab.jsx:30` (`CHART_W=660`); resizer con `mousemove`/`mouseup`.
+**Esfuerzo:** ALTO.
 
-### H-A05 | MEDIO | Seguridad | `service_role` key en texto plano en scripts de siembra
+### A43 | ALTO | `alert()`/`confirm()` nativos bloqueantes (consenso interno ui-ux + frontend)
+**Evidencia:** `src/hooks/useTasks.js:36,77,139,155`, `src/ProductivityPlus.jsx:265,293`.
+**Impacto:** rompen coherencia visual, bloquean hilo, inaccesibles.
+**Recomendación:** componente Toast no bloqueante.
+**Esfuerzo:** MEDIO.
 
-**Evidencia:** `.scratch/seed_massive.py:24` y `.scratch/seed_consolidated.py` (constante `SR` con un JWT `service_role` real). `.scratch/` está en `.gitignore` (verificado), por lo que NO está versionado.
+### A44 | MEDIO | Panel de notificaciones y dropdown del hamburguesa sin clamp al viewport
+**Evidencia:** `src/ProductivityPlus.jsx:2103` (notif `minWidth:300, right:0`), `:2155-2158` (dropdown `minWidth:220, left:0` sin `max-width: calc(100vw - 40px)`).
+**Esfuerzo:** BAJO.
 
-**Descripción:** El secreto `service_role` (acceso total, bypassa RLS) vive en disco en texto plano. No está en git, pero podría filtrarse por backup/captura/cambio futuro del `.gitignore`.
+### A45 | MEDIO | Tooltip del tour se desborda en pantallas <440px
+**Evidencia:** `src/Onboarding.jsx:579,588` (ancho fijo 440/520; el clamp da negativo si `innerWidth < tooltipW+32`).
+**Esfuerzo:** MEDIO.
 
-**Impacto:** Si se filtra, es compromiso total de la base de datos.
+### A46 | BAJO | Guard huérfano de rebrand
+**Evidencia:** `src/features/config/ConfigTab.jsx:190` (`if (target.name === "Jeferson Marmolejo") return;`). Dead code sin consecuencia de seguridad.
+**Esfuerzo:** BAJO.
 
-**Recomendación:** Rotar la `service_role` key por precaución y cargarla desde `.env.local`/variable de entorno en los scripts. Mantener `.scratch/` ignorado.
+---
 
-**Esfuerzo estimado:** BAJO
+## Resumen Auditor A
 
-### Eje 3 — Pentesting interno (defensivo)
+| Eje | Nota | Hallazgos nuevos |
+|---|---|---|
+| Arquitectura | 6.5/10 | A26-A28 |
+| Seguridad | 8.4/10 (no pasa gate 9.5) | A29-A31 |
+| Pentesting interno | — | A32-A34 |
+| Integridad conexiones/datos | 6.5/10 | A35-A39 |
+| UX/UI + Responsive | UX 7 / Responsive 4.5 | A40-A46 |
 
-### H-A06 | MEDIO | Concurrencia | Actualización de tarjeta sin control de versión (last-write-wins → lost updates)
-
-**Evidencia:** `src/ProductivityPlus.jsx:9013` (`update(dbTask).eq('id', task.id)` sin comparar `updated_at`/versión).
-
-**Descripción:** Dos personas editando la misma tarjeta a la vez: el último `UPDATE` pisa al anterior sin detección de conflicto. El realtime refresca la vista, pero hay ventana de carrera donde un cambio se pierde silenciosamente.
-
-**Impacto:** Pérdida silenciosa de ediciones en trabajo colaborativo concurrente sobre la misma tarjeta.
-
-**Recomendación:** Optimistic concurrency: `.eq('updated_at', prevUpdatedAt)` en el UPDATE; si afecta 0 filas, avisar "esta tarjeta cambió, recarga". O bloqueo suave por presencia.
-
-**Esfuerzo estimado:** MEDIO
-
-> Nota: el IDOR de `sessionId` en el chat (Codex B/H-006) y la inyección HTML en correos de retro (Codex B/H-007) son hallazgos válidos de pentest que Auditor A no exploró en profundidad; se adoptan del contraste.
-
-### Eje 4 — Integridad de conexiones
-
-### H-A07 | MEDIO | Conexión | Errores de guardado se comunican con `alert()` y sin reintento
-
-**Evidencia:** `src/ProductivityPlus.jsx:8992` (`alert('Error al guardar la tarea: ' + error.message)`), patrón repetido.
-
-**Descripción:** Ante fallo de red/insert se muestra `alert()` nativo, sin reintento ni cola offline. Si el insert falla por colisión de PK (fallback de `nextId` en H-A01 bajo fallo de RPC), el usuario pierde el borrador.
-
-**Impacto:** Experiencia frágil bajo mala conexión o concurrencia; `alert()` bloquea el hilo de UI.
-
-**Recomendación:** Toasts no bloqueantes, conservar el borrador ante error y ofrecer reintento. Para el cliente Supabase, considerar el timeout que señala Gemini (C/H-004).
-
-**Esfuerzo estimado:** MEDIO
-
-### Eje 5 — UX / UI
-
-### H-A08 | BAJO | UX | Feedback de error abrupto + accesibilidad de modales
-
-**Evidencia:** `alert()` en flujos de guardado; overlays sin `role="dialog"`/foco (detallado por Codex B/H-010, H-011).
-
-**Descripción:** Los nuevos paneles (Visión consolidada, pastilla Resumen, selección de planes) son visualmente sólidos, pero el manejo de error general usa `alert()` y los modales no atrapan foco ni cierran con `Esc`.
-
-**Impacto:** Roces de usabilidad y accesibilidad (WCAG 2.4.7, patrón de modal accesible).
-
-**Recomendación:** Componente modal común con `role="dialog"`, `aria-modal`, trampa de foco, cierre por `Esc`; `:focus-visible` consistente; toasts para errores.
-
-**Esfuerzo estimado:** MEDIO
-
-## Notas para el orquestador
-Auditoría estática centrada en concurrencia/escalabilidad. H-A01 (`claim_task_id`) es el hallazgo más relevante para producción con muchos usuarios y es exclusivo de Auditor A — ni Codex ni Gemini lo detectaron. Los hallazgos de pago/IDOR de Codex y los de bundle/validación de Gemini complementan y se integran en el contraste.
+**Críticos:** A29 (secretos), A32 (race cuota chat), A35 (trigger límite tableros).
+**Re-verificar previos:** H-013/H-014/H-017/H-019/H-007 dependen de aplicar migraciones 029/030 — confirmar estado en prod.

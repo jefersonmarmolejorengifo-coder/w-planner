@@ -291,7 +291,9 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 **Pista B `[frontend]` ✅:** se extrajeron las pantallas inline de `src/ProductivityPlus.jsx` (verbatim, prop-driven): `AuthScreen`/`UserSelectScreen`/`IntroScreen`/`ProjectLandingScreen` → `src/screens/`; `PlansLauncher` → `src/features/billing/`; `BoardSummaryPill` (+`ReportViewerDialog`) → `src/features/board/`; helper `joinProjectByCode` → `src/lib/joinProject.js`. **`ProductivityPlus.jsx`: 2470 → 1151 líneas (−53%)** — `App` queda como orquestador (auth/UI + render) + `TourMenu`/`BillingReturnOverlay`. Behavior-preserving. `vitest` 56/56 ✅, build ✅. Sin errores de lint NUEVOS (los 2 `set-state-in-effect` de BoardSummaryPill/ProjectLandingScreen son deuda preexistente que se movió de archivo; A28 sigue como mejora menor). Sin migración.
 
-> **Épico de descomposición (consenso A+B+C) sustancialmente cerrado:** `_auth.js` −36% (Sprint 38) + `ProductivityPlus.jsx` −53% (este). Restan solo refinamientos menores (A28: caché del RPC en PlansLauncher).
+> **Épico de descomposición (consenso A+B+C) sustancialmente cerrado:** `_auth.js` −36% (Sprint 38) + `ProductivityPlus.jsx` −53% (este).
+
+**Refinamientos del paso B `[lead]` ✅:** (a) **A28** — `PlansLauncher` disparaba el RPC `user_ia_capacity` por cada apertura del modal y por cada instancia (header+landing); ahora una promesa a nivel de módulo lo resuelve una sola vez por sesión (el upgrade navega a MP y recarga, reseteando el caché). (b) Los 2 `set-state-in-effect` que se movieron con el código (`BoardSummaryPill`, `ProjectLandingScreen`) se resolvieron moviendo el `setState` síncrono dentro del IIFE async del loader (behavior-preserving; de paso `ProjectLandingScreen` ganó guard `cancelled`). `vitest` 56/56 ✅, build ✅, lint de los 3 archivos limpio. (El repo conserva deuda de lint preexistente NO relacionada — 4 `set-state-in-effect` en el `App` de `ProductivityPlus` + otros — fuera del alcance de este épico.)
 
 ### Sprint 38 — descomposición arquitectónica, paso A.1: `_auth.js` → módulos (2026-06-27)
 

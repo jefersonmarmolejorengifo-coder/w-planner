@@ -6,6 +6,19 @@ import { useToast } from '../../ui/Toast';
 
 const PlanSelectionModal = lazy(() => import('./PlanSelectionModal'));
 
+// Caché a nivel de módulo del tier (A28). El RPC user_ia_capacity se resolvía en
+// CADA apertura del modal y en cada instancia montada (header + landing). El tier
+// es estable dentro de la sesión: cambiarlo navega a Mercado Pago (window.location
+// .assign) y el retorno recarga la página, reseteando este módulo. Cacheamos la
+// promesa para no repetir el RPC en cada apertura.
+let _tierPromise = null;
+const fetchTier = () => {
+  if (!_tierPromise) {
+    _tierPromise = supabase.rpc("user_ia_capacity").single().then(({ data }) => data?.tier || "free");
+  }
+  return _tierPromise;
+};
+
 // Lanzador reutilizable de la pantalla de selección de planes + checkout de
 // Mercado Pago. Se usa en el header (junto a notificaciones) y en el landing
 // (antes de crear un tablero). Encapsula el estado del modal, el tier actual y
@@ -18,9 +31,7 @@ export default function PlansLauncher({ variant = "header" }) {
 
   useEffect(() => {
     let cancelled = false;
-    supabase.rpc("user_ia_capacity").single().then(({ data }) => {
-      if (!cancelled && data?.tier) setCurrentTier(data.tier);
-    });
+    fetchTier().then((tier) => { if (!cancelled) setCurrentTier(tier); });
     return () => { cancelled = true; };
   }, [open]);
 

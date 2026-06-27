@@ -43,8 +43,13 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null 
   // Capacidad del plan (cuántos tableros puede crear). El límite real lo enforce
   // el servidor (trigger en projects, migración 027); esto es solo UX.
   useEffect(() => {
-    if (!authUser?.id) { setCapacity(null); return; }
-    supabase.rpc('user_ia_capacity').single().then(({ data }) => setCapacity(data || null));
+    let cancelled = false;
+    (async () => {
+      if (!authUser?.id) { setCapacity(null); return; }
+      const { data } = await supabase.rpc('user_ia_capacity').single();
+      if (!cancelled) setCapacity(data || null);
+    })();
+    return () => { cancelled = true; };
   }, [authUser]);
 
   // Para los tableros donde soy invitado (no soy owner), resuelve el nombre de

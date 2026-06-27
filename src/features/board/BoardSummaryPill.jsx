@@ -49,8 +49,8 @@ export default function BoardSummaryPill({ projectId, projectName }) {
   useEffect(() => {
     if (!open || !projectId) return;
     let cancelled = false;
-    setLoading(true);
     (async () => {
+      setLoading(true);
       const [{ data: tk }, { data: rh }] = await Promise.all([
         supabase.from("tasks").select("status, responsible, aporte_snapshot, end_date").eq("project_id", projectId),
         supabase.from("report_history").select("id, report_type, period_start, period_end, plain_text, model_used").eq("project_id", projectId).order("generated_at", { ascending: false }),

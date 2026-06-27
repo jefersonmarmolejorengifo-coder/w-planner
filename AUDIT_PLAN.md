@@ -287,6 +287,12 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 39 — descomposición arquitectónica, paso B: pantallas del monolito (2026-06-27)
+
+**Pista B `[frontend]` ✅:** se extrajeron las pantallas inline de `src/ProductivityPlus.jsx` (verbatim, prop-driven): `AuthScreen`/`UserSelectScreen`/`IntroScreen`/`ProjectLandingScreen` → `src/screens/`; `PlansLauncher` → `src/features/billing/`; `BoardSummaryPill` (+`ReportViewerDialog`) → `src/features/board/`; helper `joinProjectByCode` → `src/lib/joinProject.js`. **`ProductivityPlus.jsx`: 2470 → 1151 líneas (−53%)** — `App` queda como orquestador (auth/UI + render) + `TourMenu`/`BillingReturnOverlay`. Behavior-preserving. `vitest` 56/56 ✅, build ✅. Sin errores de lint NUEVOS (los 2 `set-state-in-effect` de BoardSummaryPill/ProjectLandingScreen son deuda preexistente que se movió de archivo; A28 sigue como mejora menor). Sin migración.
+
+> **Épico de descomposición (consenso A+B+C) sustancialmente cerrado:** `_auth.js` −36% (Sprint 38) + `ProductivityPlus.jsx` −53% (este). Restan solo refinamientos menores (A28: caché del RPC en PlansLauncher).
+
 ### Sprint 38 — descomposición arquitectónica, paso A.1: `_auth.js` → módulos (2026-06-27)
 
 **Consenso A+B+C (descomposición, ÉPICO) — Pista A, paso 1 `[backend-dev]` ✅:** `api/_auth.js` era un cajón de sastre (auth+CORS+DB+billing+validación, 373 líneas). Se separó en módulos focalizados, dejando `_auth.js` como **barrel que re-exporta** → **cero cambios de imports** en los ~15 endpoints (behavior-preserving total):

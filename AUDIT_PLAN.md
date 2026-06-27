@@ -300,7 +300,9 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 **Revisión de security:** el core de pagos pasó; cazó 2 gaps corregidos antes de mergear — H-BATCH-01 (fuga de `err.message` en el catch de auth, extendido a los 5 endpoints de IA) y H-BATCH-02 (recovery de filas huérfanas). `vitest` **56/56** ✅, build ✅, lint limpio. **Migración 040 aplicada en prod** (status en `mp_webhook_events` + claim atómico verificados).
 
-> Difiere: descomposición arquitectónica (`ProductivityPlus.jsx` + `_auth.js`, consenso A+B+C) — es ÉPICO, va a sprints dedicados. Pendiente: batch de a11y (#7/#10).
+**Batch a11y `[frontend]` ✅:** #7a tarjetas de perfil de `UserSelect` → `<button>` (Codex H-011); #7b menú overflow sin `role="menu"` a medias → botones navegables por Tab (Codex H-012, código de hoy); #7c visor de reportes con `useDialog` (foco/Esc/trampa, `role=dialog aria-modal`, Gemini H-006); #7d input de email con `htmlFor`/`id` (Gemini H-007); #10 tab "Pulso del equipo" alineado al acceso real (se quitó `scrum_master` de `allowedRoles` — la RPC/vista filtran por owner; Codex H-010). `vitest` 56/56 ✅, build ✅, lint en base. Sin migración.
+
+> Difiere: **solo** la descomposición arquitectónica (`ProductivityPlus.jsx` + `_auth.js`, consenso A+B+C) — es ÉPICO, va a sprints dedicados. El resto de la auditoría triple quedó subsanado.
 
 ### Sprint 36 — Tanda 3 optimizaciones de carga (A-02, O-08; A-05 y O-03/05/06 evaluadas) (2026-06-26)
 

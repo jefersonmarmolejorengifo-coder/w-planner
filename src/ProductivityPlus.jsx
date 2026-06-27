@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useDialog } from './useDialog';
 import { useBreakpoint } from './hooks/useBreakpoint';
 // La versión que muestra el footer sale de package.json (fuente única de verdad).
 // Bumpéala ahí siguiendo SemVer (MAYOR.MENOR.PARCHE) y el footer se actualiza solo.
@@ -168,8 +169,8 @@ function AuthScreen() {
                 </div>
               </div>
               <div>
-                <label style={lbl}>Correo electrónico</label>
-                <input style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && sendLink()} placeholder="tu@correo.com" autoFocus />
+                <label htmlFor="auth-email" style={lbl}>Correo electrónico</label>
+                <input id="auth-email" style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && sendLink()} placeholder="tu@correo.com" autoFocus />
               </div>
               {error && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{error}</div>}
               <button onClick={sendLink} disabled={loading}
@@ -258,11 +259,14 @@ function UserSelectScreen({ participants, activeUsers, onSelect, onConflict }) {
           const isHovered = hovered === p.id;
           const isSelected = selected === p.id;
           return (
-            <div
+            <button
+              type="button"
               key={p.id}
               onMouseEnter={() => setHovered(p.id)}
               onMouseLeave={() => setHovered(null)}
               onClick={() => !isSelected && handleSelect(p)}
+              disabled={isSelected}
+              aria-label={`Seleccionar perfil ${p.name}${online ? " (en línea)" : ""}`}
               style={{
                 width: 130, padding: "20px 10px", borderRadius: 16,
                 background: isSelected ? "rgba(236,108,4,0.15)" : isHovered ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
@@ -272,6 +276,7 @@ function UserSelectScreen({ participants, activeUsers, onSelect, onConflict }) {
                 animation: isSelected ? "selectedZoom 0.6s ease forwards 0.1s" : `cardEntrance 0.5s ease ${i * 0.07}s both`,
                 transition: "background 0.3s, border 0.3s, transform 0.3s",
                 transform: isHovered && !isSelected ? "translateY(-4px)" : "none",
+                fontFamily: "inherit",
               }}
             >
               {/* Avatar */}
@@ -304,7 +309,7 @@ function UserSelectScreen({ participants, activeUsers, onSelect, onConflict }) {
                   En línea
                 </div>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -532,6 +537,36 @@ const TASK_DONE = "Finalizada", TASK_BLOCKED = "Bloqueada";
 // ConsolidatedDashboard vive ahora en ./features/dashboard/ConsolidatedDashboard
 // y se carga con React.lazy (ver import arriba). H-002.
 
+// ─── ReportViewerDialog ────────────────────────────────────────
+// Modal accesible para ver un reporte IA archivado.
+// Se monta solo cuando hay un reporte abierto, por eso useDialog
+// funciona correctamente (foco inicial, trampa de foco, Escape).
+function ReportViewerDialog({ report, onClose }) {
+  const dialogRef = useDialog(onClose);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 100003, background: "rgba(5,5,14,0.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Reporte"
+        tabIndex={-1}
+        onClick={e => e.stopPropagation()}
+        style={{ background: "#14141f", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, maxWidth: 760, width: "100%", maxHeight: "85vh", overflowY: "auto", padding: 26, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800 }}>{REPORT_TYPE_LABEL[report.report_type] || report.report_type}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{report.period_start} a {report.period_end}</div>
+          </div>
+          <button aria-label="Cerrar" onClick={onClose} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>Cerrar</button>
+        </div>
+        <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", margin: 0 }}>{report.plain_text || "(Sin texto archivado)"}</pre>
+      </div>
+    </div>
+  );
+}
+
 // ─── Resumen del tablero activo (pastilla + panel) ────────────
 // Pastilla en el header que abre un panel con la info general del tablero
 // puntual: KPIs, distribución por estado, top aportantes y los reportes de IA
@@ -663,18 +698,7 @@ function BoardSummaryPill({ projectId, projectName }) {
           </div>
 
           {openReport && (
-            <div onClick={() => setOpenReport(null)} style={{ position: "fixed", inset: 0, zIndex: 100003, background: "rgba(5,5,14,0.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-              <div onClick={e => e.stopPropagation()} style={{ background: "#14141f", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, maxWidth: 760, width: "100%", maxHeight: "85vh", overflowY: "auto", padding: 26, color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <div>
-                    <div style={{ fontSize: 16, fontWeight: 800 }}>{REPORT_TYPE_LABEL[openReport.report_type] || openReport.report_type}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{openReport.period_start} a {openReport.period_end}</div>
-                  </div>
-                  <button onClick={() => setOpenReport(null)} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>Cerrar</button>
-                </div>
-                <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.6, color: "rgba(255,255,255,0.85)", margin: 0 }}>{openReport.plain_text || "(Sin texto archivado)"}</pre>
-              </div>
-            </div>
+            <ReportViewerDialog report={openReport} onClose={() => setOpenReport(null)} />
           )}
         </div>
       )}
@@ -1741,7 +1765,7 @@ export default function App() {
     { id: "presentation", label: "Presentación",         allowedRoles: ["po","scrum_master"] },
     { id: "evolution",    label: "Evolutivo 💎",         allowedRoles: ["po"] },
     { id: "chat",         label: "Chat IA 🤖",            allowedRoles: ["po"] },
-    { id: "pulse",        label: "Pulso del equipo 🌡",  allowedRoles: ["po","scrum_master"] },
+    { id: "pulse",        label: "Pulso del equipo 🌡",  allowedRoles: ["po"] },        // scrum_master excluido: RPC filtra por owner (requiere cambio de BD para habilitar)
     { id: "config",       label: "Configuración",        allowedRoles: [] },  // solo owner
   ];
 
@@ -2160,16 +2184,16 @@ export default function App() {
                 style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 16, minWidth: 40, minHeight: 40, display: "flex", alignItems: "center", justifyContent: "center" }}
               >⋯</button>
               {showOverflow && (
-                <div role="menu" style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#1a1a2e", borderRadius: 12, border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", minWidth: 200, zIndex: 9998, overflow: "hidden" }}>
+                <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#1a1a2e", borderRadius: 12, border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", minWidth: 200, zIndex: 9998, overflow: "hidden" }}>
                   {/* Tablet: PDF y CSV */}
                   {bp === "tablet" && (
                     <>
-                      <button role="menuitem" onClick={() => { window.print(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                      <button onClick={() => { window.print(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
                         onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
                         onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
                         <span>🖨</span><span>PDF</span>
                       </button>
-                      <button role="menuitem" onClick={() => { exportCSV(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                      <button onClick={() => { exportCSV(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
                         onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
                         onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
                         <span>↓</span><span>Exportar CSV</span>
@@ -2180,42 +2204,42 @@ export default function App() {
                   {bp === "mobile" && (
                     <>
                       {project && (
-                        <button role="menuitem" onClick={() => { const pid = localStorage.getItem('pp_project_id'); if (pid) localStorage.setItem('pp_last_project_id', pid); localStorage.removeItem('pp_project_id'); setProject(null); setProjectId(null); setShowProjectLanding(true); setActiveUser(null); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                        <button onClick={() => { const pid = localStorage.getItem('pp_project_id'); if (pid) localStorage.setItem('pp_last_project_id', pid); localStorage.removeItem('pp_project_id'); setProject(null); setProjectId(null); setShowProjectLanding(true); setActiveUser(null); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
                           onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
                           onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
                           <span>↩</span><span>Cambiar proyecto</span>
                         </button>
                       )}
                       {authUser && (
-                        <button role="menuitem" onClick={() => { setForceTourRole(null); setForceTour(true); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                        <button onClick={() => { setForceTourRole(null); setForceTour(true); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
                           onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
                           onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
                           <span>🎓</span><span>Tour</span>
                         </button>
                       )}
                       {authUser && (
-                        <button role="menuitem" onClick={() => { supabase.auth.signOut(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                        <button onClick={() => { supabase.auth.signOut(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
                           onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
                           onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
                           <span>⏻</span><span>Salir</span>
                         </button>
                       )}
                       {authUser && (
-                        <div role="menuitem" style={{ padding: "10px 16px" }}>
+                        <div style={{ padding: "10px 16px" }}>
                           <PlansLauncher variant="header" />
                         </div>
                       )}
                       {authUser && projectId && (
-                        <div role="menuitem" style={{ padding: "10px 16px" }}>
+                        <div style={{ padding: "10px 16px" }}>
                           <BoardSummaryPill projectId={projectId} projectName={project?.name} />
                         </div>
                       )}
-                      <button role="menuitem" onClick={() => { window.print(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                      <button onClick={() => { window.print(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
                         onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
                         onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
                         <span>🖨</span><span>PDF</span>
                       </button>
-                      <button role="menuitem" onClick={() => { exportCSV(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
+                      <button onClick={() => { exportCSV(); setShowOverflow(false); }} style={{ display: "flex", gap: 10, padding: "10px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", background: "transparent", border: "none", cursor: "pointer", width: "100%", textAlign: "left", alignItems: "center", fontFamily: "inherit" }}
                         onPointerEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.07)"}
                         onPointerLeave={e => e.currentTarget.style.background = "transparent"}>
                         <span>↓</span><span>Exportar CSV</span>

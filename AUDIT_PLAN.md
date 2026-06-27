@@ -256,6 +256,20 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 36 — Tanda 3 optimizaciones de carga (A-02, O-08; A-05 y O-03/05/06 evaluadas) (2026-06-26)
+
+**A-02 (quick win) `[frontend]` ✅:** `TeamPulseTab` (+ `SprintPulseCard`, `PulseList`) estaba inline y eager en `ProductivityPlus.jsx` → extraído a `src/features/team/TeamPulseTab.jsx` + `React.lazy` + Suspense (mismo patrón que el resto de tabs). Sale del bundle inicial (chunk propio 5.46 kB).
+
+**O-08 (caching) `[frontend]` ✅:** `vite.config.js` ahora fija `build.rolldownOptions.output.advancedChunks` (API nativa de Rolldown en Vite 8; `manualChunks` está deprecated). Dos vendor chunks: `vendor-react` (react+react-dom, 189 kB) y `vendor-supabase` (196 kB). **El `index` bajó de ~334 kB a 163 kB** (gzip 100→45.5): react y supabase quedan en vendors estables cacheables entre deploys, así un deploy típico solo invalida el index chico.
+
+**A-05 — NO se lazifica (decisión correcta del frontend):** `IntroScreen` se muestra en CADA carga (`showIntro` arranca `true`, sin flag de primera visita; se resetea a `true` en SIGNED_OUT). Lazificarlo agregaría un round-trip de red justo en la pantalla inicial → peor. Se deja inline.
+
+**O-03/05/06 — evaluadas, mayormente no aplican:** el "N+1 de key_results" en `useProjectData.js` **ya es una sola query batched** (`.in('okr_id', okrIds)`, no N+1). El `select('*')` es over-fetch real pero proyectar columnas es **riesgoso** (debe casar exacto con `dbToTask` + los handlers realtime) para ganancia marginal a la escala actual (datos scoped por proyecto). Se DEFIERE hasta tener un problema de performance medido.
+
+`vitest` 53/53 ✅, build ✅ (chunks nuevos verificados), lint limpio (nuevos 0; ProductivityPlus en su base de 6 errores preexistentes). Sin migración.
+
+> **Tanda 3 COMPLETA** (RESP-01/02 + smoke test visual + A-02 + O-08). Resta solo Tanda 4 (olas de validación) del roadmap.
+
 ### Sprint 35 — RESP-01/RESP-02: header y Gantt responsive (2026-06-26)
 
 **RESP-01 + RESP-02 (eje responsive 4.5/10) `[ui-ux + frontend]` ✅:** diseño de **ui-ux**, implementación de **frontend**, verificado por el líder.

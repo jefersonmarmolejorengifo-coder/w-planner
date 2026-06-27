@@ -1,8 +1,32 @@
-import { createClient } from "@supabase/supabase-js";
+// ── _auth.js ──────────────────────────────────────────────────────────────────
+// Autenticación JWT, control de acceso a proyectos, rate limiting y billing.
+//
+// RESPONSABILIDAD: todo lo que requiere verificar identidad o permisos antes de
+// ejecutar lógica de negocio. No gestiona HTTP ni validación de inputs; esas
+// responsabilidades viven en _http.js y _validation.js respectivamente.
+//
+// BARREL AL FINAL: re-exporta _validation.js, _http.js y _supabase.js para que
+// los ~15 endpoints que hacen `import { x } from "./_auth.js"` no necesiten
+// cambiar sus imports. Cualquier símbolo que antes vivía en este archivo sigue
+// disponible desde aquí.
+//
+// VERIFICACIÓN DE COLISIONES: los nombres exportados por cada módulo son disjuntos.
+//   _validation.js → MAX_USER_MESSAGE_CHARS, BadRequestError, requireString,
+//                    requirePositiveInt, requireEnum, isDateOnly, requireDateRange
+//   _http.js       → getAppBaseUrl, getOrigin, corsHeaders, applyCors,
+//                    jsonResponse, fetchWithTimeout, handleApiError
+//   _supabase.js   → getSupabaseUrl, getSupabaseAnonKey, getSupabaseServiceKey,
+//                    createSupabase, createAdminClient
+//   _auth.js       → getBearerToken, getAuthenticatedUser, assertProjectAccess,
+//                    enforceRateLimit, assertProjectCanUseIa
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { jwtVerify, createRemoteJWKSet } from "jose";
+import { getSupabaseUrl } from "./_supabase.js";
 
-const DEFAULT_APP_ORIGIN = "https://productivity-plus.vercel.app";
-
+// ── JWKS (privado al módulo) ──────────────────────────────────────────────────
+// Cachea el RemoteJWKSet para no reconstruir la URL en cada verificación.
+// Se invalida si cambia SUPABASE_URL (útil en tests que alteran process.env).
 let _jwksCache;
 const getJwks = () => {
   const url = getSupabaseUrl();
@@ -19,147 +43,10 @@ const getJwks = () => {
   return _jwksCache.jwks;
 };
 
-const splitOrigins = (value = "") =>
-  value
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+// ── Autenticación ─────────────────────────────────────────────────────────────
 
-export const getSupabaseUrl = () =>
-  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-
-export const getSupabaseAnonKey = () =>
-  process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-
-export const getSupabaseServiceKey = () =>
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-
-const getAllowedOrigins = () => {
-  const origins = new Set([
-    DEFAULT_APP_ORIGIN,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    ...splitOrigins(process.env.APP_BASE_URL),
-    ...splitOrigins(process.env.ALLOWED_ORIGINS),
-  ]);
-  if (process.env.VERCEL_URL) origins.add(`https://${process.env.VERCEL_URL}`);
-  return origins;
-};
-
-export const getAppBaseUrl = () => {
-  const [configured] = splitOrigins(process.env.APP_BASE_URL);
-  if (configured) return configured.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return DEFAULT_APP_ORIGIN;
-};
-
-export const getOrigin = (req) => {
-  if (typeof req.headers?.get === "function") return req.headers.get("origin");
-  return req.headers?.origin;
-};
-
-export const corsHeaders = (origin) => {
-  const allowed = getAllowedOrigins();
-  const allowOrigin = origin && allowed.has(origin) ? origin : DEFAULT_APP_ORIGIN;
-  return {
-    "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Cron-Secret",
-    "Vary": "Origin",
-  };
-};
-
-export const applyCors = (req, res) => {
-  const headers = corsHeaders(getOrigin(req));
-  Object.entries(headers).forEach(([key, value]) => res.setHeader(key, value));
-  return headers;
-};
-
-export const jsonResponse = (body, status = 200, headers = {}) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { ...headers, "Content-Type": "application/json" },
-  });
-
-// fetch con timeout duro (H-004). Evita que una API externa lenta cuelgue la
-// función serverless hasta agotar su maxDuration. Si el caller ya pasa su
-// propio AbortSignal, se respeta. Default 15s (suficiente para MP/Resend);
-// para llamadas LLM en streaming usar un timeout mayor (~55s).
-export const fetchWithTimeout = (url, options = {}, timeoutMs = 15000) =>
-  fetch(url, {
-    ...options,
-    signal: options.signal || AbortSignal.timeout(timeoutMs),
-  });
-
-// ── Validación ligera de inputs (H-021 tamaño / H-024 esquema) ──
-// Helpers puros sin dependencias para no inflar los bundles ni el runtime edge
-// con Zod/Joi. Lanzan un error con .status para que handleApiError/jsonError lo
-// traduzcan al código correcto (400 inválido, 413 demasiado grande).
-// 2000 chars: límite razonable para mensajes de chat. Antes era 8000, que es
-// excesivo para un turno conversacional y amplía la superficie de payload abuse.
-// Los endpoints que usaban 8000 no cambian de comportamiento visible para el
-// usuario normal; solo bloquea payloads abusivos más temprano.
-export const MAX_USER_MESSAGE_CHARS = 2000;
-
-export class BadRequestError extends Error {
-  constructor(message, status = 400) {
-    super(message);
-    this.name = "BadRequestError";
-    this.status = status;
-  }
-}
-
-// Exige string no vacío y acotado. max excedido → 413 (payload too large).
-export const requireString = (value, name, { min = 1, max = 10000, trim = true } = {}) => {
-  if (typeof value !== "string") throw new BadRequestError(`${name} debe ser texto`);
-  const v = trim ? value.trim() : value;
-  if (v.length < min) throw new BadRequestError(`${name} es requerido`);
-  if (v.length > max) throw new BadRequestError(`${name} excede el máximo de ${max} caracteres`, 413);
-  return v;
-};
-
-// Exige entero positivo (ids de proyecto/sesión/etc.).
-export const requirePositiveInt = (value, name) => {
-  const n = Number(value);
-  if (!Number.isInteger(n) || n <= 0) throw new BadRequestError(`${name} inválido`);
-  return n;
-};
-
-// Exige que value sea uno de los permitidos (enums tipo tier/role).
-export const requireEnum = (value, name, allowed) => {
-  if (!allowed.includes(value)) throw new BadRequestError(`${name} inválido`);
-  return value;
-};
-
-// Valida que un string sea una fecha YYYY-MM-DD con formato correcto Y que
-// la fecha sea calendáricamente real (rechaza 2026-13-45 o 2026-02-30).
-// El regex verifica el formato; la construcción de Date verifica la realidad
-// calendárica comparando los componentes parseados contra lo que Date devuelve
-// (JS "desborda" fechas inválidas: new Date(2026,1,30) → 2 de marzo).
-export const isDateOnly = (v) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v ?? "")) return false;
-  const [y, m, d] = v.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
-};
-
-// Exige dos fechas YYYY-MM-DD con start estrictamente anterior a end.
-// Lanza BadRequestError 400 si:
-//   - alguna tiene formato inválido (no YYYY-MM-DD)
-//   - start === end  (rango de duración cero — siempre inválido para ventanas)
-//   - start > end    (rango invertido)
-//
-// La comparación lexicográfica es suficiente para fechas ISO en formato fijo.
-// Uso: requireDateRange(periodStart, periodEnd, { startName: 'periodStart', endName: 'periodEnd' })
-export const requireDateRange = (start, end, { startName = "start", endName = "end" } = {}) => {
-  if (!isDateOnly(start)) throw new BadRequestError(`${startName} debe ser una fecha YYYY-MM-DD`);
-  if (!isDateOnly(end))   throw new BadRequestError(`${endName} debe ser una fecha YYYY-MM-DD`);
-  if (start >= end) {
-    throw new BadRequestError(`${startName} debe ser anterior a ${endName}`);
-  }
-  return { start, end };
-};
-
+// Extrae el Bearer token del header Authorization. Devuelve null si no existe
+// o si el header no sigue el formato "Bearer <token>".
 export const getBearerToken = (req) => {
   const auth =
     typeof req.headers?.get === "function"
@@ -169,44 +56,10 @@ export const getBearerToken = (req) => {
   return auth.slice("Bearer ".length).trim();
 };
 
-// fetch con timeout para el CLIENTE Supabase (H-025). Las queries de Supabase
-// usan el fetch global por defecto, sin tope: una conexión colgada retiene la
-// invocación serverless hasta agotar maxDuration. Inyectamos un AbortSignal.
-// Más holgado que el de APIs externas (10s) porque cubre lecturas potencialmente
-// grandes; si el caller ya pasa su propio signal, se respeta.
-const SUPABASE_FETCH_TIMEOUT_MS = 10000;
-const supabaseFetch = (url, options = {}) =>
-  fetch(url, { ...options, signal: options.signal || AbortSignal.timeout(SUPABASE_FETCH_TIMEOUT_MS) });
-
-export const createSupabase = (token, { admin = false } = {}) => {
-  const url = getSupabaseUrl();
-  const key = admin ? getSupabaseServiceKey() : getSupabaseAnonKey();
-  if (!url || !key) throw new Error("Supabase environment variables are missing");
-
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      fetch: supabaseFetch,
-      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
-    },
-  });
-};
-
-// Cliente admin (service_role) con el mismo timeout. Devuelve null si faltan las
-// variables, para que el caller decida cómo degradar (503, omitir persistencia…).
-export const createAdminClient = () => {
-  const url = getSupabaseUrl();
-  const key = getSupabaseServiceKey();
-  if (!url || !key) return null;
-  return createClient(url, key, {
-    auth: { persistSession: false },
-    global: { fetch: supabaseFetch },
-  });
-};
-
 // Verifica el JWT contra la JWKS pública de Supabase (firma criptográfica).
 // No depende de auth.sessions; sobrevive logins múltiples y rotaciones de la
 // tabla de sesiones que rompen `auth.getUser(token)` server-side.
+// Lanza con .status 401 si el token es inválido o está expirado.
 export const getAuthenticatedUser = async (token) => {
   if (!token) {
     const err = new Error("Authorization bearer token is required");
@@ -247,6 +100,11 @@ export const getAuthenticatedUser = async (token) => {
   }
 };
 
+// ── Control de acceso ─────────────────────────────────────────────────────────
+
+// Verifica que el usuario tenga acceso al proyecto (owner o miembro).
+// ownerOnly=true rechaza miembros con 403.
+// Busca membresía por user_id y, si no encuentra, por email (invitados pendientes).
 export const assertProjectAccess = async (supabase, user, projectId, { ownerOnly = false } = {}) => {
   const id = Number(projectId);
   if (!Number.isInteger(id) || id <= 0) {
@@ -303,10 +161,11 @@ export const assertProjectAccess = async (supabase, user, projectId, { ownerOnly
   return { project, role: "member" };
 };
 
-// Rate limiting (H-010). Llama a la RPC check_rate_limit (migración 033) que
-// incrementa un contador de ventana fija y devuelve si sigue dentro del límite.
-// Lanza 429 si se excede. Fail-open ante errores de infraestructura (incluida la
-// RPC ausente, 42883) para no romper la feature si la migración no está aplicada.
+// ── Rate limiting (H-010) ─────────────────────────────────────────────────────
+// Llama a la RPC check_rate_limit (migración 033) que incrementa un contador de
+// ventana fija y devuelve si sigue dentro del límite. Lanza 429 si se excede.
+// Fail-open ante errores de infraestructura (incluida la RPC ausente, 42883)
+// para no romper la feature si la migración no está aplicada.
 //   key            identificador del bucket, p.ej. `invite:<userId>`
 //   max            máximo de solicitudes por ventana
 //   windowSeconds  tamaño de la ventana en segundos
@@ -332,18 +191,14 @@ export const enforceRateLimit = async (supabase, { key, max, windowSeconds }) =>
   }
 };
 
-export const handleApiError = (err, res) => {
-  const status = err.status || 500;
-  return res.status(status).json({ error: err.message || "Error interno" });
-};
-
+// ── Billing / IA (H-006) ──────────────────────────────────────────────────────
 // Verifica si el proyecto tiene IA habilitada Y su owner tiene premium activo.
 // Lanza si no — los endpoints IA llaman esto antes de gastar tokens del LLM.
 // Usa la RPC user_can_use_ia_on_project (migración 016).
 //
-// H-006: si la RPC no existe (42883) hacemos FAIL-CLOSED (bloqueamos) para no
-// regalar IA de pago ante un deploy con migraciones incompletas. Solo se tolera
-// la ausencia de la RPC si ALLOW_IA_WITHOUT_RPC="true" (uso en desarrollo).
+// Fail-CLOSED si la RPC no existe (42883): bloqueamos para no regalar IA de
+// pago ante un deploy con migraciones incompletas. Solo se tolera la ausencia
+// si ALLOW_IA_WITHOUT_RPC="true" (uso en desarrollo local).
 export const assertProjectCanUseIa = async (supabase, projectId) => {
   const { data, error } = await supabase.rpc("user_can_use_ia_on_project", {
     p_project_id: Number(projectId),
@@ -370,3 +225,12 @@ export const assertProjectCanUseIa = async (supabase, projectId) => {
     throw err;
   }
 };
+
+// ── Barrel ────────────────────────────────────────────────────────────────────
+// Re-exporta los módulos descompuestos para que todos los endpoints que hacen
+// `import { x } from "./_auth.js"` sigan funcionando sin cambios.
+// Los nombres son disjuntos entre los tres módulos y los de este archivo
+// (verificado en el encabezado); no hay colisiones.
+export * from "./_validation.js";
+export * from "./_http.js";
+export * from "./_supabase.js";

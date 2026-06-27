@@ -287,6 +287,18 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 38 — descomposición arquitectónica, paso A.1: `_auth.js` → módulos (2026-06-27)
+
+**Consenso A+B+C (descomposición, ÉPICO) — Pista A, paso 1 `[backend-dev]` ✅:** `api/_auth.js` era un cajón de sastre (auth+CORS+DB+billing+validación, 373 líneas). Se separó en módulos focalizados, dejando `_auth.js` como **barrel que re-exporta** → **cero cambios de imports** en los ~15 endpoints (behavior-preserving total):
+- `api/_validation.js` (85, puro): `requireString`/`requirePositiveInt`/`requireEnum`/`isDateOnly`/`requireDateRange`/`BadRequestError`/`MAX_USER_MESSAGE_CHARS`.
+- `api/_http.js` (106): CORS (`corsHeaders`/`applyCors`/`getOrigin`/`getAppBaseUrl`), `jsonResponse`, `fetchWithTimeout`, `handleApiError`.
+- `api/_supabase.js` (72): env getters + `createSupabase`/`createAdminClient` + `supabaseFetch`.
+- `api/_auth.js` (373→237, **-36%**): conserva auth/acceso/billing (`getAuthenticatedUser`/`assertProjectAccess`/`enforceRateLimit`/`assertProjectCanUseIa`) + barrel `export *` de los 3 módulos.
+
+`vitest` **56/56** ✅, build ✅, lint limpio. Sin migración.
+
+> Resta del épico: **Pista B** — extraer las pantallas inline de `ProductivityPlus.jsx` (`AuthScreen`/`UserSelectScreen`/`IntroScreen`/`ProjectLandingScreen`) a `src/screens/`, por pasos verificados.
+
 ### Sprint 37 — fix-auditoría: integridad de pagos + seguridad (ronda triple 2026-06-27) (2026-06-27)
 
 **Subsanación de los hallazgos del triple-audit (A+B+C), batch backend `[backend-dev + security]`:**

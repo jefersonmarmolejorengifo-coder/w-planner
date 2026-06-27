@@ -9,23 +9,32 @@
 
 ## 🆕 Ronda 2026-06-27 — triple audit sobre los cambios de hoy (`87cb0d0..HEAD`) 🤖
 
-**Auditores que corrieron:** **A = Claude Opus 4.8** (orquestador) + **C = Gemini 3.1 Pro (High)** vía Antigravity (`agy`, suscripción Ultra; se corrió sin `--sandbox` porque el sandbox bloqueaba el acceso a `F:\`). **B = Codex (gpt-5.5)** quedó **OMITIDO**: su refresh token fue **revocado** (`401 Unauthorized` en `wss://chatgpt.com/backend-api/codex/responses`) → requiere `codex login`. Modo: **DUAL+ (A+C)**, Gemini con su mejor modelo.
+**Los TRES auditores corrieron** ✅: **A = Claude Opus 4.8** (orquestador) · **B = Codex GPT-5** (vía API key de OpenAI; el login ChatGPT estaba revocado, se reactivó con `codex login --with-api-key`) · **C = Gemini 3.1 Pro (High)** vía Antigravity `agy` (suscripción Ultra, corrido sin `--sandbox` que bloqueaba el acceso a `F:\`). Modo: **TRIPLE completo**, cada auditor en su mejor modelo.
 
-> Nota técnica: el `agy` CLI clásico/TUI no autentica vía mi shell; se resolvió Gemini con login OAuth de Ultra + invocación sin sandbox. El profile de Codex se migró al formato nuevo (`~/.codex/superauditor.config.toml`), pero falta el re-login. Para completar el triple: `codex login` y re-correr el Auditor B.
+> Notas técnicas de la corrida: Codex requería `</dev/null` (esperaba stdin) + re-login (token revocado) + key sin BOM. Gemini requería login OAuth de Ultra + invocación sin sandbox. El profile de Codex se migró al formato nuevo (`~/.codex/superauditor.config.toml`).
 
 ### Veredicto de la ronda
-**Los fixes de hoy resisten la auditoría: ningún auditor re-levantó los críticos/altos que cerramos** (race de cuota, tier en pago, retro atómico, responsive, alert/confirm). Eso es señal fuerte de que las correcciones funcionaron. No hay críticos nuevos.
+**Los fixes de hoy resisten la auditoría triple: ningún auditor re-levantó los críticos/altos que cerramos** (race de cuota, tier en pago, retro atómico, responsive, alert/confirm). No hay críticos nuevos. Pero los tres convergen en deuda real de **integridad de pagos** y **arquitectura**, con hallazgos NUEVOS valiosos de Codex.
 
-### Hallazgos por consenso (A=Claude, C=Gemini)
-- **`[A+C]` · MEDIO · Arquitectura — centralización excesiva.** A: el monolito `ProductivityPlus.jsx` aún tiene pantallas grandes inline (`AuthScreen`/`IntroScreen`/`ProjectLandingScreen`) + acopla `useTasks` a `ToastProvider`. C (Gemini H-001/H-002): `api/_auth.js` es un "cajón de sastre" (auth + CORS + DB + billing + validación) y las pantallas del entry-point siguen inline. → descomponer por dominio. Esfuerzo MEDIO.
-- **`[C]` · MEDIO · Pentest — `mp-webhook.js` `dataId` sin sanear (Gemini H-004).** `fetchPreapproval`/`fetchPayment` concatenan `data.id` del webhook directo a la URL de MP (`/preapproval/${id}`) sin validar que sea numérico/alfanumérico → riesgo de path-traversal si el secreto HMAC se comprometiera. Fix barato: validar `dataId` antes del fetch. **Hallazgo nuevo, vale aplicarlo.**
-- **`[C]` · MEDIO · Seguridad — `MAX_USER_MESSAGE_CHARS=8000` alto (Gemini H-003).** Permite prompts grandes que inflan costo de tokens antes de que pegue el rate-limit. Sugerencia: bajar a 1-2k salvo casos de documento.
-- **`[C]` · ALTO · UX/a11y — modales de reporte + `AuthScreen` sin semántica (Gemini H-006/H-007).** El visor de reportes (`ProductivityPlus.jsx:665`) no atrapa foco ni usa `role=dialog`; el input de email no liga `label`/`htmlFor`. (Código preexistente, no de hoy.) El nuevo `ConfirmDialog`/`Toast` de hoy SÍ son accesibles — el gap es en pantallas viejas.
-- **`[A]` · MEDIO · Conexiones — gap de enqueue del outbox (H-048).** La durabilidad de la comisión protege solo si el `INSERT` en `hub_outbox` entró; si Supabase está caído justo al cobrar, se pierde igual. Un reconciliador periódico contra la API de MP lo cerraría.
-- **`[A]` · MEDIO · Seguridad — `isDateOnly` acepta fechas inexistentes.** El regex `^\d{4}-\d{2}-\d{2}$` deja pasar `2026-13-45`; `requireDateRange` (B-3) no valida fecha real. Fix: validar con `new Date()`.
-- **`[A/C]` · BAJO · varios** — sin retry/backoff en el cliente Supabase (C/H-005), reserva de cuota temprana sin release si falla la sesión (A/C3), `IntroScreen` se muestra en cada carga (A/U3), `FOR UPDATE SKIP LOCKED` vía RPC libera el lock al retornar (A/C2).
+### Hallazgos por consenso (A=Claude, B=Codex, C=Gemini)
 
-> Reportes completos por auditor: `.superauditor/audit-claude.md` y `.superauditor/audit-gemini.md`. (`audit-codex.md` quedará cuando se re-corra B.)
+**🔴 Top nuevos (priorizados):**
+1. **`[B]` ALTO · Pentest — envenenamiento de idempotencia del webhook MP (Codex H-005).** `api/mp-webhook.js:157-175`: el evento se marca como procesado (dedupe) ANTES de consultar MP y escribir el estado premium. Si hay un fallo transitorio tras el insert de dedupe → 500, pero el reintento con el mismo id se trata como **duplicado y el pago NUNCA se procesa**. Fix: estado `processing/failed/processed`; marcar definitivo solo tras completar las escrituras.
+2. **`[B]` ALTO · Conexiones — upserts de `users_premium` no chequean `{ error }` (Codex H-006/H-008).** `mp-subscribe.js:156`, `mp-webhook.js:201,260`: si Supabase rechaza la escritura, el flujo sigue y devuelve éxito/200 → el usuario paga y queda sin plan, o MP deja de reintentar. Fix: desestructurar `{ error }` en cada escritura crítica; 500 a MP si no persiste.
+3. **`[A+B]` ALTO · Seguridad — la cuota de chat cae a modo NO atómico / fail-open si falta `service_role` (Claude P3 + Codex H-003).** Si `createAdminClient()` es null, `chat-stream` no llama la RPC atómica y el LLM se invoca igual (solo lo frena el rate-limit de ráfaga). Fix: fail-closed en prod sin admin/RPC.
+4. **`[C]` MEDIO · Pentest — `dataId` del webhook sin sanear (Gemini H-004).** `mp-webhook.js`: `data.id` se concatena a la URL de MP sin validar → posible path-traversal si el HMAC se comprometiera. Fix: validar numérico/alfanumérico antes del fetch.
+
+**🤝 Consenso fuerte:**
+- **`[A+B+C]` MEDIO · Arquitectura — centralización excesiva.** Los tres lo flaggean: `ProductivityPlus.jsx` (~2446 líneas: pantallas inline + permisos + nav) y `api/_auth.js` (cajón de sastre: auth+CORS+DB+billing+validación). Descomponer por dominio. Esfuerzo ALTO.
+- **`[A+B]` MEDIO · Conexiones — `hub_outbox_claim` no marca filas como reclamadas (Claude C2 + Codex H-009).** El `FOR UPDATE SKIP LOCKED` solo hace SELECT; el lock se libera al retornar la RPC → crons solapados pueden enviar la misma fila. Fix: `UPDATE ... SET status='processing' ... RETURNING`.
+- **`[B+C]` MEDIO · UX/a11y — deuda de accesibilidad.** Codex H-011/H-012 (tarjetas de `UserSelect` y el menú overflow nuevo con `role="menu"` sin patrón de teclado) + Gemini H-006/H-007 (visor de reportes y `AuthScreen` sin `role=dialog`/`htmlFor`). Las piezas de hoy (Toast/ConfirmDialog) SÍ son accesibles; el gap es código viejo + el `role="menu"` del overflow.
+
+**Solo un auditor (revisar):**
+- `[B]` MEDIO: sin tests del handler real de mp-webhook (H-002); `error.message` crudo al cliente en varios endpoints (H-004); tab "Pulso del equipo" visible a scrum_master pero la RPC/vista lo bloquea (H-010).
+- `[C]` MEDIO: `MAX_USER_MESSAGE_CHARS=8000` alto (H-003).
+- `[A]` MEDIO: `isDateOnly` acepta fechas inexistentes; gap de enqueue del outbox si Supabase cae al cobrar; BAJO: sin retry en el cliente Supabase, `IntroScreen` en cada carga.
+
+> Reportes completos por auditor: `.superauditor/audit-claude.md`, `.superauditor/audit-codex.md`, `.superauditor/audit-gemini.md`.
 
 ---
 

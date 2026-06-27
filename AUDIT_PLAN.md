@@ -7,6 +7,28 @@
 
 ---
 
+## 🆕 Ronda 2026-06-27 — triple audit sobre los cambios de hoy (`87cb0d0..HEAD`) 🤖
+
+**Auditores que corrieron:** **A = Claude Opus 4.8** (orquestador) + **C = Gemini 3.1 Pro (High)** vía Antigravity (`agy`, suscripción Ultra; se corrió sin `--sandbox` porque el sandbox bloqueaba el acceso a `F:\`). **B = Codex (gpt-5.5)** quedó **OMITIDO**: su refresh token fue **revocado** (`401 Unauthorized` en `wss://chatgpt.com/backend-api/codex/responses`) → requiere `codex login`. Modo: **DUAL+ (A+C)**, Gemini con su mejor modelo.
+
+> Nota técnica: el `agy` CLI clásico/TUI no autentica vía mi shell; se resolvió Gemini con login OAuth de Ultra + invocación sin sandbox. El profile de Codex se migró al formato nuevo (`~/.codex/superauditor.config.toml`), pero falta el re-login. Para completar el triple: `codex login` y re-correr el Auditor B.
+
+### Veredicto de la ronda
+**Los fixes de hoy resisten la auditoría: ningún auditor re-levantó los críticos/altos que cerramos** (race de cuota, tier en pago, retro atómico, responsive, alert/confirm). Eso es señal fuerte de que las correcciones funcionaron. No hay críticos nuevos.
+
+### Hallazgos por consenso (A=Claude, C=Gemini)
+- **`[A+C]` · MEDIO · Arquitectura — centralización excesiva.** A: el monolito `ProductivityPlus.jsx` aún tiene pantallas grandes inline (`AuthScreen`/`IntroScreen`/`ProjectLandingScreen`) + acopla `useTasks` a `ToastProvider`. C (Gemini H-001/H-002): `api/_auth.js` es un "cajón de sastre" (auth + CORS + DB + billing + validación) y las pantallas del entry-point siguen inline. → descomponer por dominio. Esfuerzo MEDIO.
+- **`[C]` · MEDIO · Pentest — `mp-webhook.js` `dataId` sin sanear (Gemini H-004).** `fetchPreapproval`/`fetchPayment` concatenan `data.id` del webhook directo a la URL de MP (`/preapproval/${id}`) sin validar que sea numérico/alfanumérico → riesgo de path-traversal si el secreto HMAC se comprometiera. Fix barato: validar `dataId` antes del fetch. **Hallazgo nuevo, vale aplicarlo.**
+- **`[C]` · MEDIO · Seguridad — `MAX_USER_MESSAGE_CHARS=8000` alto (Gemini H-003).** Permite prompts grandes que inflan costo de tokens antes de que pegue el rate-limit. Sugerencia: bajar a 1-2k salvo casos de documento.
+- **`[C]` · ALTO · UX/a11y — modales de reporte + `AuthScreen` sin semántica (Gemini H-006/H-007).** El visor de reportes (`ProductivityPlus.jsx:665`) no atrapa foco ni usa `role=dialog`; el input de email no liga `label`/`htmlFor`. (Código preexistente, no de hoy.) El nuevo `ConfirmDialog`/`Toast` de hoy SÍ son accesibles — el gap es en pantallas viejas.
+- **`[A]` · MEDIO · Conexiones — gap de enqueue del outbox (H-048).** La durabilidad de la comisión protege solo si el `INSERT` en `hub_outbox` entró; si Supabase está caído justo al cobrar, se pierde igual. Un reconciliador periódico contra la API de MP lo cerraría.
+- **`[A]` · MEDIO · Seguridad — `isDateOnly` acepta fechas inexistentes.** El regex `^\d{4}-\d{2}-\d{2}$` deja pasar `2026-13-45`; `requireDateRange` (B-3) no valida fecha real. Fix: validar con `new Date()`.
+- **`[A/C]` · BAJO · varios** — sin retry/backoff en el cliente Supabase (C/H-005), reserva de cuota temprana sin release si falla la sesión (A/C3), `IntroScreen` se muestra en cada carga (A/U3), `FOR UPDATE SKIP LOCKED` vía RPC libera el lock al retornar (A/C2).
+
+> Reportes completos por auditor: `.superauditor/audit-claude.md` y `.superauditor/audit-gemini.md`. (`audit-codex.md` quedará cuando se re-corra B.)
+
+---
+
 ## 📌 Resumen ejecutivo 🤖
 
 - **Proyecto:** `w-planner` (Productivity-Plus)

@@ -153,7 +153,10 @@ export default async function handler(req, res) {
 
     // Guarda el preapproval_id como pending en users_premium para reconciliar
     // cuando llegue el webhook. El admin (service_role) ya quedó validado arriba.
-    await admin.from("users_premium").upsert({
+    // #2 — Chequear el error: si el registro pending no se pudo guardar, no
+    // iniciar el cobro. El usuario pagaría sin que tengamos registro del intento,
+    // dificultando la reconciliación. Coherente con H-019 (fail-closed antes del cobro).
+    const { error: pendingUpsertErr } = await admin.from("users_premium").upsert({
       user_id: user.id,
       tier: "free",          // se promueve a 'pro_*' cuando llegue el webhook
       status: "pending",
@@ -161,6 +164,10 @@ export default async function handler(req, res) {
       mp_payer_email: user.email,
       metadata: { target_tier: tier },
     }, { onConflict: "user_id" });
+    if (pendingUpsertErr) {
+      console.error("[mp-subscribe] upsert users_premium pending falló:", pendingUpsertErr.message);
+      return res.status(500).json({ error: "No se pudo registrar la suscripción. Intenta de nuevo." });
+    }
 
     return res.status(200).json({
       init_point: mpData.init_point,

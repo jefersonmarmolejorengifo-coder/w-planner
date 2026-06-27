@@ -287,6 +287,21 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 37 — fix-auditoría: integridad de pagos + seguridad (ronda triple 2026-06-27) (2026-06-27)
+
+**Subsanación de los hallazgos del triple-audit (A+B+C), batch backend `[backend-dev + security]`:**
+- **#1 Idempotencia del webhook MP (ALTO, Codex H-005):** `mp_webhook_events.status` (`processing`/`processed`, migración 040). Ante `23505` se reprocesa si la fila está `processing`; se marca `processed` SOLO tras completar las escrituras → un pago que falla a mitad ya **no** queda como "duplicado" permanente.
+- **#2 Upserts de `users_premium` chequean `{error}` (ALTO, Codex H-006/H-008):** el webhook → 500 (MP reintenta) si la persistencia falla; `mp-subscribe` no inicia el cobro si no registra el pending.
+- **#3 Chat fail-closed sin `service_role` (ALTO, consenso A+B):** 503 si falta el admin client (salvo flag dev `ALLOW_CHAT_WITHOUT_ADMIN`) → no se llama al LLM sin control de cuota.
+- **#4 `dataId` saneado (MEDIO, Gemini H-004):** regex `^[A-Za-z0-9_-]+$` antes de los fetch a MP (corta path-traversal/SSRF).
+- **#6 `hub_outbox_claim` atómico (MEDIO, consenso A+B):** reescrito a `UPDATE ... FOR UPDATE SKIP LOCKED RETURNING` con estado `processing` (migración 040) → crons solapados ya no mandan la misma comisión; + recovery de filas `processing` huérfanas (>10 min) en el cron.
+- **#9 errores genéricos (MEDIO, Codex H-004):** 6 endpoints de IA ya no filtran `err.message` crudo en errores ≥500 (log server-side + mensaje genérico).
+- **#11 `MAX_USER_MESSAGE_CHARS` 8000→2000** · **#12 `isDateOnly` valida fecha real** (rechaza `2026-13-45`).
+
+**Revisión de security:** el core de pagos pasó; cazó 2 gaps corregidos antes de mergear — H-BATCH-01 (fuga de `err.message` en el catch de auth, extendido a los 5 endpoints de IA) y H-BATCH-02 (recovery de filas huérfanas). `vitest` **56/56** ✅, build ✅, lint limpio. **Migración 040 aplicada en prod** (status en `mp_webhook_events` + claim atómico verificados).
+
+> Difiere: descomposición arquitectónica (`ProductivityPlus.jsx` + `_auth.js`, consenso A+B+C) — es ÉPICO, va a sprints dedicados. Pendiente: batch de a11y (#7/#10).
+
 ### Sprint 36 — Tanda 3 optimizaciones de carga (A-02, O-08; A-05 y O-03/05/06 evaluadas) (2026-06-26)
 
 **A-02 (quick win) `[frontend]` ✅:** `TeamPulseTab` (+ `SprintPulseCard`, `PulseList`) estaba inline y eager en `ProductivityPlus.jsx` → extraído a `src/features/team/TeamPulseTab.jsx` + `React.lazy` + Suspense (mismo patrón que el resto de tabs). Sale del bundle inicial (chunk propio 5.46 kB).

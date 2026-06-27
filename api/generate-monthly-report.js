@@ -339,7 +339,7 @@ export default async function handler(req) {
       await enforceRateLimit(supabase, { key: `gen-monthly:proj:${projectId}`, max: 50, windowSeconds: 86400 });
     }
   } catch (err) {
-    return jsonError(err.message, err.status || 500, headers);
+    return jsonError((err.status || 500) < 500 ? err.message : "Error interno del servidor", err.status || 500, headers);
   }
 
   // Tareas + reportes mensuales anteriores + bitácora del mes en paralelo.
@@ -359,7 +359,11 @@ export default async function handler(req) {
       .lte("created_at", `${monthEnd}T23:59:59Z`)
       .order("created_at", { ascending: true }),
   ]);
-  if (tasksError) return jsonError(`Error leyendo tareas: ${tasksError.message}`, 500, headers);
+  if (tasksError) {
+    // #9 — Loguear detalle server-side, devolver mensaje genérico.
+    console.error("[generate-monthly] Error leyendo tareas:", tasksError.message);
+    return jsonError("No se pudo cargar la información del proyecto. Intenta de nuevo.", 500, headers);
+  }
   // histError no es crítico (tabla puede no existir aún si no se aplicó la 012).
   if (histError) console.warn("[monthly] No pude leer report_history:", histError.message);
 
@@ -426,9 +430,12 @@ export default async function handler(req) {
   }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
-    let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
-    try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep fallback */ }
-    return jsonError(errMsg, 502, headers);
+    // #9 — Loguear detalle del proveedor server-side, devolver mensaje genérico.
+    try {
+      const e = await anthropicRes.json();
+      console.error("[generate-monthly] Anthropic error:", anthropicRes.status, JSON.stringify(e));
+    } catch { /* ignore */ }
+    return jsonError("No se pudo generar el reporte mensual. Intenta de nuevo en unos minutos.", 502, headers);
   }
 
   // Transformar SSE → HTML text. Captura métricas y stop_reason en los eventos.

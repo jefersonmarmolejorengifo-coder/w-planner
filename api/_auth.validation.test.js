@@ -68,6 +68,7 @@ describe('isDateOnly', () => {
   it('acepta fechas YYYY-MM-DD válidas', () => {
     expect(isDateOnly('2026-01-15')).toBe(true);
     expect(isDateOnly('2000-12-31')).toBe(true);
+    expect(isDateOnly('2024-02-29')).toBe(true); // 2024 es bisiesto
   });
 
   it('rechaza formatos que no son YYYY-MM-DD', () => {
@@ -78,6 +79,16 @@ describe('isDateOnly', () => {
     expect(isDateOnly('')).toBe(false);
     expect(isDateOnly(null)).toBe(false);
     expect(isDateOnly(undefined)).toBe(false);
+  });
+
+  it('rechaza fechas con formato correcto pero calendáricamente imposibles (#12)', () => {
+    expect(isDateOnly('2026-13-01')).toBe(false); // mes 13 no existe
+    expect(isDateOnly('2026-00-01')).toBe(false); // mes 0 no existe
+    expect(isDateOnly('2026-02-30')).toBe(false); // febrero no tiene 30 días
+    expect(isDateOnly('2026-02-29')).toBe(false); // 2026 no es bisiesto
+    expect(isDateOnly('2026-04-31')).toBe(false); // abril solo tiene 30 días
+    expect(isDateOnly('2026-01-00')).toBe(false); // día 0 no existe
+    expect(isDateOnly('2026-01-32')).toBe(false); // día 32 no existe
   });
 });
 

@@ -337,7 +337,7 @@ export default async function handler(req) {
       await enforceRateLimit(supabase, { key: `gen-report:proj:${projectId}`, max: 50, windowSeconds: 86400 });
     }
   } catch (err) {
-    return jsonError(err.message, err.status || 500, headers);
+    return jsonError((err.status || 500) < 500 ? err.message : "Error interno del servidor", err.status || 500, headers);
   }
 
   const [

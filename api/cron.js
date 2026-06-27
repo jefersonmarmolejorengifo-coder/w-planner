@@ -292,6 +292,15 @@ export default async function handler(req, res) {
     if (!adminHub) {
       console.warn("[cron:hub_drain] createAdminClient devolvió null (faltan vars de entorno); drain omitido.");
     } else {
+      // Recovery (#6, H-BATCH-02): filas en 'processing' que un worker reclamó y
+      // dejó colgadas (murió antes del UPDATE de resultado) quedarían atascadas,
+      // porque hub_outbox_claim solo toma 'pending'/'failed'. Tras 10 min se
+      // revierten a 'failed' (con next_attempt_at=ahora) para que el claim las retome.
+      await adminHub.from("hub_outbox")
+        .update({ status: "failed", next_attempt_at: new Date().toISOString(), last_error: "worker timeout - recuperada" })
+        .eq("status", "processing")
+        .lt("updated_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
+
       // hub_outbox_claim bloquea las filas con FOR UPDATE SKIP LOCKED para que
       // dos invocaciones del cron solapadas no procesen el mismo registro.
       const { data: items, error: claimErr } = await adminHub.rpc("hub_outbox_claim", { p_limit: 5 });
@@ -302,7 +311,12 @@ export default async function handler(req, res) {
         }
       } else if (Array.isArray(items) && items.length > 0) {
         for (const item of items) {
-          const newAttempts = item.attempts + 1;
+          // #6 — hub_outbox_claim (migración 040) ya incrementó attempts y puso
+          // la fila en status='processing'. El cron NO vuelve a sumar attempts;
+          // usa item.attempts tal como lo devolvió el claim (ya es el nuevo valor).
+          // El guard de todos los UPDATEs es .eq("status","processing") para evitar
+          // sobrescribir si el webhook procesó la misma fila en paralelo.
+          const currentAttempts = item.attempts; // ya incrementado por el claim
           let r;
           try {
             r = await notificarPagoAlHub(item.payload);
@@ -319,60 +333,58 @@ export default async function handler(req, res) {
               .from("hub_outbox")
               .update({
                 status: "sent",
-                attempts: newAttempts,
                 sent_at: new Date().toISOString(),
                 last_error: null,
               })
               .eq("id", item.id)
-              .in("status", ["pending", "failed"]);
+              .eq("status", "processing"); // guard: solo si aún nos pertenece
             if (sentErr) {
               console.warn("[cron:hub_drain] marcar sent falló mp_payment_id=" + item.mp_payment_id + ":", sentErr.message);
             } else {
               console.log("[cron:hub_drain] sent mp_payment_id=" + item.mp_payment_id + " txn=" + label);
             }
           } else {
-            // Hub falló: aplicar backoff exponencial 2^attempts minutos.
-            const isDead = newAttempts >= item.max_attempts;
+            // Hub falló: aplicar backoff exponencial 2^currentAttempts minutos.
+            const isDead = currentAttempts >= item.max_attempts;
             const lastErrStr = String(r.error ?? "hub !ok").slice(0, 500);
 
             if (isDead) {
               // Estado terminal: no se vuelve a intentar. OJO: NO incluir
               // next_attempt_at en el update (columna NOT NULL; null la rompe).
               // Queda con el valor previo, lo que es aceptable porque el filtro
-              // de hub_outbox_claim exige status IN ('pending','failed').
+              // de hub_outbox_claim exige status IN ('pending','failed','processing'
+              // con next_attempt_at <= NOW()).
               const { error: deadErr } = await adminHub
                 .from("hub_outbox")
                 .update({
                   status: "dead",
-                  attempts: newAttempts,
                   last_error: lastErrStr,
                 })
                 .eq("id", item.id)
-                .in("status", ["pending", "failed"]);
+                .eq("status", "processing"); // guard
               if (deadErr) {
                 console.warn("[cron:hub_drain] marcar dead falló mp_payment_id=" + item.mp_payment_id + ":", deadErr.message);
               } else {
                 // Error prominente: debe activar alerta en Vercel / Datadog.
-                console.error("[cron:hub_drain] DEAD mp_payment_id=" + item.mp_payment_id + " intentos=" + newAttempts + "/" + item.max_attempts + " error=" + lastErrStr);
+                console.error("[cron:hub_drain] DEAD mp_payment_id=" + item.mp_payment_id + " intentos=" + currentAttempts + "/" + item.max_attempts + " error=" + lastErrStr);
               }
             } else {
-              // Reintento diferido: backoff 2^attempts minutos.
-              const backoffMs = Math.pow(2, newAttempts) * 60 * 1000;
+              // Reintento diferido: backoff 2^currentAttempts minutos.
+              const backoffMs = Math.pow(2, currentAttempts) * 60 * 1000;
               const nextAt = new Date(Date.now() + backoffMs).toISOString();
               const { error: failErr } = await adminHub
                 .from("hub_outbox")
                 .update({
                   status: "failed",
-                  attempts: newAttempts,
                   last_error: lastErrStr,
                   next_attempt_at: nextAt,
                 })
                 .eq("id", item.id)
-                .in("status", ["pending", "failed"]);
+                .eq("status", "processing"); // guard
               if (failErr) {
                 console.warn("[cron:hub_drain] marcar failed falló mp_payment_id=" + item.mp_payment_id + ":", failErr.message);
               } else {
-                console.warn("[cron:hub_drain] failed mp_payment_id=" + item.mp_payment_id + " intento " + newAttempts + "/" + item.max_attempts + " próximo=" + nextAt);
+                console.warn("[cron:hub_drain] failed mp_payment_id=" + item.mp_payment_id + " intento " + currentAttempts + "/" + item.max_attempts + " próximo=" + nextAt);
               }
             }
           }

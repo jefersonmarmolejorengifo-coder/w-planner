@@ -380,7 +380,7 @@ export default async function handler(req) {
       }
     }
   } catch (err) {
-    return jsonError(err.message, err.status || 500, headers);
+    return jsonError((err.status || 500) < 500 ? err.message : "Error interno del servidor", err.status || 500, headers);
   }
 
   // Datos: tareas + thread + evolutivos anteriores + días activos por persona
@@ -409,7 +409,11 @@ export default async function handler(req) {
     // Tolerante: si la migración 020 no se aplicó, no crashea.
     supabase.rpc("team_pulse_for_project", { p_project_id: Number(projectId) }),
   ]);
-  if (tasksError) return jsonError(`Error leyendo tareas: ${tasksError.message}`, 500, headers);
+  if (tasksError) {
+    // #9 — Loguear detalle (puede contener nombre de tabla/constraint) y devolver genérico.
+    console.error("[generate-evolution] Error leyendo tareas:", tasksError.message);
+    return jsonError("No se pudo cargar la información del proyecto. Intenta de nuevo.", 500, headers);
+  }
 
   // Días activos por persona: una llamada RPC por nombre (en paralelo).
   const allNames = new Set();
@@ -465,9 +469,12 @@ export default async function handler(req) {
   }, 55000); // streaming LLM: timeout largo
 
   if (!anthropicRes.ok) {
-    let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
-    try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep */ }
-    return jsonError(errMsg, 502, headers);
+    // #9 — Loguear detalle del proveedor server-side, devolver mensaje genérico al cliente.
+    try {
+      const e = await anthropicRes.json();
+      console.error("[generate-evolution] Anthropic error:", anthropicRes.status, JSON.stringify(e));
+    } catch { /* ignore */ }
+    return jsonError("No se pudo generar el evolutivo. Intenta de nuevo en unos minutos.", 502, headers);
   }
 
   const reader = anthropicRes.body.getReader();

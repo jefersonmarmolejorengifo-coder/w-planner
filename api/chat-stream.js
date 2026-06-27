@@ -141,7 +141,27 @@ export default async function handler(req) {
     }
 
   } catch (err) {
-    return jsonError(err.message, err.status || 500, headers);
+    // No filtrar el mensaje crudo en errores internos (puede traer detalles de BD/red).
+    return jsonError((err.status || 500) < 500 ? err.message : "Error interno del servidor", err.status || 500, headers);
+  }
+
+  // #3 — Fail-closed si el cliente admin (service_role) no está disponible.
+  // Sin admin: no podemos reservar cuota atómica ni persistir mensajes. En prod,
+  // esto significa que la variable SUPABASE_SERVICE_ROLE_KEY no está configurada,
+  // que es un error de infraestructura, no un caso legítimo de uso.
+  // El fallback de check no-atómico NO se permite en prod: podría cobrar tokens
+  // sin control de cuota ni persistencia. Solo se permite con flag explícito
+  // de dev (mismo patrón que ALLOW_MP_WEBHOOK_WITHOUT_SECRET en mp-webhook.js).
+  const admin = createAdminClient();
+  if (!admin) {
+    if (process.env.ALLOW_CHAT_WITHOUT_ADMIN === "true") {
+      // Modo dev: loguear advertencia prominente y continuar degradado.
+      // NEVER usar en producción: omite reserva de cuota atómica y persistencia.
+      console.warn("[chat] DEV: admin client nulo y ALLOW_CHAT_WITHOUT_ADMIN=true; cuota y persistencia deshabilitadas.");
+    } else {
+      console.error("[chat] CRÍTICO: SUPABASE_SERVICE_ROLE_KEY no configurada; chat deshabilitado (fail-closed).");
+      return jsonError("Servicio no disponible temporalmente. Contacta al administrador.", 503, headers);
+    }
   }
 
   // Cuota mensual con RESERVA ATÓMICA (H-030). Antes esto era leer-y-luego-
@@ -150,7 +170,6 @@ export default async function handler(req) {
   // una sola sentencia SQL guardada por la cuota (service_role, ya validado el
   // acceso al proyecto arriba). `releaseQuota` devuelve la reserva si el LLM
   // falla antes de generar nada.
-  const admin = createAdminClient();
   let reserved = false;
   const releaseQuota = async () => {
     if (!reserved || !admin) return;
@@ -292,10 +311,15 @@ export default async function handler(req) {
   }
 
   if (!anthropicRes.ok) {
-    let errMsg = `El generador de IA respondió con error ${anthropicRes.status}`;
-    try { const e = await anthropicRes.json(); errMsg = e.error?.message || errMsg; } catch { /* keep */ }
+    // #9 — Loguear el detalle de Anthropic server-side pero devolver mensaje genérico.
+    // El mensaje de error del proveedor puede contener detalles internos (rate limit
+    // por API key, nombre del modelo, etc.) que no deben llegar al cliente.
+    try {
+      const e = await anthropicRes.json();
+      console.error("[chat] Anthropic error:", anthropicRes.status, JSON.stringify(e));
+    } catch { /* ignore parse error */ }
     await releaseQuota(); // el turno no se cobró: liberar la reserva
-    return jsonError(errMsg, 502, headers);
+    return jsonError("No se pudo generar la respuesta. Intenta de nuevo en unos segundos.", 502, headers);
   }
 
   const reader = anthropicRes.body.getReader();

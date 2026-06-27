@@ -78,8 +78,10 @@ export default async function handler(req, res) {
 
     if (error) {
       // Error real de Postgres o de la RLS: la transacción ya fue revertida.
-      // No hay estado corrupto. Propagamos el error al cliente con 500.
-      return res.status(500).json({ error: error.message });
+      // No hay estado corrupto. Loguear el detalle (puede contener nombres de
+      // tablas/constraints) server-side; devolver mensaje genérico al cliente (#9).
+      console.error("[submit-retro] RPC submit_sprint_retro error:", error.message, "code:", error.code);
+      return res.status(500).json({ error: "No se pudo guardar la retrospectiva. Intenta de nuevo." });
     }
 
     // data es el JSONB que devuelve la función: { retro_id, signals_count }

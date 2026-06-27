@@ -95,7 +95,11 @@ export const fetchWithTimeout = (url, options = {}, timeoutMs = 15000) =>
 // Helpers puros sin dependencias para no inflar los bundles ni el runtime edge
 // con Zod/Joi. Lanzan un error con .status para que handleApiError/jsonError lo
 // traduzcan al código correcto (400 inválido, 413 demasiado grande).
-export const MAX_USER_MESSAGE_CHARS = 8000;
+// 2000 chars: límite razonable para mensajes de chat. Antes era 8000, que es
+// excesivo para un turno conversacional y amplía la superficie de payload abuse.
+// Los endpoints que usaban 8000 no cambian de comportamiento visible para el
+// usuario normal; solo bloquea payloads abusivos más temprano.
+export const MAX_USER_MESSAGE_CHARS = 2000;
 
 export class BadRequestError extends Error {
   constructor(message, status = 400) {
@@ -127,9 +131,17 @@ export const requireEnum = (value, name, allowed) => {
   return value;
 };
 
-// Valida que un string tenga formato date-only YYYY-MM-DD.
-// Centralizado aquí para que no se duplique como closure local en los endpoints.
-export const isDateOnly = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v ?? "");
+// Valida que un string sea una fecha YYYY-MM-DD con formato correcto Y que
+// la fecha sea calendáricamente real (rechaza 2026-13-45 o 2026-02-30).
+// El regex verifica el formato; la construcción de Date verifica la realidad
+// calendárica comparando los componentes parseados contra lo que Date devuelve
+// (JS "desborda" fechas inválidas: new Date(2026,1,30) → 2 de marzo).
+export const isDateOnly = (v) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v ?? "")) return false;
+  const [y, m, d] = v.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+};
 
 // Exige dos fechas YYYY-MM-DD con start estrictamente anterior a end.
 // Lanza BadRequestError 400 si:

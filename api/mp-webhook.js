@@ -129,6 +129,16 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, info: "missing type or id" });
   }
 
+  // #4 — Sanitizar dataId antes de concatenarlo a URLs de MP.
+  // Solo se permiten caracteres alfanuméricos, guion y guion bajo.
+  // Un dataId con barras, puntos dobles u otros caracteres de escape
+  // podría redirigir el fetch a una ruta distinta de la API de MP.
+  // Respondemos 200 (no 4xx) para que MP no reintente indefinidamente.
+  if (!/^[A-Za-z0-9_-]+$/.test(String(dataId))) {
+    console.warn("[mp-webhook] dataId con caracteres inválidos, descartado:", dataId);
+    return res.status(200).json({ ok: true, info: "invalid id format" });
+  }
+
   // ── Verificación de firma (H-001 / H-013 fail-closed) ──
   // Exigimos firma HMAC válida para procesar cualquier evento. Dos rechazos:
   //   - firma inválida/ausente → 401.
@@ -149,28 +159,77 @@ export default async function handler(req, res) {
     }
   }
 
-  // ── Idempotencia (H-001) ──
-  // MP reintenta notificaciones; registramos el id único del evento y, si ya
-  // fue procesado, devolvemos 200 sin reprocesar. Usa x-request-id (único por
-  // notificación) con fallback a "<type>:<dataId>".
+  // ── Idempotencia con status (#1 — envenenamiento de idempotencia) ──
+  // MP reintenta notificaciones ante cualquier respuesta que no sea 200.
+  //
+  // Problema anterior: el insert ocurría ANTES del procesamiento. Si el
+  // procesamiento fallaba con 500, el reintento de MP chocaba contra el UNIQUE
+  // (23505) y se devolvía "duplicate" → el pago nunca se procesaba.
+  //
+  // Solución: columna `status` en mp_webhook_events ('processing'|'processed').
+  //   1. Insert con status='processing' (el evento quedó en vuelo).
+  //   2. Si 23505: leer el status de la fila existente.
+  //      - 'processed' → verdadero duplicado; 200 "duplicate ignored".
+  //      - 'processing' → reintento legítimo de un intento anterior fallido;
+  //        continuar procesando (NO devolver "duplicate").
+  //   3. Al completar TODAS las escrituras críticas con éxito → marcar 'processed'.
+  //   4. 42P01 (tabla ausente) → fail-open sin romper, igual que antes.
+  //
+  // Usa x-request-id (único por notificación) con fallback a "<type>:<dataId>".
   const eventId = String(req.headers["x-request-id"] || `${type}:${dataId}`);
+  let dedupeTableExists = true; // asumimos que existe; 42P01 cambia esto
   try {
     const { error: dedupeErr } = await admin
       .from("mp_webhook_events")
-      .insert({ event_id: eventId, event_type: type, data_id: String(dataId) });
+      .insert({ event_id: eventId, event_type: type, data_id: String(dataId), status: "processing" });
     if (dedupeErr) {
       if (dedupeErr.code === "23505") {
-        // Clave duplicada → ya procesado.
-        return res.status(200).json({ ok: true, info: "duplicate event ignored" });
-      }
-      // 42P01 (tabla inexistente) u otros: no bloqueamos el cobro, solo avisamos.
-      if (dedupeErr.code !== "42P01") {
+        // Conflicto de clave única: puede ser duplicado real o reintento legítimo.
+        // Leer el status de la fila existente para distinguir.
+        const { data: existing, error: readErr } = await admin
+          .from("mp_webhook_events")
+          .select("status")
+          .eq("event_id", eventId)
+          .maybeSingle();
+        if (readErr) {
+          // No pudimos leer el status; asumir verdadero duplicado (safe default).
+          console.warn("[mp-webhook] no se pudo leer status del evento duplicado:", readErr.message);
+          return res.status(200).json({ ok: true, info: "duplicate event ignored (read error)" });
+        }
+        if (existing?.status === "processed") {
+          // Verdadero duplicado: ya fue procesado exitosamente antes.
+          return res.status(200).json({ ok: true, info: "duplicate event ignored" });
+        }
+        // status === 'processing' (o null por race condition): es un reintento
+        // legítimo de un intento que no completó. Continuamos procesando.
+        console.warn("[mp-webhook] evento en status 'processing'; reintento legítimo, continuando. event_id:", eventId);
+      } else if (dedupeErr.code === "42P01") {
+        // Tabla ausente (migración 040 no aplicada): fail-open, no bloqueamos el cobro.
+        dedupeTableExists = false;
+        console.warn("[mp-webhook] mp_webhook_events no existe (migración 040 pendiente); dedupe omitido.");
+      } else {
+        // Error inesperado: loguear pero continuar (fail-open).
         console.warn("[mp-webhook] dedupe insert falló:", dedupeErr.message);
       }
     }
   } catch (dedupeEx) {
     console.warn("[mp-webhook] dedupe excepción:", dedupeEx?.message);
   }
+
+  // Helper para marcar el evento como procesado al final del flujo.
+  // Solo actúa si la tabla existe y el insert/read no indicó saltar.
+  const markProcessed = async () => {
+    if (!dedupeTableExists) return;
+    try {
+      const { error: markErr } = await admin
+        .from("mp_webhook_events")
+        .update({ status: "processed" })
+        .eq("event_id", eventId);
+      if (markErr) console.warn("[mp-webhook] no se pudo marcar evento como processed:", markErr.message);
+    } catch (markEx) {
+      console.warn("[mp-webhook] excepción al marcar processed:", markEx?.message);
+    }
+  };
 
   try {
     if (type === "subscription_preapproval" || type === "preapproval") {
@@ -180,6 +239,8 @@ export default async function handler(req, res) {
       const { userId, tier } = parseExternalReference(pa.external_reference);
       if (!userId) {
         console.warn("[mp-webhook] preapproval sin external_reference parseable:", pa.external_reference);
+        // Evento no procesable: marcamos 'processed' para no quedar en 'processing'.
+        await markProcessed();
         return res.status(200).json({ ok: true, info: "no external_reference" });
       }
       const status = mapStatus(pa.status);
@@ -198,7 +259,15 @@ export default async function handler(req, res) {
       if (period?.next_charged_date) update.current_period_end = period.next_charged_date;
       if (pa.date_created)           update.current_period_start = pa.date_created;
 
-      await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
+      // #2 — Chequear el error del upsert de users_premium.
+      // Antes se ignoraba silenciosamente; si falla, el usuario pagó pero no
+      // tiene premium. Devolver 500 para que MP reintente; NO marcar 'processed'
+      // (el evento queda en 'processing' para el próximo intento).
+      const { error: paUpsertErr } = await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
+      if (paUpsertErr) {
+        console.error("[mp-webhook] upsert users_premium (preapproval) falló:", paUpsertErr.message);
+        return res.status(500).json({ error: "internal error" });
+      }
 
       // NO se notifica al hub aquí. El preapproval es la "autorización" del usuario
       // para el cobro, no un pago efectivo. Notificar aquí y también en
@@ -207,6 +276,7 @@ export default async function handler(req, res) {
       // hub no deduplica. La primera comisión se registra al llegar el evento
       // subscription_authorized_payment (primer cargo real confirmado por MP).
 
+      await markProcessed();
       return res.status(200).json({ ok: true, processed: "preapproval", user: userId, new_status: status });
     }
 
@@ -239,6 +309,10 @@ export default async function handler(req, res) {
 
       if (!userId) {
         console.warn("[mp-webhook] payment sin user resoluble:", dataId);
+        // Evento no procesable (sin userId): marcamos 'processed' para que no
+        // quede en 'processing' indefinidamente; no hay escritura crítica que
+        // proteger y MP no puede hacer nada útil con un reintento.
+        await markProcessed();
         return res.status(200).json({ ok: true, info: "no user resolvable" });
       }
 
@@ -257,7 +331,13 @@ export default async function handler(req, res) {
       if (payment.status === "approved" && tier) {
         update.tier = tier;
       }
-      await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
+      // #2 — Chequear el error del upsert de users_premium (rama payment).
+      // Si falla: 500 para que MP reintente; NO marcar 'processed'.
+      const { error: payUpsertErr } = await admin.from("users_premium").upsert(update, { onConflict: "user_id" });
+      if (payUpsertErr) {
+        console.error("[mp-webhook] upsert users_premium (payment) falló:", payUpsertErr.message);
+        return res.status(500).json({ error: "internal error" });
+      }
 
       // ── Notificación al hub (cobro recurrente) — H-048 outbox ───────────
       // Flujo de durabilidad de dos pasos:
@@ -381,9 +461,11 @@ export default async function handler(req, res) {
         }
       }
 
+      await markProcessed();
       return res.status(200).json({ ok: true, processed: "payment", user: userId });
     }
 
+    await markProcessed();
     return res.status(200).json({ ok: true, info: `evento ${type} ignorado` });
   } catch (err) {
     // Loguear el detalle real server-side (Vercel logs) sin exponerlo al caller.

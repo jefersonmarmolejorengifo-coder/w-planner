@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import crypto from 'node:crypto';
 import { verifyMpSignature, mapStatus, parseExternalReference } from './mp-webhook.js';
 
+// Regex de validación de dataId (#4) — extraída del handler para testear la
+// lógica sin levantar el servidor completo.
+const isValidDataId = (id) => /^[A-Za-z0-9_-]+$/.test(String(id));
+
 // Construye una cabecera x-signature válida para un manifest dado.
 function signedHeaders(secret, dataId, requestId, ts) {
   const id = String(dataId ?? '').toLowerCase();
@@ -68,6 +72,24 @@ describe('mapStatus', () => {
     expect(mapStatus('quien_sabe')).toBe('pending');
     expect(mapStatus('')).toBe('pending');
     expect(mapStatus(null)).toBe('pending');
+  });
+});
+
+// ── Validación de dataId (#4) ─────────────────────────────────────────────────
+describe('isValidDataId (sanitización de data.id del webhook)', () => {
+  it('acepta IDs alfanuméricos y con guiones/underscore', () => {
+    expect(isValidDataId('123456789')).toBe(true);
+    expect(isValidDataId('ABC-def_123')).toBe(true);
+    expect(isValidDataId('preapproval-9a8b')).toBe(true);
+  });
+
+  it('rechaza IDs con path traversal o caracteres de escape (#4)', () => {
+    expect(isValidDataId('../etc/passwd')).toBe(false);
+    expect(isValidDataId('123/456')).toBe(false);
+    expect(isValidDataId('123?foo=bar')).toBe(false);
+    expect(isValidDataId('123%2F456')).toBe(false); // %2F = /
+    expect(isValidDataId('123 456')).toBe(false);   // espacio
+    expect(isValidDataId('')).toBe(false);
   });
 });
 

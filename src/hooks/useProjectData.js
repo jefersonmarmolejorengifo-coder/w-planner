@@ -45,7 +45,15 @@ export function useProjectData({ activeUser, setActiveUser }) {
   const loadAllForProject = async (pid, proj, authUser = null) => {
     setLoading(true);
     try {
+      // Columnas explícitas de tasks = exactamente las que lee dbToTask (taskMapping.js).
+      // Omite columnas legacy/no usadas (inserted_at, subtasks_done) y, sobre todo, actúa
+      // de guardrail de egress: si a futuro se agrega una columna pesada a tasks (un
+      // embedding, un historial JSONB), NO se descargará para todos en cada apertura del
+      // tablero sin querer. tasks es la ÚNICA tabla que crece sin límite; el resto es chico,
+      // por eso solo aquí vale narrar columnas (las demás se dejan en select('*')).
+      const TASK_COLS = 'id, created_at_colombia, indicator, indicators, title, start_date, end_date, estimated_time, type, status, validation_close, ext_progress1, ext_progress2, difficulty, strategic_value, expected_delivery, responsible, comments, progress_percent, subtasks, dependent_task, aporte_snapshot, finalized_at, dimension_values, kr_id, sprint_id, custom_fields, updated_at, closed_at, last_modified_by';
       const q = (table) => pid ? supabase.from(table).select('*').eq('project_id', pid) : supabase.from(table).select('*');
+      const qTasks = () => pid ? supabase.from('tasks').select(TASK_COLS).eq('project_id', pid) : supabase.from('tasks').select(TASK_COLS);
       const [
         { data: tasksData },
         { data: partsData },
@@ -56,7 +64,7 @@ export function useProjectData({ activeUser, setActiveUser }) {
         { data: sprintsData },
         { data: fieldDefsData, error: fieldDefsErr },
       ] = await Promise.all([
-        q('tasks').order('id'),
+        qTasks().order('id'),
         q('participants').order('id'),
         q('indicators').order('id'),
         pid ? supabase.from('task_types').select('*').eq('project_id', pid).order('name', { ascending: true }) : supabase.from('task_types').select('*').order('name', { ascending: true }),

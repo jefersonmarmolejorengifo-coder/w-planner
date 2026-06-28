@@ -287,6 +287,14 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 
 > Esta sección NO es sobrescrita por SuperAuditor.
 
+### Sprint 40 — optimización de carga del tablero: select de columnas en tasks (2026-06-27)
+
+**Quick-win de egress/carga `[lead]` ✅:** `loadAllForProject` (`src/hooks/useProjectData.js`) traía `tasks` con `select('*')`. Se narró a las **30 columnas exactas que lee `dbToTask`** (omite legacy `inserted_at`/`subtasks_done`). Medido sobre el demo (325 tareas, 182 kB): ahorro hoy **~4%** (las columnas pesadas —comments 27 kB, custom_fields 20 kB, subtasks 16 kB, dimension_values 13 kB— SÍ se usan y se mantienen). El valor real es **guardrail**: una columna pesada futura (embedding/historial JSONB) ya no se descargaría para todos en cada apertura sin querer. Solo se narró `tasks` (única tabla que crece sin límite; el resto es chico y se deja en `select('*')` para no auditar ~20 consumidores). El índice `tasks_project_id_idx` ya existía → la query ya era rápida.
+- **Bug latente corregido de paso:** `PresentationCard.jsx:14` leía `inserted_at`/`created_at_colombia` pero los objetos de `dbToTask` exponen `createdAt` → el badge "días de cierre" nunca se mostraba. Ahora prioriza `task.createdAt` (con fallbacks snake_case).
+- Verificado: smoke test de las 30 columnas contra la BD real + `vitest` 56/56 ✅ + build ✅ + lint EXIT=0. Sin migración. Ver [[project_scalability_capacity]].
+
+> Lever grande NO hecho (no es quick-win seguro): cargar columnas pesadas (`comments`/`custom_fields`) solo al abrir la tarjeta, no en el tablero — cambia comportamiento y exige auditar ~20 consumidores. Tarea planeada aparte.
+
 ### Sprint 39 — descomposición arquitectónica, paso B: pantallas del monolito (2026-06-27)
 
 **Pista B `[frontend]` ✅:** se extrajeron las pantallas inline de `src/ProductivityPlus.jsx` (verbatim, prop-driven): `AuthScreen`/`UserSelectScreen`/`IntroScreen`/`ProjectLandingScreen` → `src/screens/`; `PlansLauncher` → `src/features/billing/`; `BoardSummaryPill` (+`ReportViewerDialog`) → `src/features/board/`; helper `joinProjectByCode` → `src/lib/joinProject.js`. **`ProductivityPlus.jsx`: 2470 → 1151 líneas (−53%)** — `App` queda como orquestador (auth/UI + render) + `TourMenu`/`BillingReturnOverlay`. Behavior-preserving. `vitest` 56/56 ✅, build ✅. Sin errores de lint NUEVOS (los 2 `set-state-in-effect` de BoardSummaryPill/ProjectLandingScreen son deuda preexistente que se movió de archivo; A28 sigue como mejora menor). Sin migración.

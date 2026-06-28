@@ -11,7 +11,9 @@ export function PresentationCard({ task, taskFieldDefs, tasks, colorByStatus, is
 
   // Tiempo de cierre real cuando aplique
   const closedAt = task.closed_at || task.closedAt;
-  const createdAt = task.inserted_at || task.insertedAt || task.created_at_colombia;
+  // dbToTask expone la fecha de creación como `createdAt`; se prioriza esa. Los
+  // fallbacks snake_case cubren el caso de recibir una fila cruda de la BD.
+  const createdAt = task.createdAt || task.created_at_colombia || task.inserted_at || task.insertedAt;
   const diasCierre = (closedAt && createdAt)
     ? Math.max(1, Math.round((new Date(closedAt) - new Date(createdAt)) / 86400000))
     : null;

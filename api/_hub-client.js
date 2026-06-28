@@ -22,7 +22,11 @@ import crypto from "node:crypto";
 
 /**
  * Lee y valida las tres variables de entorno requeridas para el hub.
- * Lanza Error con lista de claves faltantes para facilitar el diagnóstico.
+ *
+ * El mensaje del Error propagado es genérico para no exponer nombres de variables
+ * en logs externos (ej. dashboard de MP, Sentry público). El diagnóstico detallado
+ * se emite solo con console.warn, que queda en logs server-side de Vercel.
+ *
  * @returns {{ url: string, secret: string, slug: string }}
  */
 function getConfig() {
@@ -35,9 +39,9 @@ function getConfig() {
   );
 
   if (missing.length > 0) {
-    throw new Error(
-      `[hub-webhook-client] Faltan variables de entorno: ${missing.join(", ")}`,
-    );
+    // Solo en logs server-side; el nombre de las variables no sale al exterior.
+    console.warn("[hub-webhook-client] Variables de entorno faltantes:", missing.join(", "));
+    throw new Error("[hub-webhook-client] Configuración del Hub incompleta");
   }
 
   return { url, secret, slug };

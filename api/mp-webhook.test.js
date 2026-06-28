@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import crypto from 'node:crypto';
-import { verifyMpSignature, mapStatus, parseExternalReference } from './mp-webhook.js';
+import { verifyMpSignature, mapStatus, parseExternalReference, calcularMontosHub, esEmailValidoParaHub } from './mp-webhook.js';
 
 // Regex de validación de dataId (#4) — extraída del handler para testear la
 // lógica sin levantar el servidor completo.
@@ -90,6 +90,119 @@ describe('isValidDataId (sanitización de data.id del webhook)', () => {
     expect(isValidDataId('123%2F456')).toBe(false); // %2F = /
     expect(isValidDataId('123 456')).toBe(false);   // espacio
     expect(isValidDataId('')).toBe(false);
+  });
+});
+
+// ── calcularMontosHub ─────────────────────────────────────────────────────────
+// Cubre los tres fixes del PR anti-422:
+//   (a) montos decimales de MP → se envían redondeados al hub
+//   (b) monto bruto <= 0 → retorna null (guard M-2 de Jefer)
+//   (c) monto neto <= 0 → retorna null (guard anti-422 de neto)
+//   (d) pago sin email → responsabilidad del caller; calcularMontosHub no lo recibe
+//       pero el test del handler (integración) verificaría el warn. Aquí testeamos
+//       solo la lógica de montos que es la función pura exportada.
+describe('calcularMontosHub (normalización de montos para el Hub)', () => {
+  it('redondea monto bruto decimal y fee decimal → enteros; devuelve neto correcto', () => {
+    // MP puede devolver p. ej. 29900.5 COP con fee 897.015 → Hub rechazaría 422
+    const result = calcularMontosHub(29900.5, [{ amount: 897.015 }]);
+    expect(result).not.toBeNull();
+    expect(result.montoBase).toBe(29901);   // Math.round(29900.5)
+    expect(result.feeMp).toBe(897);         // Math.round(897.015)
+    expect(result.montoNeto).toBe(29004);   // 29901 - 897
+    // Verificar que todos son enteros (Hub exige z.number().int())
+    expect(Number.isInteger(result.montoBase)).toBe(true);
+    expect(Number.isInteger(result.feeMp)).toBe(true);
+    expect(Number.isInteger(result.montoNeto)).toBe(true);
+  });
+
+  it('redondea hacia arriba en .5 exacto (comportamiento de Math.round)', () => {
+    const result = calcularMontosHub(29900.5, null);
+    expect(result.montoBase).toBe(29901);
+    expect(result.feeMp).toBe(0);
+    expect(result.montoNeto).toBe(29901);
+  });
+
+  it('acepta fee_details ausente (null) → feeMp 0, neto igual al bruto', () => {
+    const result = calcularMontosHub(15000, null);
+    expect(result).toEqual({ montoBase: 15000, feeMp: 0, montoNeto: 15000 });
+  });
+
+  it('acepta fee_details vacío ([]) → feeMp 0', () => {
+    const result = calcularMontosHub(15000, []);
+    expect(result).toEqual({ montoBase: 15000, feeMp: 0, montoNeto: 15000 });
+  });
+
+  it('suma múltiples entradas de fee_details y redondea el total', () => {
+    // 897.5 + 100.8 = 998.3 → Math.round = 998
+    const result = calcularMontosHub(30000, [{ amount: 897.5 }, { amount: 100.8 }]);
+    expect(result.feeMp).toBe(998);
+    expect(result.montoNeto).toBe(29002);
+  });
+
+  it('guard M-2: retorna null cuando monto bruto es 0 (mantiene lógica de Jefer)', () => {
+    expect(calcularMontosHub(0, null)).toBeNull();
+    expect(calcularMontosHub(0.4, null)).toBeNull(); // Math.round(0.4) = 0 → null
+  });
+
+  it('guard M-2: retorna null cuando monto bruto es negativo', () => {
+    expect(calcularMontosHub(-100, null)).toBeNull();
+  });
+
+  it('guard M-2: retorna null cuando transaction_amount es null o undefined', () => {
+    expect(calcularMontosHub(null, null)).toBeNull();
+    expect(calcularMontosHub(undefined, null)).toBeNull();
+  });
+
+  it('guard neto <= 0: retorna null cuando fee supera el monto bruto (caso extremo MP)', () => {
+    // MP podría reportar un fee de ajuste mayor al monto en devoluciones parciales
+    expect(calcularMontosHub(1000, [{ amount: 1000 }])).toBeNull(); // neto = 0
+    expect(calcularMontosHub(1000, [{ amount: 1500 }])).toBeNull(); // neto = -500
+  });
+
+  it('acepta entradas ya enteras sin alterar los valores', () => {
+    const result = calcularMontosHub(29900, [{ amount: 897 }]);
+    expect(result).toEqual({ montoBase: 29900, feeMp: 897, montoNeto: 29003 });
+  });
+
+  it('ignora entradas de fee_details con amount ausente o 0', () => {
+    const result = calcularMontosHub(10000, [{ amount: 0 }, { amount: null }, { amount: 500 }]);
+    expect(result.feeMp).toBe(500);
+    expect(result.montoNeto).toBe(9500);
+  });
+});
+
+// ── esEmailValidoParaHub ──────────────────────────────────────────────────────
+// Cubre el hallazgo F-01 del gate de security: emails malformados que pasaban
+// el guard anterior (!payerEmail) pero el Hub rechazaba con 422 igual.
+describe('esEmailValidoParaHub (validación de formato de email antes de encolar)', () => {
+  it('acepta emails con formato válido', () => {
+    expect(esEmailValidoParaHub('usuario@ejemplo.com')).toBe(true);
+    expect(esEmailValidoParaHub('a@b.com')).toBe(true);
+    expect(esEmailValidoParaHub('user+tag@sub.dominio.co')).toBe(true);
+  });
+
+  it('rechaza cadena vacía', () => {
+    expect(esEmailValidoParaHub('')).toBe(false);
+  });
+
+  it('rechaza email sin @ (F-01: causaba 422 en el Hub)', () => {
+    expect(esEmailValidoParaHub('invalido')).toBe(false);
+    expect(esEmailValidoParaHub('sinArroba.com')).toBe(false);
+  });
+
+  it('rechaza email sin punto en el dominio (F-01: causaba 422 en el Hub)', () => {
+    expect(esEmailValidoParaHub('a@b')).toBe(false);
+    expect(esEmailValidoParaHub('usuario@dominio')).toBe(false);
+  });
+
+  it('rechaza null y undefined', () => {
+    expect(esEmailValidoParaHub(null)).toBe(false);
+    expect(esEmailValidoParaHub(undefined)).toBe(false);
+  });
+
+  it('rechaza tipos no-string (número, objeto)', () => {
+    expect(esEmailValidoParaHub(123)).toBe(false);
+    expect(esEmailValidoParaHub({})).toBe(false);
   });
 });
 

@@ -66,13 +66,17 @@ export function useReferralCapture() {
       const params = new URLSearchParams(window.location.search);
       const refParam = params.get("ref");
 
-      if (!refParam || !REF_REGEX.test(refParam)) return;
+      // Normalizar a mayúsculas: el código se valida con REF_REGEX (^[A-Z0-9]{8}$).
+      // Si el afiliado comparte el link con el código en minúsculas (?ref=pfwag84q),
+      // sin normalizar la validación fallaría y el referido se perdería.
+      const normalized = refParam ? refParam.trim().toUpperCase() : null;
+      if (!normalized || !REF_REGEX.test(normalized)) return;
 
       // Lock-in: solo guardar si no hay código previo válido
       const existing = getReferralCode();
       if (!existing) {
         const payload = {
-          code: refParam,
+          code: normalized,
           captured_at: new Date().toISOString(),
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));

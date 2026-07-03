@@ -8,7 +8,7 @@ import { ALL_PLANS, PLAN_CONTACT_EMAIL } from "../../plans";
 //   - onSubscribe(tier): dispara el checkout de Mercado Pago (planes 'buy').
 //   - ctaType 'contact' (Enterprise) abre un correo a PLAN_CONTACT_EMAIL.
 // Extraído del monolito (H-002) y cargado con React.lazy para sacarlo del bundle inicial.
-export default function PlanSelectionModal({ currentTier, busy, referralCode, onSubscribe, onClose }) {
+export default function PlanSelectionModal({ currentTier, busy, referralCode, onSubscribe, onClose, wompiOn = false }) {
   const fmt = (n) => n.toLocaleString("es-CO");
   const titleId = useId();
   const dialogRef = useDialog(onClose);
@@ -31,6 +31,10 @@ export default function PlanSelectionModal({ currentTier, busy, referralCode, on
         style={{ "--accent": plan.accent }}
         disabled={busy}
         onClick={() => onSubscribe(plan.tier)}
+        // ui-ux #3: el texto visible del botón no incluye el precio; los lectores de
+        // pantalla necesitan el aria-label completo para que el usuario sepa qué
+        // está eligiendo y cuánto cuesta sin tener que recorrer toda la tarjeta.
+        aria-label={`Elegir ${plan.displayName} — COP $${fmt(plan.priceCop)} al mes`}
       >
         {busy ? "Redirigiendo…" : `Elegir ${plan.displayName}`}
       </button>
@@ -145,7 +149,12 @@ export default function PlanSelectionModal({ currentTier, busy, referralCode, on
         <h2 id={titleId} className="pp-plans-title">Elige tu plan</h2>
         <p className="pp-plans-sub">
           Desbloquea reportes con IA, pulso del equipo y analítica avanzada.
-          Cobro mensual en COP vía Mercado Pago. Cancela cuando quieras.
+          {wompiOn
+            // ui-ux #1: la rama Wompi ahora incluye "Cancela cuando quieras" con la
+            // misma transparencia que tenía la rama MercadoPago. Ambas cobran
+            // suscripción recurrente y el usuario merece saberlo en ambos casos.
+            ? "Cobro mensual recurrente en COP. Cancela cuando quieras desde tu panel. Al elegir un plan serás redirigido al checkout seguro de panel.softatumedida.com."
+            : "Cobro mensual en COP vía Mercado Pago. Cancela cuando quieras."}
         </p>
 
         {referralCode && (

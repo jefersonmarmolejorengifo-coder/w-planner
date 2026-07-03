@@ -221,18 +221,32 @@ function TourMenu({ onPick }) {
 
 // PlansLauncher vive ahora en ./features/billing/PlansLauncher (importado arriba). H-002 fase E.
 
-// Overlay de retorno de pago de Mercado Pago. MP redirige al usuario a
-// `/?billing=return` (ver api/mp-subscribe.js). El webhook que activa la
+// Overlay de retorno de pago. Tanto Wompi (/?billing=return&via=wompi) como
+// MercadoPago (/?billing=return) redirigen aquí. El webhook que activa la
 // suscripción puede tardar unos segundos, así que sondeamos `user_ia_capacity`
 // hasta que el tier deje de ser 'free' con status 'active'. Se monta una sola
 // vez al tope de App y se autogestiona desde la URL.
+//
+// ui-ux #2 / seguridad: el param `via` SOLO se usa para elegir un literal de
+// display entre la lista blanca fija VIA_ALLOWLIST. Nunca se interpola en el DOM
+// ni influye en ninguna decisión de lógica o autorización.
+const VIA_ALLOWLIST = ['wompi', 'mp'];
+function getProcessorLabel(rawVia) {
+  const via = VIA_ALLOWLIST.includes(rawVia) ? rawVia : null;
+  if (via === 'wompi') return 'Wompi · Soft a tu Medida';
+  return 'Mercado Pago'; // default: MP o valor desconocido/ausente
+}
+
 function BillingReturnOverlay() {
   const [state, setState] = useState("hidden"); // hidden | checking | success | pending
   const [planName, setPlanName] = useState("");
+  const [processorLabel, setProcessorLabel] = useState("Mercado Pago");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("billing") !== "return") return;
+    // ui-ux #2: leemos `via` y lo validamos contra VIA_ALLOWLIST antes de usarlo.
+    setProcessorLabel(getProcessorLabel(params.get("via")));
     setState("checking");
 
     let cancelled = false;
@@ -282,8 +296,10 @@ function BillingReturnOverlay() {
       }}>
         {state === "checking" && (
           <>
+            {/* ui-ux #2: mostramos la marca del procesador leída de la lista blanca,
+                nunca el valor crudo del query param. */}
             <div style={{ fontSize: 13, letterSpacing: 4, textTransform: "uppercase", color: "rgba(255,255,255,0.4)", marginBottom: 18 }}>
-              Mercado Pago
+              {processorLabel}
             </div>
             <div style={{ fontSize: 19, fontWeight: 700, marginBottom: 10 }}>Confirmando tu pago…</div>
             <div style={{ width: 200, height: 2, background: "rgba(255,255,255,0.1)", borderRadius: 1, overflow: "hidden", margin: "20px auto 0" }}>
@@ -314,8 +330,10 @@ function BillingReturnOverlay() {
           <>
             <div style={{ fontSize: 48, marginBottom: 8 }}>⏳</div>
             <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>Tu pago se está procesando</div>
+            {/* ui-ux #2: también en el estado pending usamos processorLabel, que viene
+                de la lista blanca, para referir correctamente al procesador. */}
             <div style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
-              Mercado Pago aún no confirma el cobro. Suele reflejarse en unos minutos,
+              {processorLabel} aún no confirma el cobro. Suele reflejarse en unos minutos,
               <strong style={{ color: "#fff" }}> no necesitas pagar de nuevo</strong>. Tu plan aparecerá en Configuración cuando se confirme.
             </div>
             <button onClick={close} style={{

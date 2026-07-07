@@ -51,13 +51,24 @@
   }
 }
 
+/* Fondo oscuro del DOCUMENTO. La app abre en pantallas oscuras (intro, login,
+   selección de tablero) y su "chrome" es oscuro; las vistas de tablero pintan su
+   propio fondo claro encima (min-height:100vh), así que esto no las afecta. Evita
+   dos flashes blancos: (1) el rebote elástico del scroll (overscroll) que asomaba
+   el fondo claro en los bordes, y (2) el instante antes de que React monte. */
+html {
+  background: #0d0d1a;
+}
+
 body {
   margin: 0;
   padding: 0;
-  background: var(--color-background-tertiary);
+  background: #0d0d1a;
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-size: 14px;
+  /* Sin rebote elástico al llegar al borde del scroll (no asoma el documento). */
+  overscroll-behavior: none;
 }
 
 #root {

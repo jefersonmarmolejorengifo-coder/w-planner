@@ -178,6 +178,94 @@ export const comparisons = [
     ],
     related: ['reportes-con-ia', 'okrs-y-metricas'],
   },
+  {
+    slug: 'asana',
+    name: 'Asana',
+    themGoodAt: 'gestión de trabajo pulida con muchas vistas',
+    seoTitle: 'Productivity-Plus vs Asana | Alternativa en español con reportes de IA',
+    seoDesc:
+      'Asana es un gestor de trabajo pulido y completo. Productivity-Plus es la alternativa enfocada en liderar equipos, con reportes ejecutivos de IA y evolución del equipo, en español y con precio simple.',
+    intro:
+      'Asana es un gestor de trabajo pulido y maduro: muchas vistas (lista, tablero, timeline, calendario), automatizaciones y portafolios. Productivity-Plus es la alternativa cuando tu foco no es modelar el trabajo de toda la empresa, sino liderar equipos por proyectos, con reportes ejecutivos que la IA arma sobre riesgos y evolución del equipo, en español y con un precio más simple. Asana es un gran todoterreno; nosotros vamos a fondo en el liderazgo del equipo.',
+    chooseThem: [
+      'Necesitas un gestor pulido con varias vistas y automatizaciones maduras.',
+      'Manejas portafolios de muchos proyectos entre varias áreas.',
+      'El precio por asiento en dólares no es una restricción.',
+    ],
+    chooseUs: [
+      'Tu foco es liderar equipos por proyectos, con reportes de IA sobre riesgos y aporte.',
+      'Quieres sprints, OKRs y métricas sin tener que subir a los planes más caros.',
+      'Te importa la evolución del equipo: retros, pulso y reconocimiento.',
+      'Prefieres español nativo, precio en pesos y un plan gratis para empezar.',
+    ],
+    table: [
+      { f: 'Reportes ejecutivos con IA', them: 'IA general (Asana AI)', us: 'Sí, enfocados en riesgos y equipo' },
+      { f: 'Tablero Kanban', them: 'Sí', us: 'Sí' },
+      { f: 'Sprints / Scrum nativo', them: 'No nativo (se adapta)', us: 'Sí, nativo' },
+      { f: 'Gantt (timeline) y dependencias', them: 'En planes superiores', us: 'Sí, nativo' },
+      { f: 'OKRs y métricas', them: 'Goals (planes superiores)', us: 'Sí, nativo' },
+      { f: 'Retros y pulso del equipo', them: 'No', us: 'Sí' },
+      { f: 'Chat de IA sobre tu equipo', them: 'IA general', us: 'Sí (plan Power)' },
+      { f: 'Español nativo', them: 'Interfaz traducida', us: 'Sí, todo en español' },
+      { f: 'Moneda', them: 'Dólares por asiento', us: 'Pesos (COP), por plan' },
+      { f: 'Curva de aprendizaje', them: 'Media', us: 'Baja' },
+    ],
+    faqs: [
+      {
+        q: '¿Es Productivity-Plus una buena alternativa a Asana?',
+        a: 'Sí, si buscas liderar proyectos y equipos con reportes de IA sin pagar los planes más altos y en español. Asana es un gestor muy completo y pulido; Productivity-Plus está más enfocado en la lectura del proyecto y del equipo (riesgos, aporte, evolución), con sprints y OKRs listos de fábrica.',
+      },
+      {
+        q: '¿En qué se diferencian los reportes?',
+        a: 'Asana ofrece dashboards y funciones de IA general. Productivity-Plus genera el informe ejecutivo (de sprint, semanal, mensual y evolutivo) enfocado en tareas atascadas, riesgos y aporte por persona, listo para leer y decidir, sin que armes el tablero de métricas tú.',
+      },
+    ],
+    related: ['reportes-con-ia', 'okrs-y-metricas'],
+  },
+  {
+    slug: 'notion',
+    name: 'Notion',
+    themGoodAt: 'documentos, wiki y bases de datos flexibles',
+    seoTitle: 'Productivity-Plus vs Notion | Gestión de proyectos que ya viene lista',
+    seoDesc:
+      'Notion es imbatible para docs y wikis, pero el sistema de proyectos lo construyes tú. Productivity-Plus trae sprints, métricas y reportes de IA listos de fábrica, en español.',
+    intro:
+      'Notion es imbatible como espacio flexible: documentos, wikis y bases de datos donde puedes construir casi cualquier cosa, incluido un tablero de proyectos. Productivity-Plus es la alternativa cuando no quieres construir tu sistema de gestión desde cero: los sprints, las métricas, los OKRs y los reportes con IA ya vienen listos y funcionando, en español. Notion es un lienzo en blanco; nosotros somos la herramienta de gestión ya armada.',
+    chooseThem: [
+      'Necesitas documentos, wiki y base de conocimiento además de tareas, todo junto.',
+      'Te gusta construir tu propio sistema a medida y tienes tiempo para configurarlo.',
+      'Valoras la flexibilidad total por encima de que "ya venga hecho".',
+    ],
+    chooseUs: [
+      'Quieres una herramienta de gestión que ya venga lista, sin armarla tú.',
+      'Necesitas reportes de IA sobre riesgos y evolución del equipo, no notas.',
+      'Buscas sprints, métricas y OKRs que funcionen de fábrica, no plantillas por montar.',
+      'Prefieres español nativo, precio en pesos y un plan gratis.',
+    ],
+    table: [
+      { f: 'Reportes ejecutivos con IA', them: 'Notion AI (escritura general)', us: 'Sí, sobre tu tablero' },
+      { f: 'Documentos y wiki', them: 'Sí (su fuerte)', us: 'No es su foco' },
+      { f: 'Tablero Kanban', them: 'Sí (lo construyes)', us: 'Sí, listo' },
+      { f: 'Sprints / Scrum nativo', them: 'No (lo armas tú)', us: 'Sí, nativo' },
+      { f: 'Gantt y dependencias', them: 'Vista timeline, sin dependencias reales', us: 'Sí, con dependencias' },
+      { f: 'OKRs y métricas', them: 'Manual (lo construyes)', us: 'Sí, nativo' },
+      { f: 'Retros y pulso del equipo', them: 'No', us: 'Sí' },
+      { f: 'Chat de IA sobre tu equipo', them: 'Notion AI (docs)', us: 'Sí (plan Power)' },
+      { f: 'Español nativo', them: 'Interfaz traducida', us: 'Sí, todo en español' },
+      { f: 'Moneda', them: 'Dólares por asiento', us: 'Pesos (COP), por plan' },
+    ],
+    faqs: [
+      {
+        q: '¿Sirve Productivity-Plus como alternativa a Notion para proyectos?',
+        a: 'Sí, si quieres gestión de proyectos que funcione de una en vez de construirla. Notion es excelente para documentos y wikis, pero el sistema de sprints, métricas y reportes lo montas tú. Productivity-Plus ya trae todo eso listo, con reportes de IA y en español.',
+      },
+      {
+        q: '¿Notion o Productivity-Plus?',
+        a: 'Para documentación, wiki y un tracking flexible a tu medida, Notion. Para liderar proyectos y equipos con sprints, métricas, reportes de IA y evolución del equipo sin armarlo tú, Productivity-Plus. Muchos equipos usan Notion para docs y una herramienta de gestión aparte para lo demás.',
+      },
+    ],
+    related: ['reportes-con-ia', 'tableros-scrum-kanban'],
+  },
 ];
 
 export function getComparison(slug) {

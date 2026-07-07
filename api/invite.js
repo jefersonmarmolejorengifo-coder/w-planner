@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     // Rate limit: 30 invitaciones/hora por usuario (H-010).
     await enforceRateLimit(supabase, { key: `invite:${user.id}`, max: 30, windowSeconds: 3600 });
 
-    const inviteUrl = `${getAppBaseUrl()}?join=${encodeURIComponent(project.invite_code)}`;
+    const inviteUrl = `${getAppBaseUrl()}/app?join=${encodeURIComponent(project.invite_code)}`;
     const safeInviteUrl = escapeHtml(inviteUrl);
     const projectNameText = project.name || "Productivity-Plus";
     const projectName = escapeHtml(projectNameText);

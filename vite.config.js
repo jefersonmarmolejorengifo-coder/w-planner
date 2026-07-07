@@ -4,7 +4,14 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // La app React (privada, CSR) se sirve bajo /app; el marketing (Astro) toma la
+  // raíz. base fija las URLs de los assets a /app/assets/*. La salida va a
+  // web/public/app para que el build de Astro la copie a web/dist/app (salida
+  // combinada de un solo deploy). Ver vercel.json (buildCommand + rewrites).
+  base: '/app/',
   build: {
+    outDir: 'web/public/app',
+    emptyOutDir: true,
     // Rolldown (bundler nativo de Vite 8) expone advancedChunks como reemplazo
     // de manualChunks (deprecated en Rolldown). Usamos rolldownOptions.output
     // para fijar vendor chunks cacheables independientes del hash del index.

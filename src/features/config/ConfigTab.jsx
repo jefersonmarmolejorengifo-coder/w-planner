@@ -241,7 +241,7 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
                   {project.invite_code}
                 </div>
                 <button
-                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}?join=${project.invite_code}`); setCopiedCode(true); setTimeout(() => setCopiedCode(false), 2000); }}
+                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/app?join=${project.invite_code}`); setCopiedCode(true); setTimeout(() => setCopiedCode(false), 2000); }}
                   style={{ background: copiedCode ? "#e8f8ee" : "linear-gradient(135deg,#542c9c,#6e3ebf)", color: copiedCode ? "#27ae60" : "#fff", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}
                 >
                   {copiedCode ? "✓ Copiado" : "Copiar link"}

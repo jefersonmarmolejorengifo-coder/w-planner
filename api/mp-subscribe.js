@@ -114,7 +114,7 @@ export default async function handler(req, res) {
     // Vuelve a la raíz de la SPA con un flag que el frontend detecta para
     // mostrar la confirmación del pago (no hay router, /billing/return no existe
     // como ruta). MP añade sus propios params (?preapproval_id=...&...) con '&'.
-    const backUrl = `${baseUrl}/?billing=return`;
+    const backUrl = `${baseUrl}/app?billing=return`;
 
     // Cobro recurrente inline (auto_recurring) con precio y frecuencia del
     // catálogo en código. No usamos preapproval_plan_id porque los planes no se

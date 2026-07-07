@@ -38,3 +38,6 @@ dist-ssr
 
 # Astro cache (sitio web/)
 .astro
+
+# Salida del build de la app dentro del sitio Astro (vite base=/app)
+web/public/app

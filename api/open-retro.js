@@ -122,7 +122,7 @@ export default async function handler(req, res) {
     if (emails.length > 0) {
       try {
         const { apiKey, from } = getResendConfig();
-        const appUrl = getAppBaseUrl();
+        const appUrl = `${getAppBaseUrl()}/app`;
         const closesAtLocal = new Date(closesAt).toLocaleDateString("es-CO", {
           day: "numeric", month: "long", year: "numeric",
         });

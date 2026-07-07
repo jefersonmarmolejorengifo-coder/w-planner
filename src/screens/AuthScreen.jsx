@@ -24,7 +24,7 @@ export default function AuthScreen() {
       email: mail,
       options: {
         // Vuelve a esta misma URL (conserva ?join=... para invitaciones).
-        emailRedirectTo: window.location.origin + window.location.search,
+        emailRedirectTo: window.location.origin + '/app' + window.location.search,
         shouldCreateUser: true,
       },
     });

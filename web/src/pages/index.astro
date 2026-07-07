@@ -1,0 +1,160 @@
+---
+import Base from '../layouts/Base.astro';
+import { features } from '../data/features.js';
+import { plans, formatCOP } from '../data/plans.js';
+import { faqs } from '../data/faq.js';
+import { APP_URL } from '../data/site.js';
+import { graph, org, website, softwareApp } from '../lib/schema.js';
+
+const title = 'Productivity-Plus | Gestión de proyectos con IA para equipos';
+const description =
+  'Planea proyectos, sprints y OKRs, y genera reportes ejecutivos con IA. El software de gestión de proyectos para líderes de equipo y PMs en Colombia. Empieza gratis.';
+const jsonld = graph(org, website, softwareApp);
+const homeFaqs = faqs.slice(0, 4);
+---
+<Base title={title} description={description} path="/" jsonld={jsonld}>
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container">
+        <span class="eyebrow">Software de gestión de proyectos con IA</span>
+        <h1>Lidera el proyecto. Deja que la IA arme los <span class="grad-text">reportes</span>.</h1>
+        <p class="lead">
+          Productivity-Plus reúne tableros Scrum y Kanban, Gantt, OKRs y sprints en un
+          solo lugar, y genera solo los informes ejecutivos que hoy haces a mano. En
+          español, para equipos en Colombia.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href={APP_URL}>Empieza gratis</a>
+          <a class="btn btn-ghost" href="/funciones">Ver funciones</a>
+        </div>
+        <p class="hero-note">Plan gratis sin tarjeta. Precios en pesos colombianos.</p>
+      </div>
+    </section>
+
+    <!-- Prueba social / posicionamiento -->
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="grid grid-3">
+          <div class="card">
+            <div class="stat grad-text">4 reportes</div>
+            <p class="small mt-0">Scrum, semanal, mensual y evolutivo, escritos por IA a partir de tu tablero.</p>
+          </div>
+          <div class="card">
+            <div class="stat grad-text">Todo en uno</div>
+            <p class="small mt-0">Kanban, Scrum, Gantt, OKRs, dependencias y métricas sin saltar de herramienta.</p>
+          </div>
+          <div class="card">
+            <div class="stat grad-text">En español</div>
+            <p class="small mt-0">Hecho para equipos en Colombia, con precios en COP y soporte local.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Funciones -->
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Funciones</span>
+          <h2>Todo lo que un líder necesita para entregar</h2>
+          <p>Un solo lugar para planear, ejecutar y reportar. Sin cinco pestañas abiertas.</p>
+        </div>
+        <div class="grid grid-2">
+          {features.map((f) => (
+            <a class="card" href={`/funciones/${f.slug}`}>
+              <div style="font-size: 1.9rem; margin-bottom: 8px;">{f.icon}</div>
+              <h3>{f.title}</h3>
+              <p class="small mt-0">{f.short}</p>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- Diferenciador: reportes con IA -->
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="card" style="padding: clamp(28px, 5vw, 52px);">
+          <div class="grid grid-2" style="align-items: center; gap: 32px;">
+            <div>
+              <span class="eyebrow">El diferenciador</span>
+              <h2>La IA lee tu tablero y escribe el informe</h2>
+              <p>
+                Armar el reporte de la semana suele robar un par de horas a quien lidera.
+                Productivity-Plus lo genera solo: qué está atascado, qué riesgos aparecen,
+                cómo priorizar el backlog y cuánto aportó cada persona.
+              </p>
+              <a class="btn btn-ghost" href="/funciones/reportes-con-ia">Cómo funcionan los reportes</a>
+            </div>
+            <ul class="checks">
+              <li><b>Reporte Scrum:</b> caza tareas atascadas y riesgos del sprint.</li>
+              <li><b>Reporte semanal:</b> prioriza el backlog y mide el aporte por persona.</li>
+              <li><b>Análisis mensual:</b> una lectura privada de cómo va el equipo.</li>
+              <li><b>Reporte evolutivo:</b> mide crecimiento y reconoce a tu gente.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Precios teaser -->
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Precios</span>
+          <h2>Empieza gratis, crece cuando lo necesites</h2>
+          <p>Del primer tablero al chat de IA sobre los datos de tu equipo. Precios en COP, sin sorpresas.</p>
+        </div>
+        <div class="price-grid">
+          {plans.map((p) => (
+            <div class={`card plan${p.popular ? ' popular' : ''}`}>
+              {p.popular && <span class="badge" style="align-self: flex-start; margin-bottom: 8px;">Más popular</span>}
+              <h3 class="mt-0">{p.name}</h3>
+              <div class="price">{p.price === 0 ? 'Gratis' : formatCOP(p.price)}</div>
+              <div class="tagline">{p.price === 0 ? 'Para empezar' : 'por mes'}</div>
+            </div>
+          ))}
+        </div>
+        <div class="center" style="margin-top: 28px;">
+          <a class="btn btn-primary" href="/precios">Ver planes en detalle</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ teaser -->
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Preguntas</span>
+          <h2>Lo que más nos preguntan</h2>
+        </div>
+        <div class="faq">
+          {homeFaqs.map((f) => (
+            <details>
+              <summary>{f.q}</summary>
+              <p>{f.a}</p>
+            </details>
+          ))}
+        </div>
+        <div class="center" style="margin-top: 24px;">
+          <a class="btn btn-ghost" href="/preguntas-frecuentes">Ver todas las preguntas</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA final -->
+    <section>
+      <div class="container">
+        <div class="cta-band">
+          <h2>Empieza a liderar con datos, no con corazonadas</h2>
+          <p class="mx-auto" style="max-width: 46ch;">
+            Crea tu cuenta gratis, arma tu primer tablero y deja que la IA te muestre lo que
+            de verdad importa esta semana.
+          </p>
+          <a class="btn btn-primary" href={APP_URL}>Crear cuenta gratis</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

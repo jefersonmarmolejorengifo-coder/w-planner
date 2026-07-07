@@ -1,0 +1,50 @@
+---
+import Base from '../../layouts/Base.astro';
+import { features } from '../../data/features.js';
+import { APP_URL } from '../../data/site.js';
+import { graph, org, breadcrumb } from '../../lib/schema.js';
+
+const title = 'Funciones de Productivity-Plus | Kanban, Scrum, Gantt, OKRs e IA';
+const description =
+  'Tableros Scrum y Kanban, reportes con IA, OKRs y métricas, Gantt y dependencias. Todo lo que Productivity-Plus ofrece para planear, ejecutar y reportar en un solo lugar.';
+const jsonld = graph(
+  org,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Funciones', path: '/funciones' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/funciones" jsonld={jsonld}>
+  <main>
+    <section class="hero">
+      <div class="container">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Funciones</p>
+        <span class="eyebrow">Funciones</span>
+        <h1>Planea, ejecuta y reporta sin cambiar de herramienta</h1>
+        <p class="lead">
+          Productivity-Plus junta lo que hoy tienes repartido en varias apps: el tablero del
+          día a día, la vista en el tiempo, los objetivos y los informes que la IA arma sola.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="grid grid-2">
+          {features.map((f) => (
+            <a class="card" href={`/funciones/${f.slug}`}>
+              <div style="font-size: 2rem; margin-bottom: 10px;">{f.icon}</div>
+              <h3>{f.title}</h3>
+              <p class="small">{f.answer}</p>
+              <span class="small" style="color: var(--teal); font-weight: 700;">Ver más →</span>
+            </a>
+          ))}
+        </div>
+        <div class="center" style="margin-top: 34px;">
+          <a class="btn btn-primary" href={APP_URL}>Probar gratis</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

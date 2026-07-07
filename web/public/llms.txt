@@ -1,0 +1,35 @@
+# Productivity-Plus
+
+> Software de gestión de proyectos con IA para líderes de equipo y PMs en Colombia.
+> Reúne tableros Scrum y Kanban, Gantt, OKRs, sprints, dependencias y métricas, y
+> genera reportes ejecutivos con IA (Scrum, semanal, mensual y evolutivo) además de
+> un chat de IA sobre los datos del propio equipo. Producto de Soft a Tu Medida.
+
+## Qué es
+
+Productivity-Plus (marca "P+") es un SaaS B2B en español. Está pensado para quien
+lidera uno o varios equipos y necesita ver bloqueos, prioridades y avance sin armar
+informes a mano. Los datos de cada equipo son privados y viven tras autenticación;
+esta descripción y las páginas públicas son la única superficie abierta.
+
+## Funciones principales
+
+- Tableros Scrum y Kanban, vista Gantt y red de tareas.
+- OKRs, sprints, dependencias, subtareas y métricas de avance.
+- Reportes ejecutivos generados con IA: Scrum (caza tareas atascadas y riesgos),
+  semanal (prioriza backlog y mide aporte por persona), mensual y evolutivo.
+- Chat de IA en vivo sobre los datos del equipo (planes superiores).
+- Presencia en tiempo real, retros anónimas y exportación CSV.
+
+## Planes (COP, mensual)
+
+- Gratis: 1 tablero. Scrum y Kanban, OKRs, calculadora de aporte, onboarding guiado.
+- Pro (80.000): 4 tableros, 2 con IA. Reportes Scrum, semanal y análisis mensual.
+- Pro Team (110.000): 9 tableros, 5 con IA. Reportes con IA en todos, visión consolidada.
+- Pro Power (210.000): 14 tableros, 8 con IA. Chat de IA (100 msg/mes) y reporte evolutivo.
+
+## Enlaces
+
+- Sitio: https://productivityplus.softatumedida.com/
+- Empresa: https://softatumedida.com
+- Contacto comercial: ventas@softatumedida.com

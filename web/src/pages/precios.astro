@@ -1,0 +1,73 @@
+---
+import Base from '../layouts/Base.astro';
+import { plans, formatCOP } from '../data/plans.js';
+import { APP_URL } from '../data/site.js';
+import { graph, org, softwareApp, breadcrumb } from '../lib/schema.js';
+
+const title = 'Precios de Productivity-Plus | Planes en pesos colombianos';
+const description =
+  'Planes de Productivity-Plus en COP: Gratis, Pro ($80.000), Pro Team ($110.000) y Pro Power ($210.000) al mes. Más tableros, IA y reportes en cada nivel. Empieza gratis.';
+const jsonld = graph(
+  org,
+  softwareApp,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Precios', path: '/precios' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/precios" jsonld={jsonld}>
+  <main>
+    <section class="hero">
+      <div class="container">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Precios</p>
+        <span class="eyebrow">Precios</span>
+        <h1>Un plan para cada etapa de tu equipo</h1>
+        <p class="lead">
+          Empieza gratis con un tablero. Cuando necesites más tableros o los reportes con IA,
+          subes de plan. Todos los precios están en pesos colombianos, por mes.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="price-grid">
+          {plans.map((p) => (
+            <div class={`card plan${p.popular ? ' popular' : ''}`}>
+              {p.popular && <span class="badge" style="align-self: flex-start; margin-bottom: 10px;">Más popular</span>}
+              <h3 class="mt-0">{p.name}</h3>
+              <div class="price">
+                {p.price === 0 ? 'Gratis' : <>{formatCOP(p.price)}<small> /mes</small></>}
+              </div>
+              <div class="tagline">{p.tagline}</div>
+              <ul class="checks">
+                {p.features.map((feat) => <li>{feat}</li>)}
+              </ul>
+              <a class={`btn ${p.popular ? 'btn-primary' : 'btn-ghost'}`} href={APP_URL} style="width: 100%; justify-content: center;">
+                {p.cta}
+              </a>
+            </div>
+          ))}
+        </div>
+        <p class="center small muted" style="margin-top: 24px;">
+          Los límites de tableros y de IA se aplican por seguridad en el servidor. El plan
+          gratis no pide tarjeta.
+        </p>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="cta-band">
+          <h2>¿No sabes cuál elegir?</h2>
+          <p class="mx-auto" style="max-width: 44ch;">
+            Empieza con el plan gratis y súbete a Pro cuando quieras los reportes con IA.
+            Cambiar de plan toma un minuto.
+          </p>
+          <a class="btn btn-primary" href={APP_URL}>Empezar gratis</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

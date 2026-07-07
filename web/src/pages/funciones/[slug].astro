@@ -1,0 +1,70 @@
+---
+import Base from '../../layouts/Base.astro';
+import { features, getFeature } from '../../data/features.js';
+import { APP_URL } from '../../data/site.js';
+import { graph, org, breadcrumb } from '../../lib/schema.js';
+
+export function getStaticPaths() {
+  return features.map((f) => ({ params: { slug: f.slug } }));
+}
+
+const { slug } = Astro.params;
+const feature = getFeature(slug);
+const others = features.filter((f) => f.slug !== slug);
+
+const jsonld = graph(
+  org,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Funciones', path: '/funciones' },
+    { name: feature.title, path: `/funciones/${feature.slug}` },
+  ]),
+);
+---
+<Base title={feature.seoTitle} description={feature.seoDesc} path={`/funciones/${feature.slug}`} jsonld={jsonld}>
+  <main>
+    <section class="hero">
+      <div class="container" style="max-width: 820px;">
+        <p class="breadcrumb"><a href="/">Inicio</a> / <a href="/funciones">Funciones</a> / {feature.title}</p>
+        <div style="font-size: 2.4rem; margin-bottom: 10px;">{feature.icon}</div>
+        <h1>{feature.title}</h1>
+        <p class="lead" style="max-width: 60ch;">{feature.answer}</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href={APP_URL}>Probar gratis</a>
+          <a class="btn btn-ghost" href="/precios">Ver precios</a>
+        </div>
+      </div>
+    </section>
+
+    <section style="padding-top: 0;">
+      <div class="container" style="max-width: 820px;">
+        {feature.body.map((par) => <p style="font-size: 1.08rem;">{par}</p>)}
+
+        <div class="card" style="margin-top: 26px;">
+          <h3 class="mt-0">Qué incluye</h3>
+          <ul class="checks" style="margin-top: 14px;">
+            {feature.points.map((pt) => <li>{pt}</li>)}
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Sigue explorando</span>
+          <h2>Otras funciones</h2>
+        </div>
+        <div class="grid grid-3">
+          {others.map((f) => (
+            <a class="card" href={`/funciones/${f.slug}`}>
+              <div style="font-size: 1.6rem; margin-bottom: 8px;">{f.icon}</div>
+              <h3>{f.title}</h3>
+              <p class="small mt-0">{f.short}</p>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

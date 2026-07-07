@@ -1,0 +1,15 @@
+---
+import { nav, APP_URL } from '../data/site.js';
+---
+<header class="nav">
+  <div class="container nav-inner">
+    <a href="/" class="logo" aria-label="Productivity-Plus, inicio">
+      <span class="p">P</span><span class="plus">+</span>
+      <small class="hide-sm">Productivity-Plus</small>
+    </a>
+    <nav class="nav-links" aria-label="Principal">
+      {nav.map((item) => <a class="hide-sm" href={item.href}>{item.label}</a>)}
+      <a class="btn btn-primary" href={APP_URL}>Entrar</a>
+    </nav>
+  </div>
+</header>

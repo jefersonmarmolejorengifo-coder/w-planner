@@ -1,0 +1,33 @@
+---
+import { site, nav, APP_URL } from '../data/site.js';
+import { features } from '../data/features.js';
+const year = 2026;
+---
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div style="max-width: 300px;">
+        <a href="/" class="logo"><span class="p">P</span><span class="plus">+</span></a>
+        <p class="small muted" style="margin-top: 12px;">
+          {site.tagline}. Un producto de {site.company}.
+        </p>
+      </div>
+      <div>
+        <h4>Producto</h4>
+        {nav.map((item) => <a href={item.href}>{item.label}</a>)}
+        <a href={APP_URL}>Entrar a la app</a>
+      </div>
+      <div>
+        <h4>Funciones</h4>
+        {features.map((f) => <a href={`/funciones/${f.slug}`}>{f.title}</a>)}
+      </div>
+      <div>
+        <h4>Contacto</h4>
+        <a href={`mailto:${site.salesEmail}`}>{site.salesEmail}</a>
+        <a href={site.companyUrl} rel="noopener">softatumedida.com</a>
+      </div>
+    </div>
+    <hr class="divider" style="margin: 34px 0 20px;" />
+    <p class="small muted mt-0">© {year} {site.company}. Productivity-Plus. Hecho en Colombia.</p>
+  </div>
+</footer>

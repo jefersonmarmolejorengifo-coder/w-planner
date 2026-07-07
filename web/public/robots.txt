@@ -1,0 +1,36 @@
+# robots.txt — Productivity-Plus (productivityplus.softatumedida.com)
+# Permitimos el rastreo del sitio público de marketing y, de forma explícita, a
+# los crawlers de IA: queremos que ChatGPT, Perplexity, Gemini y los AI Overviews
+# puedan leer y CITAR el contenido. La app (/app) es privada y no aporta al índice.
+
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /api/
+
+# ─── Crawlers de motores de respuesta de IA (permitidos) ───
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+Sitemap: https://productivityplus.softatumedida.com/sitemap-index.xml

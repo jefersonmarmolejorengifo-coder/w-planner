@@ -1,0 +1,55 @@
+---
+import Base from '../layouts/Base.astro';
+import { faqs } from '../data/faq.js';
+import { APP_URL } from '../data/site.js';
+import { graph, org, faqPage, breadcrumb } from '../lib/schema.js';
+
+const title = 'Preguntas frecuentes | Productivity-Plus';
+const description =
+  'Qué es Productivity-Plus, para quién es, en qué se diferencia de Trello o Jira, cómo funcionan los reportes con IA, precios en COP y privacidad. Respuestas directas.';
+const jsonld = graph(
+  org,
+  faqPage(faqs),
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Preguntas frecuentes', path: '/preguntas-frecuentes' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/preguntas-frecuentes" jsonld={jsonld}>
+  <main>
+    <section class="hero">
+      <div class="container" style="max-width: 820px;">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Preguntas frecuentes</p>
+        <span class="eyebrow">Preguntas frecuentes</span>
+        <h1>Respuestas directas sobre Productivity-Plus</h1>
+        <p class="lead">Lo esencial para decidir si la herramienta encaja con tu equipo.</p>
+      </div>
+    </section>
+
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="faq">
+          {faqs.map((f) => (
+            <details>
+              <summary>{f.q}</summary>
+              <p>{f.a}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="cta-band">
+          <h2>¿Te quedó otra duda?</h2>
+          <p class="mx-auto" style="max-width: 42ch;">
+            Empieza gratis y pruébalo con tu propio tablero, o escríbenos si necesitas algo puntual.
+          </p>
+          <a class="btn btn-primary" href={APP_URL}>Empezar gratis</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

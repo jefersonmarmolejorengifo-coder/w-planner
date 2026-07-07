@@ -235,6 +235,14 @@ section { padding: clamp(56px, 9vw, 104px) 0; }
 .breadcrumb { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 18px; }
 .breadcrumb a:hover { color: var(--text); }
 
+/* ---- Tabla comparativa ---- */
+.cmp { width: 100%; border-collapse: collapse; font-size: 0.96rem; min-width: 520px; }
+.cmp th, .cmp td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+.cmp thead th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); border-bottom: 1px solid var(--border-strong); }
+.cmp th.us, .cmp td.us { background: rgba(236, 108, 4, 0.08); color: var(--text); }
+.cmp thead th.us { color: var(--orange); }
+.cmp tbody tr:last-child td { border-bottom: 0; }
+
 /* ---- Prose (cuerpo de los artículos del blog) ---- */
 .prose { font-size: 1.08rem; line-height: 1.75; color: var(--text-muted); }
 .prose > *:first-child { margin-top: 0; }

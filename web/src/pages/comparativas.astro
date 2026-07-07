@@ -1,0 +1,45 @@
+---
+import Base from '../layouts/Base.astro';
+import { comparisons } from '../data/comparisons.js';
+import { graph, org, breadcrumb } from '../lib/schema.js';
+
+const title = 'Comparativas | Productivity-Plus vs Trello, Jira y Monday';
+const description =
+  'Comparaciones honestas de Productivity-Plus frente a Trello, Jira y Monday: para qué es mejor cada una y cuándo elegir Productivity-Plus. En español.';
+const jsonld = graph(
+  org,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Comparativas', path: '/comparativas' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/comparativas" jsonld={jsonld}>
+  <main>
+    <section class="hero">
+      <div class="container">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Comparativas</p>
+        <span class="eyebrow">Comparativas</span>
+        <h1>¿Cuál elegir? Te lo decimos sin adornos</h1>
+        <p class="lead">
+          Comparaciones honestas contra las herramientas más usadas. Para qué es mejor cada una
+          y cuándo Productivity-Plus te conviene más. Sin trampas.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="grid grid-3">
+          {comparisons.map((c) => (
+            <a class="card" href={`/vs/${c.slug}`}>
+              <h3 class="mt-0">vs {c.name}</h3>
+              <p class="small">{c.name} es bueno para {c.themGoodAt}. Mira cuándo Productivity-Plus encaja mejor.</p>
+              <span class="small" style="color: var(--teal); font-weight: 700;">Ver comparación →</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

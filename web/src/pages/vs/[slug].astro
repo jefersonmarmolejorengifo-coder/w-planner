@@ -1,0 +1,130 @@
+---
+import Base from '../../layouts/Base.astro';
+import { comparisons, getComparison } from '../../data/comparisons.js';
+import { getFeature } from '../../data/features.js';
+import { APP_URL } from '../../data/site.js';
+import { graph, org, softwareApp, faqPage, breadcrumb } from '../../lib/schema.js';
+
+export function getStaticPaths() {
+  return comparisons.map((c) => ({ params: { slug: c.slug } }));
+}
+
+const { slug } = Astro.params;
+const c = getComparison(slug);
+const related = (c.related || []).map(getFeature).filter(Boolean);
+const path = `/vs/${c.slug}`;
+
+const jsonld = graph(
+  org,
+  softwareApp,
+  faqPage(c.faqs),
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Comparativas', path: '/comparativas' },
+    { name: `vs ${c.name}`, path },
+  ]),
+);
+---
+<Base title={c.seoTitle} description={c.seoDesc} path={path} jsonld={jsonld}>
+  <main>
+    <section class="hero">
+      <div class="container" style="max-width: 860px;">
+        <p class="breadcrumb"><a href="/">Inicio</a> / <a href="/comparativas">Comparativas</a> / vs {c.name}</p>
+        <span class="eyebrow">Comparativa honesta</span>
+        <h1>Productivity-Plus vs {c.name}</h1>
+        <p class="lead" style="max-width: 62ch;">{c.intro}</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href={APP_URL}>Prueba Productivity-Plus gratis</a>
+          <a class="btn btn-ghost" href="/por-que-productivity-plus">Por qué somos diferentes</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cuándo elegir cada uno (honesto) -->
+    <section style="padding-top: 0;">
+      <div class="container" style="max-width: 900px;">
+        <div class="grid grid-2">
+          <div class="card">
+            <h3 class="mt-0">Elige {c.name} si…</h3>
+            <ul class="checks" style="margin-top: 14px;">
+              {c.chooseThem.map((it) => <li>{it}</li>)}
+            </ul>
+          </div>
+          <div class="card" style="border-color: var(--orange);">
+            <h3 class="mt-0">Elige Productivity-Plus si…</h3>
+            <ul class="checks" style="margin-top: 14px;">
+              {c.chooseUs.map((it) => <li>{it}</li>)}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tabla comparativa -->
+    <section style="padding-top: 0;">
+      <div class="container" style="max-width: 900px;">
+        <div class="section-head" style="margin-bottom: 24px;">
+          <span class="eyebrow">Frente a frente</span>
+          <h2>{c.name} vs Productivity-Plus</h2>
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="cmp">
+            <thead>
+              <tr><th>Característica</th><th>{c.name}</th><th class="us">Productivity-Plus</th></tr>
+            </thead>
+            <tbody>
+              {c.table.map((row) => (
+                <tr>
+                  <td><b>{row.f}</b></td>
+                  <td class="muted">{row.them}</td>
+                  <td class="us">{row.us}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="small muted" style="margin-top: 14px;">
+          Comparación a julio de 2026, en términos generales. Las herramientas cambian seguido;
+          si ves algo desactualizado, escríbenos y lo corregimos.
+        </p>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="section-head"><span class="eyebrow">Preguntas</span><h2>Dudas frecuentes</h2></div>
+        <div class="faq">
+          {c.faqs.map((f) => (
+            <details>
+              <summary>{f.q}</summary>
+              <p>{f.a}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- Related + CTA -->
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="cta-band">
+          <h2>Compruébalo con tu propio equipo</h2>
+          <p class="mx-auto" style="max-width: 46ch;">
+            Empieza gratis, arma tu primer tablero y deja que la IA te muestre lo que una
+            comparación no alcanza a contar.
+          </p>
+          <a class="btn btn-primary" href={APP_URL}>Empieza gratis</a>
+          {related.length > 0 && (
+            <p class="small muted" style="margin-top: 18px;">
+              Ver:
+              {related.map((f, i) => (
+                <>{i > 0 ? ' · ' : ' '}<a href={`/funciones/${f.slug}`} style="color: var(--teal);">{f.title}</a></>
+              ))}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

@@ -1,0 +1,4 @@
+# Mantener index.html en LF para que el hash sha256 del bloque JSON-LD en la CSP
+# (vercel.json → script-src) sea idéntico en local (Windows) y en producción
+# (Vercel/Linux). Sin esto, core.autocrlf podría meter CRLF y romper el hash.
+index.html text eol=lf

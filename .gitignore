@@ -32,3 +32,6 @@ dist-ssr
 .env*.local
 .claude/
 .scratch/
+
+# SuperSEO: prompts renderizados intermedios
+.superseo/*-rendered.md

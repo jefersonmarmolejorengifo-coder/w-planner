@@ -134,6 +134,50 @@ export const comparisons = [
     ],
     related: ['reportes-con-ia', 'okrs-y-metricas'],
   },
+  {
+    slug: 'microsoft-planner',
+    name: 'Microsoft Planner',
+    themGoodAt: 'equipos que ya viven en Microsoft 365 y Teams',
+    seoTitle: 'Productivity-Plus vs Microsoft Planner | Alternativa con reportes de IA',
+    seoDesc:
+      'Microsoft Planner es cómodo si ya usas Microsoft 365. Productivity-Plus es la alternativa cuando necesitas sprints, OKRs y reportes ejecutivos con IA, sin depender del ecosistema Microsoft y en español.',
+    intro:
+      'Microsoft Planner es cómodo si tu empresa ya vive en Microsoft 365: tableros de tareas dentro de Teams, sin costo extra. Productivity-Plus es la alternativa cuando necesitas liderar de verdad: sprints, OKRs, métricas y reportes ejecutivos que la IA arma sobre riesgos y evolución del equipo, sin atarte al ecosistema Microsoft y todo en español. Planner ordena tareas dentro de Office; nosotros te damos la lectura del proyecto y del equipo.',
+    chooseThem: [
+      'Tu empresa ya usa Microsoft 365 y todo el equipo trabaja dentro de Teams y Outlook.',
+      'Solo necesitas tableros de tareas simples integrados con el resto de Office.',
+      'Prefieres no sumar otra herramienta porque Planner "ya viene incluido".',
+    ],
+    chooseUs: [
+      'No quieres depender del ecosistema Microsoft: buscas una app web independiente.',
+      'Necesitas reportes de IA sobre riesgos y aporte, no solo listas de tareas.',
+      'Quieres sprints, OKRs, Gantt y métricas sin saltar a Microsoft Project (aparte y más caro).',
+      'Te importa la evolución del equipo (retros, pulso) y el español nativo, con plan gratis.',
+    ],
+    table: [
+      { f: 'Reportes ejecutivos con IA', them: 'Copilot general (licencia aparte)', us: 'Sí, enfocados en riesgos y equipo' },
+      { f: 'Tablero Kanban', them: 'Sí (buckets)', us: 'Sí' },
+      { f: 'Sprints / Scrum nativo', them: 'No', us: 'Sí, nativo' },
+      { f: 'Gantt y dependencias', them: 'Solo en Project (aparte)', us: 'Sí, nativo' },
+      { f: 'OKRs y métricas', them: 'Limitado', us: 'Sí, nativo' },
+      { f: 'Retros y pulso del equipo', them: 'No', us: 'Sí' },
+      { f: 'Chat de IA sobre tu equipo', them: 'Copilot general', us: 'Sí (plan Power)' },
+      { f: 'Español nativo', them: 'Interfaz traducida', us: 'Sí, todo en español' },
+      { f: 'Requiere ecosistema', them: 'Sí, Microsoft 365', us: 'No, es web independiente' },
+      { f: 'Moneda', them: 'Dólares (licencia M365)', us: 'Pesos (COP), pago internacional' },
+    ],
+    faqs: [
+      {
+        q: '¿Es Productivity-Plus una alternativa a Microsoft Planner?',
+        a: 'Sí, sobre todo si no quieres depender de Microsoft 365 o si necesitas más que tareas: sprints, OKRs, métricas y reportes ejecutivos con IA. Planner es cómodo dentro de Office; Productivity-Plus está pensado para liderar proyectos y equipos, y funciona en cualquier navegador.',
+      },
+      {
+        q: '¿Necesito Microsoft 365 para usar Productivity-Plus?',
+        a: 'No. Productivity-Plus es una app web independiente: entras desde el navegador con tu correo, sin licencias de Office ni configuración de administrador. Tienes un plan gratis para empezar.',
+      },
+    ],
+    related: ['reportes-con-ia', 'okrs-y-metricas'],
+  },
 ];
 
 export function getComparison(slug) {

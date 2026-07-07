@@ -11,6 +11,7 @@ export const site = {
 };
 
 export const nav = [
+  { label: 'Por qué', href: '/por-que-productivity-plus' },
   { label: 'Funciones', href: '/funciones' },
   { label: 'Precios', href: '/precios' },
   { label: 'Blog', href: '/blog' },

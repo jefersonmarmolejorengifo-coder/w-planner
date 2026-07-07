@@ -1,0 +1,178 @@
+---
+import Base from '../layouts/Base.astro';
+import { APP_URL } from '../data/site.js';
+import { graph, org, softwareApp, breadcrumb } from '../lib/schema.js';
+
+const title = 'Por qué Productivity-Plus | Más que un tablero de tareas';
+const description =
+  'La mayoría de herramientas organizan tareas. Productivity-Plus usa IA para quitarte el trabajo pesado de reportar y te ayuda a entender y hacer crecer a tu equipo. Esta es la diferencia.';
+const jsonld = graph(
+  org,
+  softwareApp,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Por qué Productivity-Plus', path: '/por-que-productivity-plus' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/por-que-productivity-plus" jsonld={jsonld}>
+  <main>
+    <!-- Hero / tesis -->
+    <section class="hero">
+      <div class="container">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Por qué Productivity-Plus</p>
+        <span class="eyebrow">Por qué somos diferentes</span>
+        <h1>La mayoría organiza tareas. Nosotros te ayudamos a hacer <span class="grad-text">crecer al equipo</span>.</h1>
+        <p class="lead" style="max-width: 56ch;">
+          Un tablero te dice qué falta. Productivity-Plus te dice qué está en riesgo, cómo va
+          tu gente y qué decidir esta semana. Ahí está la diferencia, y por eso somos mejores
+          para quien de verdad lidera.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href={APP_URL}>Empieza gratis</a>
+          <a class="btn btn-ghost" href="/funciones">Ver todo lo que hace</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- El problema real -->
+    <section style="padding-top: 0;">
+      <div class="container" style="max-width: 820px;">
+        <span class="eyebrow">El problema de fondo</span>
+        <h2>Liderar no es mover tarjetas. Es entender qué pasa detrás de ellas.</h2>
+        <p style="font-size: 1.1rem;">
+          Las herramientas de siempre son buenas para una cosa: guardar tareas en columnas.
+          Pero el trabajo difícil de quien lidera empieza donde ellas terminan. Qué se atascó y
+          por qué. Quién está sobrecargado. Qué riesgo puede reventar la entrega. Cómo va el
+          ánimo del equipo. Qué contar en la reunión del lunes.
+        </p>
+        <p style="font-size: 1.1rem;">
+          Con un tablero normal, todo eso queda de tu lado, a mano, cada semana. Terminas el
+          viernes armando un reporte en vez de descansar, y aun así llegas al lunes sin ver lo
+          que de verdad importaba. No es que trabajes poco. Es que la herramienta te dejó solo
+          en la parte más pesada.
+        </p>
+      </div>
+    </section>
+
+    <!-- Lo que hacemos diferente -->
+    <section>
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Lo que hacemos diferente</span>
+          <h2>Cuatro decisiones que nos separan del resto</h2>
+        </div>
+        <div class="grid grid-2">
+          <div class="card">
+            <div style="font-size: 1.8rem; margin-bottom: 8px;">🤖</div>
+            <h3>La IA hace el trabajo pesado; tú lideras</h3>
+            <p class="small mt-0">
+              En vez de darte más campos que llenar, la IA lee tu tablero y arma sola el reporte
+              de sprint, el semanal, el mensual y el evolutivo. Tú le pones criterio y decides.
+              Te devolvemos las horas que otras herramientas te quitan.
+            </p>
+          </div>
+          <div class="card">
+            <div style="font-size: 1.8rem; margin-bottom: 8px;">🧩</div>
+            <h3>Todo en un solo lugar</h3>
+            <p class="small mt-0">
+              Kanban, Scrum, Gantt, OKRs, dependencias, métricas y chat con IA sobre tu equipo,
+              sin saltar entre cinco apps ni pagar cinco suscripciones. Una sola verdad, no seis
+              pestañas que se contradicen.
+            </p>
+          </div>
+          <div class="card">
+            <div style="font-size: 1.8rem; margin-bottom: 8px;">🤝</div>
+            <h3>Medimos para reconocer, no para vigilar</h3>
+            <p class="small mt-0">
+              El aporte de cada persona se mide para agradecer y repartir mejor la carga, no
+              para armar un ranking y presionar. Reconocemos a quien destrabó al equipo, no a
+              quien "hizo más puntos". Esa diferencia lo cambia todo.
+            </p>
+          </div>
+          <div class="card">
+            <div style="font-size: 1.8rem; margin-bottom: 8px;">🌎</div>
+            <h3>Hecho para equipos de habla hispana</h3>
+            <p class="small mt-0">
+              En español real, no traducido, con reportes de IA que también escriben en español.
+              Precio en pesos colombianos (pagas con tarjeta desde cualquier país) y un plan
+              gratis para empezar sin fricción.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- La evolución del equipo (el corazón) -->
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="card" style="padding: clamp(30px, 6vw, 56px); background: linear-gradient(180deg, rgba(110,62,191,0.14), rgba(20,156,172,0.06));">
+          <div style="max-width: 760px;">
+            <span class="eyebrow">A lo que de verdad apuntamos</span>
+            <h2>La evolución del equipo, no solo el avance de las tareas</h2>
+            <p style="font-size: 1.1rem;">
+              Un proyecto no es una lista de tareas cerradas. Es gente que aprende, se cansa,
+              se destraba entre sí y crece con el tiempo. La mayoría de herramientas ignoran esa
+              parte porque no cabe en una columna. Nosotros la pusimos en el centro.
+            </p>
+            <p style="font-size: 1.1rem;">
+              Por eso Productivity-Plus no solo mide velocidad. Toma el pulso del equipo con
+              retros anónimas, reconoce a quien ayudó a los demás, y con el reporte evolutivo te
+              muestra cómo crece tu gente a lo largo de los meses: qué mejoró, cómo está el
+              ánimo, quién merece un reconocimiento. Medir así no es control. Es cuidar.
+            </p>
+            <p style="font-size: 1.1rem;">
+              Lo que tratamos de lograr es simple de decir y difícil de hacer: que liderar deje
+              de ser apagar incendios y pase a ser hacer crecer personas. Si al final de un
+              trimestre tu equipo entregó y además está mejor que al empezar, la herramienta
+              hizo su trabajo.
+            </p>
+            <a class="btn btn-ghost" href="/funciones/reportes-con-ia" style="margin-top: 8px;">Ver cómo funcionan los reportes</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Por esto somos mejores (contraste) -->
+    <section>
+      <div class="container" style="max-width: 860px;">
+        <div class="section-head">
+          <span class="eyebrow">En corto</span>
+          <h2>Por esto somos mejores</h2>
+        </div>
+        <div class="grid" style="gap: 14px;">
+          <div class="card" style="display: flex; gap: 16px; align-items: flex-start;">
+            <span style="font-size: 1.3rem;">📋 →📊</span>
+            <p class="mt-0"><b>Otras te dan un tablero.</b> Nosotros, un informe con IA que te dice qué está en riesgo y qué decidir.</p>
+          </div>
+          <div class="card" style="display: flex; gap: 16px; align-items: flex-start;">
+            <span style="font-size: 1.3rem;">✅ → 🌱</span>
+            <p class="mt-0"><b>Otras miden tareas cerradas.</b> Nosotros medimos cómo va tu gente y cómo crece con el tiempo.</p>
+          </div>
+          <div class="card" style="display: flex; gap: 16px; align-items: flex-start;">
+            <span style="font-size: 1.3rem;">🕐 → 🤖</span>
+            <p class="mt-0"><b>Otras te dejan solo el viernes armando el reporte.</b> Nosotros lo armamos por ti y tú solo lo revisas.</p>
+          </div>
+          <div class="card" style="display: flex; gap: 16px; align-items: flex-start;">
+            <span style="font-size: 1.3rem;">💵 → 🗣️</span>
+            <p class="mt-0"><b>Otras cobran en dólares y hablan en inglés.</b> Nosotros, en tu idioma y en pesos, con un plan gratis para arrancar.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA final -->
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="cta-band">
+          <h2>La mejor forma de verlo es probarlo con tu equipo</h2>
+          <p class="mx-auto" style="max-width: 48ch;">
+            Crea tu cuenta gratis, arma tu primer tablero y deja que la IA te muestre, en tu
+            primer sprint, lo que otras herramientas nunca te dijeron.
+          </p>
+          <a class="btn btn-primary" href={APP_URL}>Empieza gratis</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

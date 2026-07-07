@@ -20,7 +20,7 @@ export const website = {
   '@id': `${D}/#website`,
   url: `${D}/`,
   name: site.name,
-  inLanguage: 'es-CO',
+  inLanguage: 'es',
   publisher: { '@id': orgId },
 };
 
@@ -30,10 +30,10 @@ export const softwareApp = {
   operatingSystem: 'Web',
   applicationCategory: 'BusinessApplication',
   applicationSubCategory: 'Project Management Software',
-  inLanguage: 'es-CO',
+  inLanguage: 'es',
   url: `${D}/`,
   description:
-    'Software de gestión de proyectos con IA: tableros Scrum y Kanban, Gantt, OKRs, sprints, dependencias, métricas y reportes ejecutivos generados con IA para líderes de equipo en Colombia.',
+    'Software de gestión de proyectos con IA: tableros Scrum y Kanban, Gantt, OKRs, sprints, dependencias, métricas y reportes ejecutivos generados con IA para equipos que trabajan en español.',
   publisher: { '@id': orgId },
   offers: plans.map((p) => ({
     '@type': 'Offer',

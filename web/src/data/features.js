@@ -9,7 +9,7 @@ export const features = [
     short: 'Arrastra tareas, asigna responsables y ve dependencias, todo en un tablero.',
     seoTitle: 'Tableros Scrum y Kanban en español | Productivity-Plus',
     seoDesc:
-      'Gestiona tu equipo con tableros Scrum y Kanban: estados, responsables, subtareas, dependencias y avance en tiempo real. En español, pensado para Colombia.',
+      'Gestiona tu equipo con tableros Scrum y Kanban: estados, responsables, subtareas, dependencias y avance en tiempo real. En español, para equipos de Latinoamérica.',
     answer:
       'Productivity-Plus reúne Scrum y Kanban en el mismo lugar. Arrastras cada tarea entre columnas, le pones responsable, subtareas y dependencias, y ves el avance del sprint sin salir del tablero.',
     body: [
@@ -53,7 +53,7 @@ export const features = [
     short: 'Conecta el trabajo diario con los objetivos y mide avance real.',
     seoTitle: 'Software de OKRs y métricas para equipos | Productivity-Plus',
     seoDesc:
-      'Define OKRs, enlázalos a tareas y sprints, y mide el avance real de tu equipo con métricas claras. Software de OKRs en español para Colombia.',
+      'Define OKRs, enlázalos a tareas y sprints, y mide el avance real de tu equipo con métricas claras. Software de OKRs en español para equipos de Latinoamérica.',
     answer:
       'Con Productivity-Plus defines OKRs, los enlazas a las tareas y sprints del equipo, y las métricas te muestran avance real en vez de percepción.',
     body: [

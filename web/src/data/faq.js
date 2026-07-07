@@ -9,11 +9,11 @@ export const faqs = [
   },
   {
     q: '¿Para quién es?',
-    a: 'Para líderes de equipo, project managers y coordinadores que manejan uno o varios equipos por proyectos y necesitan ver bloqueos, prioridades y avance sin perder horas en informes. Está en español y pensado para el mercado de Colombia.',
+    a: 'Para líderes de equipo, project managers y coordinadores que manejan uno o varios equipos por proyectos y necesitan ver bloqueos, prioridades y avance sin perder horas en informes. Está en español y sirve para equipos de cualquier país de habla hispana.',
   },
   {
     q: '¿En qué se diferencia de Trello, Jira o Monday?',
-    a: 'La diferencia principal son los reportes con IA: Productivity-Plus lee tu tablero y arma solo el informe de sprint, el semanal, el mensual y el evolutivo, con foco en tareas atascadas, riesgos y aporte por persona. Además está en español, con precios en pesos colombianos y un plan gratis para empezar.',
+    a: 'La diferencia principal son los reportes con IA: Productivity-Plus lee tu tablero y arma solo el informe de sprint, el semanal, el mensual y el evolutivo, con foco en tareas atascadas, riesgos y aporte por persona. Además está en español, tiene un plan gratis y se cobra en pesos colombianos (puedes pagar desde cualquier país con tarjeta).',
   },
   {
     q: '¿Cómo funcionan los reportes con IA?',
@@ -29,11 +29,15 @@ export const faqs = [
   },
   {
     q: '¿Cuánto cuesta?',
-    a: 'Los planes en pesos colombianos son: Gratis (0), Pro ($80.000/mes), Pro Team ($110.000/mes, el más popular) y Pro Power ($210.000/mes). Cada plan sube la cantidad de tableros, cuántos usan IA y las funciones de reportes y chat.',
+    a: 'Los planes se cobran en pesos colombianos (COP): Gratis (0), Pro ($80.000/mes), Pro Team ($110.000/mes, el más popular) y Pro Power ($210.000/mes). Cada plan sube la cantidad de tableros, cuántos usan IA y las funciones de reportes y chat. Puedes pagar desde cualquier país con tarjeta.',
   },
   {
     q: '¿Está en español?',
-    a: 'Sí, toda la herramienta está en español y los reportes de IA se escriben en español. Los precios están en pesos colombianos.',
+    a: 'Sí, toda la herramienta está en español y los reportes de IA se escriben en español. El cobro es en pesos colombianos (COP).',
+  },
+  {
+    q: '¿Puedo usarla desde otro país, como Argentina o México?',
+    a: 'Sí. Productivity-Plus es una app web en español que funciona desde cualquier país. El cobro es en pesos colombianos (COP) y puedes pagar con tarjeta desde donde estés; tu banco hace la conversión. No necesitas estar en Colombia para usarla.',
   },
   {
     q: '¿Funciona para equipos remotos?',

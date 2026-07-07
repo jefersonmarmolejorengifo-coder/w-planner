@@ -1,0 +1,93 @@
+---
+import { getCollection, render } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import { getFeature } from '../../data/features.js';
+import { APP_URL } from '../../data/site.js';
+import { graph, org, article, breadcrumb } from '../../lib/schema.js';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+const path = `/blog/${post.id}`;
+
+// Fecha legible en español, sin depender de la zona horaria del build.
+const fmt = (d) =>
+  new Intl.DateTimeFormat('es', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(d);
+
+const related = (post.data.related || []).map(getFeature).filter(Boolean);
+
+// Otros artículos (para enlazado interno entre el cluster).
+const others = (await getCollection('blog'))
+  .filter((p) => p.id !== post.id)
+  .sort((a, b) => b.data.pubDate - a.data.pubDate)
+  .slice(0, 2);
+
+const jsonld = graph(
+  org,
+  article({
+    title: post.data.title,
+    description: post.data.description,
+    path,
+    datePublished: post.data.pubDate.toISOString(),
+    dateModified: (post.data.updatedDate || post.data.pubDate).toISOString(),
+  }),
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Blog', path: '/blog' },
+    { name: post.data.title, path },
+  ]),
+);
+---
+<Base title={`${post.data.title} | Blog de Productivity-Plus`} description={post.data.description} path={path} jsonld={jsonld}>
+  <main>
+    <article>
+      <section class="hero" style="padding-bottom: 0;">
+        <div class="container" style="max-width: 760px;">
+          <p class="breadcrumb"><a href="/">Inicio</a> / <a href="/blog">Blog</a> / {post.data.cluster}</p>
+          <span class="eyebrow">{post.data.cluster}</span>
+          <h1>{post.data.title}</h1>
+          <p class="small muted">Publicado el {fmt(post.data.pubDate)}{post.data.updatedDate ? ` · Actualizado el ${fmt(post.data.updatedDate)}` : ''}</p>
+        </div>
+      </section>
+
+      <section style="padding-top: 28px;">
+        <div class="container" style="max-width: 760px;">
+          <div class="prose">
+            <Content />
+          </div>
+
+          {related.length > 0 && (
+            <div class="card" style="margin-top: 40px;">
+              <h3 class="mt-0">Pruébalo en Productivity-Plus</h3>
+              <ul class="checks" style="margin: 14px 0 18px;">
+                {related.map((f) => <li><a href={`/funciones/${f.slug}`} style="color: var(--teal);">{f.title}</a> — {f.short}</li>)}
+              </ul>
+              <a class="btn btn-primary" href={APP_URL}>Empieza gratis</a>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {others.length > 0 && (
+        <section>
+          <div class="container">
+            <div class="section-head"><span class="eyebrow">Sigue leyendo</span><h2>Más del blog</h2></div>
+            <div class="grid grid-2">
+              {others.map((p) => (
+                <a class="card" href={`/blog/${p.id}`}>
+                  <span class="badge" style="margin-bottom: 10px;">{p.data.cluster}</span>
+                  <h3>{p.data.title}</h3>
+                  <p class="small mt-0">{p.data.description}</p>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+    </article>
+  </main>
+</Base>

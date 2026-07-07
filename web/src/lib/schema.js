@@ -55,6 +55,21 @@ export function breadcrumb(items) {
   };
 }
 
+export function article({ title, description, path, datePublished, dateModified }) {
+  return {
+    '@type': 'BlogPosting',
+    headline: title,
+    description,
+    inLanguage: 'es',
+    datePublished,
+    dateModified: dateModified || datePublished,
+    author: { '@type': 'Organization', name: site.name, url: `${D}/` },
+    publisher: { '@id': orgId },
+    mainEntityOfPage: `${D}${path}`,
+    image: `${D}/og-image.png`,
+  };
+}
+
 export function faqPage(faqs) {
   return {
     '@type': 'FAQPage',

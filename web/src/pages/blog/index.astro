@@ -1,0 +1,51 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import { graph, org, breadcrumb } from '../../lib/schema.js';
+
+const posts = (await getCollection('blog')).sort((a, b) => b.data.pubDate - a.data.pubDate);
+
+const fmt = (d) =>
+  new Intl.DateTimeFormat('es', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(d);
+
+const title = 'Blog de Productivity-Plus | Gestión ágil, sprints, OKRs y reportes';
+const description =
+  'Guías prácticas para liderar equipos: cómo hacer reportes de sprint, escribir OKRs, elegir entre Scrum y Kanban y priorizar el backlog. En español, sin relleno.';
+const jsonld = graph(
+  org,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Blog', path: '/blog' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/blog" jsonld={jsonld}>
+  <main>
+    <section class="hero">
+      <div class="container">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Blog</p>
+        <span class="eyebrow">Blog</span>
+        <h1>Guías para liderar equipos, sin relleno</h1>
+        <p class="lead">
+          Lo que de verdad sirve para planear, ejecutar y reportar: sprints, OKRs,
+          metodologías ágiles y cómo medir a tu equipo sin volverlo vigilancia.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top: 0;">
+      <div class="container">
+        <div class="grid grid-2">
+          {posts.map((p) => (
+            <a class="card" href={`/blog/${p.id}`}>
+              <span class="badge" style="margin-bottom: 12px;">{p.data.cluster}</span>
+              <h3>{p.data.title}</h3>
+              <p class="small">{p.data.description}</p>
+              <span class="small muted">{fmt(p.data.pubDate)}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

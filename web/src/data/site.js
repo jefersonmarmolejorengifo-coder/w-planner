@@ -13,6 +13,7 @@ export const site = {
 export const nav = [
   { label: 'Funciones', href: '/funciones' },
   { label: 'Precios', href: '/precios' },
+  { label: 'Blog', href: '/blog' },
   { label: 'Preguntas', href: '/preguntas-frecuentes' },
   { label: 'Nosotros', href: '/sobre' },
 ];

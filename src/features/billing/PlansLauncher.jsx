@@ -75,7 +75,7 @@ export default function PlansLauncher({ variant = "header" }) {
         // ui-ux #2: marcamos el procesador en el redirect para que BillingReturnOverlay
         // pueda mostrar la marca correcta (Wompi vs Mercado Pago) sin usar el valor
         // crudo del param en ninguna decisión de lógica/autorización.
-        const redirect = `${window.location.origin}/?billing=return&via=wompi`;
+        const redirect = `${window.location.origin}/app?billing=return&via=wompi`;
 
         // Email del usuario autenticado. Si la sesión no tiene email (caso
         // improbable en producción, ya que se necesita cuenta para llegar aquí),

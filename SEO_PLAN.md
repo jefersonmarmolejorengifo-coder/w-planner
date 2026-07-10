@@ -246,3 +246,14 @@ Google no penaliza "contenido con IA"; penaliza contenido poco útil y de rellen
 
 ## Comentarios del equipo
 <!-- Esta sección NUNCA se sobrescribe. Agregá acá notas, decisiones, contexto. -->
+
+**2026-07-10 — Ejecución completada (más allá del plan original):** el lever maestro se implementó
+y está EN PRODUCCIÓN. Se construyó un **sitio de marketing Astro** en `web/` que ocupa la raíz del
+dominio, y la **app React se movió a `/app`** (dual-build en un solo deploy de Vercel; ver
+`web/`, `vite.config.js`, `vercel.json`). Contenido vivo (21 URLs): home, `/por-que-productivity-plus`,
+`/funciones` (+4), `/precios`, `/blog` (+3 artículos), `/comparativas` (+6: Trello, Jira, Monday,
+Microsoft Planner, Asana, Notion), `/preguntas-frecuentes`, `/sobre`. Todo con schema, answer-first,
+enlazado interno. **GSC verificado** (meta tag). **Posicionamiento: general LATAM** (no solo Colombia;
+Colombia solo como origen; cobro COP con pago internacional). **Pagos validados** (solo cambiaron las
+URLs de retorno a `/app`; contrato del Hub intacto). Pendiente: solicitar indexación en GSC, analítica
+RUM (Vercel Speed Insights), más artículos, directorios. Detalle vivo en la auto-memoria del proyecto.

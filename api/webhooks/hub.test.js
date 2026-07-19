@@ -222,6 +222,16 @@ function makeAdminMock(tableConfig = {}, rpcConfig = {}) {
         _selectCol = col;
         return chain;
       },
+      // maybeSingle/single: no cambian la resolución (el `then` de abajo ya
+      // resuelve según tableConfig[table]); solo necesitan existir como
+      // métodos encadenables porque handlePagoReembolsado los usa tras
+      // .select().eq() para leer una sola fila de users_premium.
+      maybeSingle() {
+        return chain;
+      },
+      single() {
+        return chain;
+      },
       eq(col, val) {
         if (_op === "delete") {
           calls.deletes.push({ table, col, val });
@@ -801,5 +811,363 @@ describe("hub.js — receptor cable Hub→w-planner", () => {
 
     const upsert = _mockAdmin.calls.upserts.find((u) => u.table === "users_premium");
     expect(upsert?.data?.current_period_end).toBeNull();
+  });
+});
+
+// ── Tests de pago.reembolsado ──────────────────────────────────────────────────
+//
+// CONTRATO: docs/eventos-salientes.md (softatumedida-panel) — el Hub emite este
+// evento cuando un admin anula un cobro por reembolso. w-planner debe revocar
+// el acceso (tier→'free', status→'cancelled') SOLO si el cobro reembolsado
+// (evento_id_original) es el que otorgó el estado vigente de users_premium
+// (comparado contra metadata.hub_evento_id, que handleSuscripcionCobrada ya
+// escribe en cada cobro exitoso). Ver el JSDoc de handlePagoReembolsado en
+// hub.js para el razonamiento completo (por qué no se usa el esquema
+// wompi_pay:/wompi_sub: de la SPEC: w-planner no tiene ledger de pagos).
+//
+// COBERTURA (10 casos):
+//   1. Camino feliz: evento_id_original coincide → revoca (tier=free, status=cancelled).
+//   2. evento_id_original NO coincide con el acceso vigente → parqueado, sin tocar la fila.
+//   3. Email no resuelve → parqueado (user_not_found).
+//   4. Usuario sin fila en users_premium → nothing_to_revoke.
+//   5. Ya estaba revocado (mismo evento) → already_revoked, sin UPDATE.
+//   6. cliente_email ausente en el payload → parqueado.
+//   7. evento_id_original ausente → 400.
+//   8. periodicidad inválida → 400.
+//   9. Candado 'duplicate'/'in_flight' → 200 sin tocar users_premium.
+//   10. Fallo del UPDATE → hub_revertir_evento + 500.
+describe("hub.js — pago.reembolsado (revocación de acceso)", () => {
+  const EVENTO_ORIGINAL = "sus-abc123:2026-07-01";
+
+  beforeEach(() => {
+    process.env.HUB_WEBHOOK_SECRET = SECRET;
+    _mockAdmin = null;
+  });
+
+  /** Payload mínimo válido para pago.reembolsado según la SPEC del Hub. */
+  function buildPayloadReembolso(overrides = {}) {
+    return {
+      evento:             "pago.reembolsado",
+      evento_id:          `refund:${EVENTO_ORIGINAL}`,
+      app_slug:           "w-planner",
+      cliente_email:      "jeferson@gmail.com",
+      app_cliente_ref:    null,
+      evento_id_original: EVENTO_ORIGINAL,
+      periodicidad:       "mensual",
+      concepto:           null,
+      motivo:             "solicitud del cliente",
+      fecha:              "2026-07-10T12:00:00Z",
+      ...overrides,
+    };
+  }
+
+  /**
+   * Mock de la fila users_premium: distingue SELECT (op=null, sin .update()
+   * previo en el chain) de UPDATE (op="update") para que el mismo tableConfig
+   * sirva a ambas operaciones del handler.
+   */
+  function mockPremiumRow(row, { updateError = null, updateAffected = 1 } = {}) {
+    return (op) => {
+      if (op === "update") {
+        // El UPDATE atómico del handler encadena .select("user_id") y cuenta
+        // filas afectadas: updateAffected=0 simula la carrera TOCTOU (una
+        // renovación cambió hub_evento_id entre el SELECT y el UPDATE).
+        return {
+          data: updateError ? null : Array.from({ length: updateAffected }, () => ({ user_id: "u-1" })),
+          error: updateError,
+        };
+      }
+      return { data: row, error: null };
+    };
+  }
+
+  // ── Test 1: Camino feliz — revoca ───────────────────────────────────────────
+  it("(1) evento_id_original coincide con el acceso vigente → revoca tier=free/status=cancelled", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock({
+      users_premium: mockPremiumRow({
+        tier: "pro_solo",
+        status: "active",
+        metadata: { provider: "wompi-hub", hub_evento_id: EVENTO_ORIGINAL },
+      }),
+    });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, revoked: true });
+
+    const update = _mockAdmin.calls.inserts.find(
+      (c) => c.table === "users_premium" && c.op === "update",
+    );
+    expect(update).toBeDefined();
+    expect(update.data.tier).toBe("free");
+    expect(update.data.status).toBe("cancelled");
+    // La metadata previa (provider) se preserva; se añade el rastro del reembolso.
+    expect(update.data.metadata.provider).toBe("wompi-hub");
+    expect(update.data.metadata.last_event).toBe("pago.reembolsado");
+    expect(update.data.metadata.hub_refund_evento_id).toBe(payload.evento_id);
+    expect(update.data.metadata.motivo_reembolso).toBe("solicitud del cliente");
+
+    const markCall = _mockAdmin.calls.rpc.find((c) => c.fn === "hub_marcar_evento_procesado");
+    expect(markCall).toBeDefined();
+  });
+
+  // ── Test 1b: Carrera TOCTOU — renovación entre SELECT y UPDATE ─────────────
+  it("(1b) el UPDATE atómico afecta 0 filas (renovación concurrente pisó hub_evento_id) → parquea sin revocar", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    // El SELECT del paso 3 aún ve el evento original como vigente (por eso el
+    // handler avanza al paso 4), pero el UPDATE condicionado devuelve 0 filas:
+    // una suscripcion.cobrada concurrente ya reemplazó hub_evento_id.
+    _mockAdmin = makeAdminMock({
+      users_premium: mockPremiumRow(
+        {
+          tier: "pro_solo",
+          status: "active",
+          metadata: { provider: "wompi-hub", hub_evento_id: EVENTO_ORIGINAL },
+        },
+        { updateAffected: 0 },
+      ),
+    });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, parked: "evento_original_cambio_durante_reembolso" });
+
+    // Se marcó procesado (no habrá reintentos que revoquen la renovación nueva).
+    const markCall = _mockAdmin.calls.rpc.find((c) => c.fn === "hub_marcar_evento_procesado");
+    expect(markCall).toBeDefined();
+  });
+
+  // ── Test 2: evento_id_original no coincide → parqueado, sin tocar la fila ────
+  it("(2) el cobro reembolsado no otorgó el acceso vigente → parqueado sin UPDATE", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    // La fila vigente fue otorgada por OTRO evento (ej. un cobro posterior).
+    _mockAdmin = makeAdminMock({
+      users_premium: mockPremiumRow({
+        tier: "pro_solo",
+        status: "active",
+        metadata: { hub_evento_id: "sus-otro-evento:2026-08-01" },
+      }),
+      hub_eventos_sin_resolver: { data: null, error: null },
+    });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, parked: "evento_original_no_es_el_vigente" });
+
+    const update = _mockAdmin.calls.inserts.find(
+      (c) => c.table === "users_premium" && c.op === "update",
+    );
+    expect(update).toBeUndefined();
+
+    const parqueo = _mockAdmin.calls.upserts.find((u) => u.table === "hub_eventos_sin_resolver");
+    expect(parqueo).toBeDefined();
+    expect(parqueo.data.payload).not.toHaveProperty("cliente_email");
+  });
+
+  // ── Test 3: Email no resuelve → parqueado ────────────────────────────────────
+  it("(3) cliente_email no encontrado en auth.users → parqueado (user_not_found)", async () => {
+    const payload = buildPayloadReembolso({ cliente_email: "fantasma@ejemplo.com" });
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock(
+      { hub_eventos_sin_resolver: { data: null, error: null } },
+      { get_user_id_by_email: { data: null, error: null } },
+    );
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, parked: "user_not_found" });
+  });
+
+  // ── Test 4: Usuario sin fila en users_premium → nothing_to_revoke ────────────
+  it("(4) usuario sin fila en users_premium → nothing_to_revoke", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock({
+      users_premium: { data: null, error: null }, // maybeSingle() sin filas
+    });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, nothing_to_revoke: true });
+
+    const update = _mockAdmin.calls.inserts.find(
+      (c) => c.table === "users_premium" && c.op === "update",
+    );
+    expect(update).toBeUndefined();
+  });
+
+  // ── Test 5: Ya estaba revocado → already_revoked, sin UPDATE ─────────────────
+  it("(5) ya estaba revocado (mismo evento) → already_revoked, sin volver a actualizar", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock({
+      users_premium: mockPremiumRow({
+        tier: "free",
+        status: "cancelled",
+        metadata: { hub_evento_id: EVENTO_ORIGINAL, hub_refund_evento_id: payload.evento_id },
+      }),
+    });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, already_revoked: true });
+
+    const update = _mockAdmin.calls.inserts.find(
+      (c) => c.table === "users_premium" && c.op === "update",
+    );
+    expect(update).toBeUndefined();
+  });
+
+  // ── Test 6: cliente_email ausente → parqueado ─────────────────────────────────
+  it("(6) payload sin cliente_email → parqueado (cliente_email_ausente)", async () => {
+    const payload = buildPayloadReembolso({ cliente_email: null });
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock({ hub_eventos_sin_resolver: { data: null, error: null } });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, parked: "cliente_email_ausente" });
+  });
+
+  // ── Test 7: evento_id_original ausente → 400 ─────────────────────────────────
+  it("(7) payload sin evento_id_original → 400", async () => {
+    const payload = buildPayloadReembolso({ evento_id_original: undefined });
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock({});
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(400);
+    expect(res._body.error).toBe("missing_evento_id_original");
+  });
+
+  // ── Test 8: periodicidad inválida → 400 ──────────────────────────────────────
+  it("(8) periodicidad distinta de 'unico'/'mensual' → 400", async () => {
+    const payload = buildPayloadReembolso({ periodicidad: "semanal" });
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock({});
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(400);
+    expect(res._body.error).toBe("invalid_periodicidad");
+  });
+
+  // ── Test 9: Candado duplicate/in_flight → 200 sin tocar users_premium ────────
+  it("(9a) hub_reclamar_evento 'duplicate' → 200 sin tocar users_premium", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock(
+      {},
+      { hub_reclamar_evento: { data: "duplicate", error: null } },
+    );
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, duplicate: true });
+
+    const update = _mockAdmin.calls.inserts.find(
+      (c) => c.table === "users_premium" && c.op === "update",
+    );
+    expect(update).toBeUndefined();
+  });
+
+  it("(9b) hub_reclamar_evento 'in_flight' → 200 sin tocar users_premium", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock(
+      {},
+      { hub_reclamar_evento: { data: "in_flight", error: null } },
+    );
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, in_flight: true });
+  });
+
+  // ── Test 10: Fallo del UPDATE → hub_revertir_evento + 500 ────────────────────
+  it("(10) error en UPDATE users_premium → hub_revertir_evento + 500", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    _mockAdmin = makeAdminMock({
+      users_premium: mockPremiumRow(
+        {
+          tier: "pro_solo",
+          status: "active",
+          metadata: { hub_evento_id: EVENTO_ORIGINAL },
+        },
+        { updateError: { message: "connection timeout", code: "08006" } },
+      ),
+    });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(500);
+    expect(res._body.error).toBeDefined();
+
+    const revertCall = _mockAdmin.calls.rpc.find((c) => c.fn === "hub_revertir_evento");
+    expect(revertCall).toBeDefined();
+    expect(revertCall.args.p_evento_id).toBe(payload.evento_id);
   });
 });

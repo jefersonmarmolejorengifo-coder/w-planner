@@ -1,0 +1,170 @@
+---
+import Base from '../layouts/Base.astro';
+import { site } from '../data/site.js';
+import { EMPRESA, NIT, DIRECCION, CIUDAD, PAIS, TELEFONO, CORREO, VIGENCIA } from '../data/legal.js';
+import { graph, org, breadcrumb } from '../lib/schema.js';
+
+const title = 'Términos y Condiciones | Productivity-Plus';
+const description =
+  'Términos y condiciones de uso de Productivity-Plus: planes y precios, pago y renovación de la suscripción, retracto y reversión (Ley 1480 de 2011), cancelación y responsabilidades.';
+const jsonld = graph(
+  org,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Términos y condiciones', path: '/terminos' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/terminos" jsonld={jsonld}>
+  <main>
+    <section class="hero" style="padding-bottom: 0;">
+      <div class="container" style="max-width: 760px;">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Términos y condiciones</p>
+        <span class="eyebrow">Legal</span>
+        <h1>Términos y Condiciones de Uso</h1>
+        <p class="small muted">Vigentes desde el {VIGENCIA}</p>
+      </div>
+    </section>
+
+    <section style="padding-top: 28px;">
+      <div class="container" style="max-width: 760px;">
+        <div class="prose">
+          <p>
+            Estos términos regulan el uso de <strong>{site.name}</strong> ({site.domain}), un
+            servicio de software por suscripción para la gestión de proyectos y equipos. Al
+            crear una cuenta o usar el servicio, aceptas estos términos y la
+            <a href="/tratamiento-datos">Política de Tratamiento de Datos Personales</a>.
+            Si no estás de acuerdo, no uses el servicio.
+          </p>
+
+          <h2>1. Quiénes somos</h2>
+          <table>
+            <tbody>
+              <tr><td><strong>Razón social</strong></td><td>{EMPRESA} (nombre comercial: «{site.company}»)</td></tr>
+              <tr><td><strong>NIT</strong></td><td>{NIT}</td></tr>
+              <tr><td><strong>Domicilio</strong></td><td>{DIRECCION}, {CIUDAD}, {PAIS}</td></tr>
+              <tr><td><strong>Correo de contacto</strong></td><td>{CORREO}</td></tr>
+              <tr><td><strong>Teléfono</strong></td><td>{TELEFONO}</td></tr>
+            </tbody>
+          </table>
+
+          <h2>2. El servicio</h2>
+          <p>
+            {site.name} permite organizar proyectos con tableros, cronogramas (Gantt), OKRs,
+            sprints, retrospectivas y reportes, incluidas funciones asistidas por inteligencia
+            artificial que procesan el contenido de tus tableros para generar resúmenes,
+            reportes y respuestas de chat. El servicio se presta «tal cual» y evoluciona de
+            forma continua: podemos agregar, modificar o retirar funciones, avisando por los
+            canales habituales cuando el cambio sea sustancial.
+          </p>
+
+          <h2>3. Tu cuenta</h2>
+          <ul>
+            <li>Debes ser mayor de edad y registrarte con información veraz.</li>
+            <li>Eres responsable de la confidencialidad de tus credenciales y de la actividad realizada desde tu cuenta.</li>
+            <li>Si invitas colaboradores a tus proyectos, cada uno crea su propia cuenta y acepta estos términos.</li>
+          </ul>
+
+          <h2>4. Planes y precios</h2>
+          <p>Los planes vigentes se publican en <a href="/precios">/precios</a>. A la fecha de vigencia de estos términos son:</p>
+          <table>
+            <thead><tr><th>Plan</th><th>Precio (COP)</th></tr></thead>
+            <tbody>
+              <tr><td>Gratis</td><td>$0 (1 tablero, funciones básicas)</td></tr>
+              <tr><td>Pro</td><td>$80.000 / mes</td></tr>
+              <tr><td>Pro Team</td><td>$110.000 / mes</td></tr>
+              <tr><td>Pro Power</td><td>$210.000 / mes</td></tr>
+            </tbody>
+          </table>
+          <p>
+            Los precios están expresados en pesos colombianos e incluyen los impuestos
+            aplicables salvo que se indique lo contrario. Podemos actualizar los precios hacia
+            el futuro; el cambio nunca aplica retroactivamente a un período ya pagado y se
+            informa antes de la renovación en la que entra a regir.
+          </p>
+
+          <h2>5. Pago y renovación</h2>
+          <ul>
+            <li>La suscripción es <strong>mensual y de renovación automática</strong>: al final de cada ciclo se cobra el siguiente, hasta que canceles.</li>
+            <li>El cobro se procesa a través de pasarelas de pago habilitadas en Colombia: <strong>Wompi</strong> (a través del Hub de pagos de {site.company}) como vía principal, o <strong>MercadoPago</strong> como vía de contingencia. No almacenamos los datos completos de tu tarjeta: los recibe y custodia la pasarela.</li>
+            <li>Si un cobro de renovación falla, podremos reintentarlo; si no es posible completarlo, el plan baja a Gratis y tus datos se conservan según la política de datos.</li>
+          </ul>
+
+          <h2>6. Derecho de retracto y reversión del pago (Ley 1480 de 2011)</h2>
+          <ul>
+            <li>
+              <strong>Retracto (artículo 47):</strong> puedes retractarte de la compra dentro de
+              los cinco (5) días hábiles siguientes al primer pago de una suscripción nueva,
+              siempre que no hayas hecho un uso sustancial del servicio pagado. Se devuelve el
+              dinero por el mismo medio de pago.
+            </li>
+            <li>
+              <strong>Reversión (artículo 51):</strong> si el pago se hizo con tarjeta u otro
+              instrumento electrónico y hubo fraude, operación no solicitada o el servicio no
+              fue prestado, puedes pedir la reversión ante tu banco y notificarnos a {CORREO}
+              dentro de los cinco (5) días hábiles siguientes.
+            </li>
+            <li>Cuando un pago es reembolsado o revertido, el acceso premium asociado a ese pago se revoca.</li>
+          </ul>
+
+          <h2>7. Cancelación</h2>
+          <p>
+            Puedes cancelar en cualquier momento desde la app. La cancelación evita el
+            siguiente cobro; conservas el acceso premium hasta el final del período ya pagado y
+            luego tu cuenta baja al plan Gratis. No hay penalidades ni permanencias mínimas.
+          </p>
+
+          <h2>8. Uso aceptable</h2>
+          <p>No puedes usar el servicio para actividades ilegales, para vulnerar derechos de terceros, para intentar acceder a datos de otras cuentas ni para revender el servicio sin autorización escrita. Podemos suspender o terminar cuentas que incumplan estos términos, avisando previamente salvo urgencia justificada.</p>
+
+          <h2>9. Tu contenido y propiedad intelectual</h2>
+          <ul>
+            <li><strong>Tu contenido es tuyo.</strong> Lo que registras en tus tableros (tareas, comentarios, documentos) te pertenece. Nos autorizas a alojarlo y procesarlo únicamente para prestarte el servicio, incluida la generación de reportes y respuestas de IA a partir de él.</li>
+            <li>El software, la marca y el diseño de {site.name} son de {EMPRESA} o de sus licenciantes. La suscripción te da un derecho de uso, no una cesión.</li>
+            <li>Al cerrar tu cuenta puedes exportar tu información antes de la supresión definitiva, según los plazos de la política de datos.</li>
+          </ul>
+
+          <h2>10. Disponibilidad y soporte</h2>
+          <p>
+            Hacemos esfuerzos razonables para mantener el servicio disponible y respaldado,
+            pero no garantizamos disponibilidad ininterrumpida. El soporte se presta por los
+            canales publicados en el sitio y dentro de la app.
+          </p>
+
+          <h2>11. Limitación de responsabilidad</h2>
+          <p>
+            En la máxima medida permitida por la ley colombiana, la responsabilidad total de
+            {EMPRESA} por cualquier reclamo derivado del servicio se limita al valor pagado por
+            ti en los tres (3) meses anteriores al hecho que dio origen al reclamo. Nada en
+            estos términos limita los derechos que la Ley 1480 de 2011 te otorga como
+            consumidor.
+          </p>
+
+          <h2>12. Datos personales</h2>
+          <p>
+            El tratamiento de tus datos se rige por la
+            <a href="/tratamiento-datos">Política de Tratamiento de Datos Personales</a> y el
+            <a href="/privacidad">Aviso de Privacidad</a>. Canal de derechos habeas data: {CORREO}.
+          </p>
+
+          <h2>13. Cambios a estos términos</h2>
+          <p>
+            Podemos actualizar estos términos. Los cambios sustanciales se anuncian por el
+            sitio, la app o el correo con antelación razonable. Si continúas usando el servicio
+            después de la fecha de entrada en vigor, aceptas la nueva versión.
+          </p>
+
+          <h2>14. Ley aplicable</h2>
+          <p>
+            Estos términos se rigen por las leyes de la República de Colombia. Cualquier
+            controversia se somete a los jueces y tribunales de {CIUDAD}, sin perjuicio de las
+            normas de protección al consumidor que dispongan otra cosa.
+          </p>
+
+          <h2>15. Contacto</h2>
+          <p>{CORREO} · {TELEFONO} · {DIRECCION}, {CIUDAD}, {PAIS}.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

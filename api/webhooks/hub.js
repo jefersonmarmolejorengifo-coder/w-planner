@@ -1,10 +1,15 @@
 // api/webhooks/hub.js — Receptor del cable saliente Hub→w-planner
 //
 // QUÉ hace:
-//   Recibe el evento `suscripcion.cobrada` que el Hub (panel.softatumedida.com)
-//   emite cuando Wompi confirma el cobro de un ciclo recurrente. Escribe/actualiza
-//   `public.users_premium` EXACTAMENTE como lo haría `api/mp-webhook.js` en el
-//   camino feliz de un `subscription_authorized_payment` aprobado.
+//   Recibe los eventos que el Hub (panel.softatumedida.com) emite sobre Wompi:
+//   - `suscripcion.cobrada`: confirma el cobro de un ciclo recurrente. Escribe/
+//     actualiza `public.users_premium` EXACTAMENTE como lo haría
+//     `api/mp-webhook.js` en el camino feliz de un `subscription_authorized_payment`
+//     aprobado.
+//   - `pago.reembolsado`: un admin del Hub anuló un cobro por reembolso. Revoca
+//     el acceso premium que ese cobro había otorgado (ver handlePagoReembolsado
+//     para el razonamiento completo — w-planner no tiene ledger de pagos, así
+//     que la revocación se basa en `users_premium.metadata.hub_evento_id`).
 //
 // POR QUÉ no necesita hub_outbox ni notificarPagoAlHub:
 //   El Hub ya atribuyó la comisión al afiliado correspondiente antes de notificar.
@@ -160,8 +165,9 @@ function verifyHubSignature(secret, appSlug, timestampHeader, rawBody, receivedS
  * POST /api/webhooks/hub
  *
  * Receptor del cable saliente Hub→w-planner (protocolo X-Hub-Version: 1).
- * Solo maneja `suscripcion.cobrada`; otros eventos se aceptan con 200+skipped
- * para forward-compat (no romper con 4xx cuando el Hub añada eventos nuevos).
+ * Maneja `suscripcion.cobrada` y `pago.reembolsado`; otros eventos se aceptan
+ * con 200+skipped para forward-compat (no romper con 4xx cuando el Hub añada
+ * eventos nuevos).
  *
  * Flujo (fail-closed en autenticación, continuidad en fallos transitorios):
  *   1. Solo POST.
@@ -171,7 +177,7 @@ function verifyHubSignature(secret, appSlug, timestampHeader, rawBody, receivedS
  *   5. Verificar secreto y HMAC (fail-closed: sin secreto → 503).
  *   6. Parsear JSON. Validar payload.app_slug === 'w-planner'.
  *   7. Dispatch por evento. No manejado → 200 skipped (forward-compat).
- *   8. Solo para 'suscripcion.cobrada':
+ *   8. Para 'suscripcion.cobrada' (ver handleSuscripcionCobrada):
  *      a. Reclamo atómico vía RPC hub_reclamar_evento.
  *         - 'duplicate' → 200 (idempotente, ya procesado).
  *         - 'in_flight' → 200 (otra corrida activa; self-healing a los 15 min).
@@ -181,6 +187,9 @@ function verifyHubSignature(secret, appSlug, timestampHeader, rawBody, receivedS
  *      d. Upsert users_premium.
  *      e. En éxito: marcar evento procesado → 200.
  *      f. En fallo: revertir evento → 500 (reintentable; self-heal si falla).
+ *   9. Para 'pago.reembolsado' (ver handlePagoReembolsado): mismo candado de
+ *      idempotencia y resolución por email; revoca tier/status en users_premium
+ *      SOLO si el cobro reembolsado es el que otorgó el acceso vigente.
  */
 export default async function handler(req, res) {
   // ── 1. Solo POST ────────────────────────────────────────────────────────────
@@ -324,20 +333,24 @@ export default async function handler(req, res) {
   }
 
   // ── 7. Dispatch por tipo de evento ─────────────────────────────────────────
-  // Solo manejamos 'suscripcion.cobrada'. Otros eventos se aceptan con 200 +
-  // skipped para forward-compat: cuando el Hub añada eventos nuevos (ej.
-  // 'suscripcion.cancelada'), no rompemos con 4xx/5xx que causarían reintentos.
+  // Manejamos 'suscripcion.cobrada' y 'pago.reembolsado'. Otros eventos se
+  // aceptan con 200 + skipped para forward-compat: cuando el Hub añada eventos
+  // nuevos (ej. 'suscripcion.cancelada'), no rompemos con 4xx/5xx que causarían
+  // reintentos infinitos sin posibilidad de éxito.
   if (!payload.evento) {
     return res.status(400).json({ error: "missing_evento" });
   }
 
-  if (payload.evento !== "suscripcion.cobrada") {
-    console.log("[hub-webhook] evento no manejado (forward-compat):", payload.evento);
-    return res.status(200).json({ ok: true, skipped: "evento_no_manejado" });
+  if (payload.evento === "suscripcion.cobrada") {
+    return handleSuscripcionCobrada(req, res, payload);
   }
 
-  // ── 8. Procesar 'suscripcion.cobrada' ──────────────────────────────────────
-  return handleSuscripcionCobrada(req, res, payload);
+  if (payload.evento === "pago.reembolsado") {
+    return handlePagoReembolsado(req, res, payload);
+  }
+
+  console.log("[hub-webhook] evento no manejado (forward-compat):", payload.evento);
+  return res.status(200).json({ ok: true, skipped: "evento_no_manejado" });
 }
 
 // ── handleSuscripcionCobrada ──────────────────────────────────────────────────
@@ -577,6 +590,261 @@ async function handleSuscripcionCobrada(req, res, payload) {
     // SELF-HEALING: si revertirEvento falla aquí también, el evento queda en
     // 'procesando' con timestamp viejo → se auto-reclama a los 15 min.
     console.error("[hub-webhook] excepción inesperada:", err?.message, { evento_id: eventoId });
+    await revertirEvento(admin, eventoId);
+    return res.status(500).json({ error: "internal error" });
+  }
+}
+
+// ── handlePagoReembolsado ─────────────────────────────────────────────────────
+
+/**
+ * Procesa el evento `pago.reembolsado`: revoca el acceso premium que había
+ * otorgado el cobro original.
+ *
+ * CONTRATO (docs/eventos-salientes.md del Hub, softatumedida-panel): el Hub
+ * emite este evento cuando un admin anula un cobro por reembolso (por
+ * `wompi_tx_id`). `evento_id_original` identifica el `suscripcion.cobrada`
+ * que otorgó el acceso; `evento_id` de ESTE evento trae el prefijo "refund:"
+ * (clave de idempotencia propia, no colisiona con el candado del cobro original).
+ *
+ * POR QUÉ w-planner NO reconstruye el ID `wompi_pay:`/`wompi_sub:` de la SPEC:
+ *   La SPEC describe cómo reconstruir el identificador del pago original para
+ *   apps que llevan un LEDGER de pagos (una fila por cobro — ej. betting-analyst
+ *   con su tabla `payments`). w-planner NO tiene ledger: `users_premium` es UNA
+ *   fila por usuario que se SOBRESCRIBE en cada cobro (ver handleSuscripcionCobrada,
+ *   upsert onConflict:'user_id'). El equivalente de "qué evento otorgó el acceso
+ *   actual" en w-planner es `users_premium.metadata.hub_evento_id`, que
+ *   handleSuscripcionCobrada ya escribe en cada cobro exitoso. Por eso este
+ *   handler compara ese campo contra `evento_id_original` en vez de reconstruir
+ *   un ID con prefijo que w-planner nunca guarda.
+ *
+ * POR QUÉ verificar hub_evento_id antes de revocar (no solo "el usuario existe"):
+ *   users_premium es una fila viva, no un historial. Si el Hub reembolsa un
+ *   cobro VIEJO ya superado por un cobro más reciente y legítimo (ej. un admin
+ *   reembolsa el cargo de un mes atrás cuando el usuario ya pagó el ciclo
+ *   siguiente), revocar sin verificar mataría una suscripción activa y vigente
+ *   que no tiene nada que ver con el reembolso. Comparar
+ *   `metadata.hub_evento_id === evento_id_original` asegura que solo revocamos
+ *   si el cobro reembolsado es EXACTAMENTE el que otorgó el estado actual. Si
+ *   no coincide (o el usuario nunca tuvo acceso vía Hub — ej. paga por MP), se
+ *   parquea para revisión manual en vez de tocar el estado — mismo patrón que
+ *   user_not_found / plan_desconocido en handleSuscripcionCobrada.
+ *
+ * Tier/status de destino: 'free' / 'cancelled'. No existe un status 'refunded'
+ * en el CHECK de users_premium (migración 016: 'active'|'pending'|'past_due'|
+ * 'cancelled'). 'cancelled' es el valor que ya usa mp-webhook.js para el mismo
+ * caso semántico (mapStatus('cancelled') + targetTier forzado a 'free' cuando
+ * status !== 'active', línea ~289-290 de api/mp-webhook.js), y es lo que ya
+ * interpretan los gates de acceso de la app (enforce_project_limit en la
+ * migración 027, user_can_use_ia_on_project en la 016): cualquier status
+ * distinto de 'active' se trata como sin premium. tier='free' además alinea
+ * el dato con el saneamiento de la migración 037 (un tier de pago en un status
+ * que no paga es información inconsistente que ahí se corrige de la misma forma).
+ *
+ * Idempotente: reprocesar el mismo evento_id (retry del Hub) no falla — el
+ * candado hub_reclamar_evento corta duplicados; y si de todas formas llegara
+ * a reejecutarse (self-heal tras un fallo de marcado), revocar dos veces es
+ * un no-op detectado explícitamente (ver chequeo "ya estaba revocado" abajo).
+ * Si no hay nada que revocar (usuario no encontrado, sin fila en users_premium,
+ * o el cobro reembolsado no es el que otorgó el acceso vigente), responde 200
+ * igual — patrón tolerante (ver handlePagoReembolsado de betting-analyst).
+ *
+ * @param {object} req
+ * @param {object} res
+ * @param {object} payload  Payload ya parseado y validado (evento/evento_id
+ *   genéricos validados en el dispatcher; evento_id_original/periodicidad se
+ *   validan aquí por ser propios de este tipo de evento).
+ */
+async function handlePagoReembolsado(req, res, payload) {
+  const eventoId = payload.evento_id;
+
+  // Validación de forma de los campos propios del reembolso. Un payload
+  // malformado del Hub indica un bug de configuración, no una condición
+  // transitoria — pero se responde 400 (no 200) siguiendo la misma convención
+  // que el resto de validaciones de forma de este archivo (ej. missing_evento_id).
+  if (!payload.evento_id_original || typeof payload.evento_id_original !== "string") {
+    console.warn("[hub-webhook] pago.reembolsado sin evento_id_original:", eventoId);
+    return res.status(400).json({ error: "missing_evento_id_original" });
+  }
+  if (payload.periodicidad !== "unico" && payload.periodicidad !== "mensual") {
+    console.warn("[hub-webhook] pago.reembolsado con periodicidad inválida:", payload.periodicidad);
+    return res.status(400).json({ error: "invalid_periodicidad" });
+  }
+
+  const admin = createAdminClient();
+  if (!admin) {
+    console.error("[hub-webhook] Supabase no configurado (createAdminClient devolvió null)");
+    return res.status(503).json({ error: "supabase_not_configured" });
+  }
+
+  // ── Paso 1: Reclamo atómico del candado de idempotencia ───────────────────
+  const { data: claimResult, error: claimError } = await admin
+    .rpc("hub_reclamar_evento", {
+      p_evento_id:   eventoId,
+      p_evento_tipo: payload.evento,
+    });
+
+  if (claimError) {
+    console.error("[hub-webhook] error al reclamar evento (pago.reembolsado):", claimError.message, { evento_id: eventoId });
+    return res.status(500).json({ error: "db_error" });
+  }
+
+  if (claimResult === "duplicate") {
+    console.log("[hub-webhook] pago.reembolsado ya procesado (idempotente):", eventoId);
+    return res.status(200).json({ ok: true, duplicate: true });
+  }
+
+  if (claimResult === "in_flight") {
+    console.log("[hub-webhook] pago.reembolsado en vuelo (otra corrida activa):", eventoId);
+    return res.status(200).json({ ok: true, in_flight: true });
+  }
+
+  // claimResult === 'claimed': somos el procesador designado.
+  try {
+    // ── Paso 2: Resolver usuario por email ────────────────────────────────
+    // cliente_email es nullable en la SPEC. w-planner resuelve identidad
+    // exclusivamente por email (igual que handleSuscripcionCobrada; no usa
+    // app_cliente_ref). Sin email no hay forma de ubicar al usuario: parquear.
+    const emailRaw = payload.cliente_email;
+    if (!emailRaw || typeof emailRaw !== "string") {
+      console.warn("[hub-webhook] pago.reembolsado sin cliente_email:", { evento_id: eventoId });
+      await parquearEvento(admin, payload, "cliente_email_ausente");
+      await marcarEventoProcesado(admin, eventoId);
+      return res.status(200).json({ ok: true, parked: "cliente_email_ausente" });
+    }
+
+    const emailNorm = emailRaw.trim().toLowerCase();
+    const emailMask = maskEmail(emailNorm);
+
+    const { data: userId, error: uidError } = await admin
+      .rpc("get_user_id_by_email", { p_email: emailNorm });
+
+    if (uidError) {
+      console.error("[hub-webhook] error en RPC get_user_id_by_email (reembolso):", uidError.message);
+      await revertirEvento(admin, eventoId);
+      return res.status(500).json({ error: "db_error" });
+    }
+
+    if (!userId) {
+      console.warn("[hub-webhook] pago.reembolsado: email no encontrado en auth.users:", {
+        email: emailMask,
+        evento_id: eventoId,
+      });
+      await parquearEvento(admin, payload, "user_not_found");
+      await marcarEventoProcesado(admin, eventoId);
+      return res.status(200).json({ ok: true, parked: "user_not_found" });
+    }
+
+    // ── Paso 3: Leer el estado premium actual del usuario ──────────────────
+    // Necesitamos tier/status/metadata para (a) verificar que el cobro que se
+    // reembolsa es el que otorgó el acceso VIGENTE, y (b) mergear metadata sin
+    // una segunda consulta. A diferencia del upsert de handleSuscripcionCobrada
+    // (que evita el round-trip a propósito), aquí SÍ compensa: ya lo necesitamos
+    // para el chequeo (a).
+    const { data: premiumRow, error: selectError } = await admin
+      .from("users_premium")
+      .select("tier, status, metadata")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error("[hub-webhook] error leyendo users_premium para reembolso:", selectError.message, { evento_id: eventoId });
+      await revertirEvento(admin, eventoId);
+      return res.status(500).json({ error: "db_error" });
+    }
+
+    if (!premiumRow) {
+      // El usuario existe en auth.users pero nunca tuvo fila en users_premium
+      // (nunca pagó por ningún canal). Nada que revocar.
+      console.log("[hub-webhook] pago.reembolsado: usuario sin fila en users_premium, nada que revocar:", {
+        email: emailMask,
+        evento_id: eventoId,
+      });
+      await marcarEventoProcesado(admin, eventoId);
+      return res.status(200).json({ ok: true, nothing_to_revoke: true });
+    }
+
+    const grantingEventId = premiumRow.metadata?.hub_evento_id ?? null;
+
+    if (grantingEventId !== payload.evento_id_original) {
+      // El acceso vigente NO fue otorgado por el cobro que se está reembolsando
+      // (nunca llegó vía Hub —p.ej. paga por MP—, o un cobro posterior ya lo
+      // reemplazó). Revocar aquí mataría una suscripción legítima y distinta
+      // de la que el admin quiso reembolsar. Se parquea para revisión manual
+      // en vez de actuar a ciegas.
+      console.warn("[hub-webhook] pago.reembolsado: el cobro reembolsado no otorgó el acceso vigente:", {
+        email: emailMask,
+        evento_id: eventoId,
+        evento_id_original: payload.evento_id_original,
+        acceso_vigente_otorgado_por: grantingEventId,
+      });
+      await parquearEvento(admin, payload, "evento_original_no_es_el_vigente");
+      await marcarEventoProcesado(admin, eventoId);
+      return res.status(200).json({ ok: true, parked: "evento_original_no_es_el_vigente" });
+    }
+
+    if (premiumRow.status === "cancelled" && premiumRow.tier === "free") {
+      // Ya estaba revocado (reintento del Hub tras self-heal, o el candado se
+      // reclamó dos veces). Idempotente: no repetir el UPDATE ni pisar
+      // metadata.reembolsado_en con un timestamp nuevo.
+      console.log("[hub-webhook] pago.reembolsado: ya estaba revocado (idempotente):", { evento_id: eventoId });
+      await marcarEventoProcesado(admin, eventoId);
+      return res.status(200).json({ ok: true, already_revoked: true });
+    }
+
+    // ── Paso 4: Revocar — tier='free', status='cancelled' ───────────────────
+    const { error: updateError } = await admin
+      .from("users_premium")
+      .update({
+        tier:   "free",
+        status: "cancelled",
+        metadata: {
+          ...(premiumRow.metadata ?? {}),
+          last_event:           "pago.reembolsado",
+          hub_refund_evento_id: eventoId,
+          motivo_reembolso:     payload.motivo ?? null,
+          reembolsado_en:       payload.fecha ?? new Date().toISOString(),
+        },
+      })
+      .eq("user_id", userId);
+
+    if (updateError) {
+      console.error("[hub-webhook] update users_premium (reembolso) falló:", updateError.message, {
+        evento_id: eventoId,
+        email: emailMask,
+      });
+      await revertirEvento(admin, eventoId);
+      return res.status(500).json({ error: "internal error" });
+    }
+
+    // ── Paso 5: Marcar evento como procesado (antes de responder 200) ───────
+    const { error: markError } = await admin
+      .rpc("hub_marcar_evento_procesado", { p_evento_id: eventoId });
+
+    if (markError) {
+      console.error(
+        "[hub-webhook] no se pudo marcar evento procesado tras reembolso (self-heal en 15 min):",
+        markError.message,
+        { evento_id: eventoId },
+      );
+      // No revertir: el UPDATE ya ocurrió (acceso ya revocado). El auto-sanado
+      // retomará a los 15 min y el chequeo "ya estaba revocado" del paso 3 lo
+      // volverá un no-op. Responder 200: revocar dos veces no causa daño, pero
+      // reintentar con 5xx aquí sería trabajo innecesario para un efecto que
+      // ya se aplicó.
+    }
+
+    console.log("[hub-webhook] pago.reembolsado aplicado (acceso revocado):", {
+      email:         emailMask,
+      evento_id:     eventoId,
+      tier_anterior: premiumRow.tier,
+    });
+    return res.status(200).json({ ok: true, revoked: true });
+
+  } catch (err) {
+    // Excepción inesperada: revertir el candado para permitir reintento del
+    // Hub. Misma garantía self-healing que handleSuscripcionCobrada.
+    console.error("[hub-webhook] excepción inesperada (pago.reembolsado):", err?.message, { evento_id: eventoId });
     await revertirEvento(admin, eventoId);
     return res.status(500).json({ error: "internal error" });
   }

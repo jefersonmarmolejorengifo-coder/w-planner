@@ -793,7 +793,13 @@ async function handlePagoReembolsado(req, res, payload) {
     }
 
     // ── Paso 4: Revocar — tier='free', status='cancelled' ───────────────────
-    const { error: updateError } = await admin
+    // ATÓMICO (fix gate seguridad 2026-07-18): el UPDATE re-exige que el acceso
+    // vigente siga otorgado por el MISMO evento que se reembolsa. Sin esto hay
+    // una carrera TOCTOU: si una renovación legítima (suscripcion.cobrada)
+    // actualiza la fila entre el SELECT del paso 3 y este UPDATE, revocaríamos
+    // una suscripción recién pagada. Con el filtro JSON, esa carrera deja el
+    // UPDATE en 0 filas y se parquea en vez de revocar.
+    const { data: updatedRows, error: updateError } = await admin
       .from("users_premium")
       .update({
         tier:   "free",
@@ -806,7 +812,9 @@ async function handlePagoReembolsado(req, res, payload) {
           reembolsado_en:       payload.fecha ?? new Date().toISOString(),
         },
       })
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .eq("metadata->>hub_evento_id", payload.evento_id_original)
+      .select("user_id");
 
     if (updateError) {
       console.error("[hub-webhook] update users_premium (reembolso) falló:", updateError.message, {
@@ -815,6 +823,20 @@ async function handlePagoReembolsado(req, res, payload) {
       });
       await revertirEvento(admin, eventoId);
       return res.status(500).json({ error: "internal error" });
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      // La condición dejó de cumplirse entre la lectura y la escritura: un
+      // cobro nuevo reemplazó al evento original durante este handler. El
+      // acceso vigente ya NO corresponde al cobro reembolsado → no revocar.
+      console.warn("[hub-webhook] pago.reembolsado: el evento original cambió durante el reembolso (carrera con renovación), se parquea:", {
+        email: emailMask,
+        evento_id: eventoId,
+        evento_id_original: payload.evento_id_original,
+      });
+      await parquearEvento(admin, payload, "evento_original_cambio_durante_reembolso");
+      await marcarEventoProcesado(admin, eventoId);
+      return res.status(200).json({ ok: true, parked: "evento_original_cambio_durante_reembolso" });
     }
 
     // ── Paso 5: Marcar evento como procesado (antes de responder 200) ───────

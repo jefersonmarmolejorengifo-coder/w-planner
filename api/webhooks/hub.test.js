@@ -866,9 +866,17 @@ describe("hub.js — pago.reembolsado (revocación de acceso)", () => {
    * previo en el chain) de UPDATE (op="update") para que el mismo tableConfig
    * sirva a ambas operaciones del handler.
    */
-  function mockPremiumRow(row, { updateError = null } = {}) {
+  function mockPremiumRow(row, { updateError = null, updateAffected = 1 } = {}) {
     return (op) => {
-      if (op === "update") return { error: updateError };
+      if (op === "update") {
+        // El UPDATE atómico del handler encadena .select("user_id") y cuenta
+        // filas afectadas: updateAffected=0 simula la carrera TOCTOU (una
+        // renovación cambió hub_evento_id entre el SELECT y el UPDATE).
+        return {
+          data: updateError ? null : Array.from({ length: updateAffected }, () => ({ user_id: "u-1" })),
+          error: updateError,
+        };
+      }
       return { data: row, error: null };
     };
   }
@@ -906,6 +914,38 @@ describe("hub.js — pago.reembolsado (revocación de acceso)", () => {
     expect(update.data.metadata.hub_refund_evento_id).toBe(payload.evento_id);
     expect(update.data.metadata.motivo_reembolso).toBe("solicitud del cliente");
 
+    const markCall = _mockAdmin.calls.rpc.find((c) => c.fn === "hub_marcar_evento_procesado");
+    expect(markCall).toBeDefined();
+  });
+
+  // ── Test 1b: Carrera TOCTOU — renovación entre SELECT y UPDATE ─────────────
+  it("(1b) el UPDATE atómico afecta 0 filas (renovación concurrente pisó hub_evento_id) → parquea sin revocar", async () => {
+    const payload = buildPayloadReembolso();
+    const rawBody = JSON.stringify(payload);
+    const headers = buildHeaders(rawBody);
+
+    // El SELECT del paso 3 aún ve el evento original como vigente (por eso el
+    // handler avanza al paso 4), pero el UPDATE condicionado devuelve 0 filas:
+    // una suscripcion.cobrada concurrente ya reemplazó hub_evento_id.
+    _mockAdmin = makeAdminMock({
+      users_premium: mockPremiumRow(
+        {
+          tier: "pro_solo",
+          status: "active",
+          metadata: { provider: "wompi-hub", hub_evento_id: EVENTO_ORIGINAL },
+        },
+        { updateAffected: 0 },
+      ),
+    });
+
+    const req = makeReq(rawBody, headers);
+    const res = makeRes();
+    await handler(req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._body).toMatchObject({ ok: true, parked: "evento_original_cambio_durante_reembolso" });
+
+    // Se marcó procesado (no habrá reintentos que revoquen la renovación nueva).
     const markCall = _mockAdmin.calls.rpc.find((c) => c.fn === "hub_marcar_evento_procesado");
     expect(markCall).toBeDefined();
   });

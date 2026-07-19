@@ -1,6 +1,7 @@
 ---
 import { site, nav, APP_URL } from '../data/site.js';
 import { features } from '../data/features.js';
+import { CORREO } from '../data/legal.js';
 const year = 2026;
 ---
 <footer class="footer">
@@ -24,8 +25,14 @@ const year = 2026;
       </div>
       <div>
         <h4>Contacto</h4>
-        <a href={`mailto:${site.salesEmail}`}>{site.salesEmail}</a>
+        <a href={`mailto:${CORREO}`}>{CORREO}</a>
         <a href={site.companyUrl} rel="noopener">softatumedida.com</a>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <a href="/terminos">Términos y condiciones</a>
+        <a href="/tratamiento-datos">Tratamiento de datos</a>
+        <a href="/privacidad">Aviso de privacidad</a>
       </div>
     </div>
     <hr class="divider" style="margin: 34px 0 20px;" />

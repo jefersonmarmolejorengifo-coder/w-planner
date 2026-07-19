@@ -1,0 +1,145 @@
+---
+import Base from '../layouts/Base.astro';
+import { site } from '../data/site.js';
+import { EMPRESA, NIT, DIRECCION, CIUDAD, PAIS, TELEFONO, CORREO, VIGENCIA } from '../data/legal.js';
+import { graph, org, breadcrumb } from '../lib/schema.js';
+
+const title = 'Aviso de Privacidad | Productivity-Plus';
+const description =
+  'Aviso de privacidad de Productivity-Plus: qué datos recogemos, para qué los usamos, con quién los compartimos y cómo ejercer tus derechos de habeas data (Ley 1581 de 2012).';
+const jsonld = graph(
+  org,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Privacidad', path: '/privacidad' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/privacidad" jsonld={jsonld}>
+  <main>
+    <section class="hero" style="padding-bottom: 0;">
+      <div class="container" style="max-width: 760px;">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Privacidad</p>
+        <span class="eyebrow">Legal</span>
+        <h1>Aviso de Privacidad</h1>
+        <p class="small muted">Vigente desde el {VIGENCIA}</p>
+      </div>
+    </section>
+
+    <section style="padding-top: 28px;">
+      <div class="container" style="max-width: 760px;">
+        <div class="prose">
+          <p>
+            Este es el aviso de privacidad de <strong>{site.company}</strong> para
+            <strong>{site.name}</strong> ({site.domain}), escrito en lenguaje claro conforme a
+            los artículos 14 y 15 del Decreto 1377 de 2013. Te contamos qué datos recogemos,
+            para qué los usamos, con quién los compartimos y cómo ejercer tus derechos. El
+            detalle completo está en nuestra <a href="/tratamiento-datos">Política de Tratamiento
+            de Datos Personales</a>, que también rige junto con estos <a href="/terminos">Términos
+            y Condiciones</a>.
+          </p>
+
+          <h2>1. ¿Quién es el responsable de tus datos?</h2>
+          <p>
+            <strong>{EMPRESA}</strong> («{site.company}»), NIT <strong>{NIT}</strong>, con
+            domicilio en <strong>{DIRECCION}</strong>, <strong>{CIUDAD}</strong>, {PAIS}.
+          </p>
+          <ul>
+            <li>Correo de contacto y para ejercer derechos de datos (habeas data): <strong>{CORREO}</strong></li>
+            <li>Teléfono: <strong>{TELEFONO}</strong></li>
+          </ul>
+
+          <h2>2. ¿Qué datos recogemos?</h2>
+          <p><strong>Si nos escribes desde el sitio web:</strong> nombre, correo electrónico y el contenido de tu mensaje.</p>
+          <p><strong>Si usas la aplicación</strong> (creas una cuenta y un equipo):</p>
+          <ul>
+            <li>Nombre, correo electrónico y contraseña (almacenada cifrada, nunca en texto plano).</li>
+            <li>Datos de tu suscripción y del pago del plan (Pro, Pro Team o Pro Power).</li>
+            <li>Los nombres y correos de las personas que invitas a colaborar en tus tableros.</li>
+          </ul>
+          <p><strong>Datos operativos que ingresas en tus tableros:</strong> proyectos, tareas, comentarios, sprints, OKRs y las respuestas que tu equipo da en las retros. Cuando generas un reporte o usas el chat con IA, el contenido relevante del tablero se envía a nuestro proveedor de IA para producir ese reporte o esa respuesta (ver sección 4).</p>
+          <p class="small muted">No pedimos datos sensibles (salud, religión, orientación política, biométricos, etc.). No los ingreses en la app.</p>
+
+          <h2>3. ¿Para qué usamos tus datos?</h2>
+          <ul>
+            <li>Crear y administrar tu cuenta y prestarte el servicio de gestión de proyectos.</li>
+            <li>Generar los reportes y el chat con IA a partir de los datos de tu propio tablero.</li>
+            <li>Cobrar la suscripción del plan que elijas, a través de la pasarela de pagos.</li>
+            <li>Enviarte correos transaccionales: confirmación de cuenta, avisos de tu suscripción, notificaciones de reportes e invitaciones a tableros.</li>
+            <li>Darte soporte técnico y atender tus solicitudes.</li>
+            <li>Cumplir obligaciones legales, contables y tributarias.</li>
+          </ul>
+
+          <h2>4. ¿Con quién compartimos tus datos?</h2>
+          <p>
+            Para que {site.name} funcione, nos apoyamos en proveedores tecnológicos que actúan
+            como <strong>encargados</strong> del tratamiento: tratan tus datos por cuenta
+            nuestra, bajo contrato y con deberes de confidencialidad y seguridad.
+          </p>
+          <table>
+            <thead><tr><th>Proveedor</th><th>Para qué</th><th>Dónde se guardan los datos</th></tr></thead>
+            <tbody>
+              <tr><td>Supabase / Amazon Web Services (AWS)</td><td>Base de datos, autenticación y almacenamiento</td><td>Estados Unidos (AWS)</td></tr>
+              <tr><td>Vercel</td><td>Alojamiento y funcionamiento de la app web</td><td>Estados Unidos / red global</td></tr>
+              <tr><td>Anthropic</td><td>Generación de los reportes y del chat con IA a partir de tu tablero</td><td>Estados Unidos</td></tr>
+              <tr><td>MercadoPago</td><td>Procesar el pago de tu suscripción</td><td>Colombia</td></tr>
+              <tr><td>Wompi, vía el Hub de {site.company}</td><td>Procesar el pago de tu suscripción</td><td>Colombia</td></tr>
+              <tr><td>Resend</td><td>Envío de correos transaccionales</td><td>Estados Unidos</td></tr>
+            </tbody>
+          </table>
+          <p>No vendemos tus datos personales. Solo los compartimos con estos proveedores para prestarte el servicio, o cuando la ley o una autoridad lo exijan.</p>
+
+          <h2>5. Transferencia internacional de datos</h2>
+          <p>
+            Como Supabase/AWS, Vercel, Anthropic y Resend almacenan o procesan datos
+            <strong>en el exterior (Estados Unidos)</strong>, al aceptar este aviso y nuestra
+            Política de Tratamiento <strong>autorizas expresamente</strong> que tus datos se
+            transmitan y alojen allí para las finalidades descritas (Ley 1581 de 2012,
+            artículo 26, literal a), amparada además en los contratos de tratamiento suscritos
+            con cada proveedor.
+          </p>
+
+          <h2>6. ¿Cuáles son tus derechos y cómo los ejerces?</h2>
+          <p>En cualquier momento puedes:</p>
+          <ul>
+            <li>Conocer, actualizar y rectificar tus datos.</li>
+            <li>Solicitar prueba de la autorización que otorgaste.</li>
+            <li>Saber cómo hemos usado tus datos.</li>
+            <li>Revocar la autorización o pedir que eliminemos tus datos (salvo que la ley nos obligue a conservarlos).</li>
+            <li>Presentar quejas ante la Superintendencia de Industria y Comercio (SIC).</li>
+          </ul>
+          <p>
+            <strong>¿Cómo?</strong> Escríbenos a <strong>{CORREO}</strong> desde tu correo
+            registrado, indicando tu solicitud. Respondemos consultas en un máximo de
+            <strong>10 días hábiles</strong> (prorrogables 5 días hábiles) y reclamos en un
+            máximo de <strong>15 días hábiles</strong> (prorrogables 8 días hábiles).
+          </p>
+
+          <h2>7. Cómo conocer cambios en esta política</h2>
+          <p>
+            Este Aviso y la Política de Tratamiento están disponibles de forma permanente en
+            {site.domain} y dentro de la app. Si hacemos cambios sustanciales, te lo
+            informaremos por el sitio, la app o por correo antes de que entren en vigor.
+          </p>
+
+          <h2>8. Seguridad y conservación</h2>
+          <p>
+            Protegemos tus datos con medidas técnicas y organizativas razonables: cifrado en
+            tránsito (HTTPS), aislamiento de datos por equipo/proyecto, control de acceso por
+            roles y buenas prácticas de gestión de credenciales. Conservamos tus datos mientras
+            dure tu relación con nosotros y, después, durante los plazos que exijan las
+            obligaciones legales; luego los eliminamos o anonimizamos.
+          </p>
+
+          <h2>9. Normas aplicables</h2>
+          <ul>
+            <li>Constitución Política de Colombia, artículo 15 (habeas data).</li>
+            <li>Ley Estatutaria 1581 de 2012 — protección de datos personales.</li>
+            <li>Decreto 1377 de 2013 (compilado en el Decreto 1074 de 2015) — aviso de privacidad (artículos 14 y 15) y política de tratamiento (artículo 13).</li>
+            <li>Circular Única de la SIC — transferencias internacionales y Registro Nacional de Bases de Datos.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

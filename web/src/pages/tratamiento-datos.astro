@@ -1,0 +1,218 @@
+---
+import Base from '../layouts/Base.astro';
+import { site } from '../data/site.js';
+import { EMPRESA, NIT, DIRECCION, CIUDAD, PAIS, TELEFONO, CORREO, VIGENCIA } from '../data/legal.js';
+import { graph, org, breadcrumb } from '../lib/schema.js';
+
+const title = 'Política de Tratamiento de Datos Personales | Productivity-Plus';
+const description =
+  'Política de tratamiento de datos personales de Productivity-Plus, conforme a la Ley 1581 de 2012 y el Decreto 1074 de 2015 (habeas data): finalidades, derechos, encargados y transferencia internacional.';
+const jsonld = graph(
+  org,
+  breadcrumb([
+    { name: 'Inicio', path: '/' },
+    { name: 'Tratamiento de datos', path: '/tratamiento-datos' },
+  ]),
+);
+---
+<Base title={title} description={description} path="/tratamiento-datos" jsonld={jsonld}>
+  <main>
+    <section class="hero" style="padding-bottom: 0;">
+      <div class="container" style="max-width: 760px;">
+        <p class="breadcrumb"><a href="/">Inicio</a> / Tratamiento de datos</p>
+        <span class="eyebrow">Legal</span>
+        <h1>Política de Tratamiento de Datos Personales</h1>
+        <p class="small muted">Vigente desde el {VIGENCIA}</p>
+      </div>
+    </section>
+
+    <section style="padding-top: 28px;">
+      <div class="container" style="max-width: 760px;">
+        <div class="prose">
+          <p>
+            Esta política se expide en cumplimiento de la Ley Estatutaria 1581 de 2012, del
+            Decreto 1377 de 2013 (hoy compilado en el Decreto Único Reglamentario 1074 de 2015)
+            y demás normas colombianas sobre protección de datos personales (habeas data). Su
+            contenido desarrolla, como mínimo, lo exigido por el artículo 13 del Decreto 1377
+            de 2013 para <strong>{site.name}</strong> ({site.domain}).
+          </p>
+
+          <h2>1. Identificación del responsable del tratamiento</h2>
+          <table>
+            <tbody>
+              <tr><td><strong>Razón social</strong></td><td>{EMPRESA} (nombre comercial: «{site.company}»)</td></tr>
+              <tr><td><strong>NIT</strong></td><td>{NIT}</td></tr>
+              <tr><td><strong>Domicilio</strong></td><td>{DIRECCION}, {CIUDAD}, {PAIS}</td></tr>
+              <tr><td><strong>Correo de contacto y para habeas data</strong></td><td>{CORREO}</td></tr>
+              <tr><td><strong>Teléfono</strong></td><td>{TELEFONO}</td></tr>
+              <tr><td><strong>Sitio web del producto</strong></td><td>{site.domain}</td></tr>
+            </tbody>
+          </table>
+          <p>En adelante, «{site.company}», «la Compañía» o «el Responsable».</p>
+
+          <h2>2. Definiciones</h2>
+          <ul>
+            <li><strong>Autorización:</strong> consentimiento previo, expreso e informado del Titular para el tratamiento de sus datos personales.</li>
+            <li><strong>Base de datos:</strong> conjunto organizado de datos personales objeto de tratamiento.</li>
+            <li><strong>Dato personal:</strong> cualquier información vinculada o que pueda asociarse a una persona natural determinada o determinable.</li>
+            <li><strong>Dato sensible:</strong> el que afecta la intimidad del Titular o cuyo uso indebido puede generar discriminación (por ejemplo, salud, origen racial, datos biométricos). {site.name} no está diseñado para recolectar datos sensibles.</li>
+            <li><strong>Titular:</strong> persona natural cuyos datos personales son objeto de tratamiento.</li>
+            <li><strong>Responsable del tratamiento:</strong> quien decide sobre la base de datos y/o el tratamiento.</li>
+            <li><strong>Encargado del tratamiento:</strong> quien trata los datos por cuenta del Responsable, siguiendo sus instrucciones.</li>
+            <li><strong>Tratamiento:</strong> cualquier operación sobre datos personales (recolección, almacenamiento, uso, circulación, supresión).</li>
+          </ul>
+
+          <h2>3. Principios rectores</h2>
+          <p>
+            Todo tratamiento se rige por los principios del artículo 4 de la Ley 1581 de 2012:
+            legalidad, finalidad, libertad, veracidad o calidad, transparencia, acceso y
+            circulación restringida, seguridad y confidencialidad. {site.company} solo trata
+            datos para finalidades legítimas, informadas y autorizadas, adopta medidas de
+            seguridad razonables y no divulga los datos salvo en los casos previstos por la ley.
+          </p>
+
+          <h2>4. Tratamiento y finalidades</h2>
+          <h3>4.1. Datos de contactos y clientes potenciales (sitio corporativo)</h3>
+          <ul>
+            <li>Datos: nombre, correo electrónico, mensaje.</li>
+            <li>Finalidades: atender solicitudes de contacto, enviar información comercial de {site.name} y gestionar la relación precontractual.</li>
+          </ul>
+          <h3>4.2. Datos de la cuenta (usuarios registrados de la app)</h3>
+          <ul>
+            <li>Datos: nombre, correo electrónico, contraseña cifrada, datos de la suscripción y del pago del plan.</li>
+            <li>Finalidades: crear y administrar la cuenta; prestar el servicio de gestión de proyectos (tableros, Gantt, OKRs, sprints, reportes); gestionar el cobro de la suscripción a través de la pasarela de pagos; enviar comunicaciones transaccionales; soporte técnico; cumplimiento de obligaciones legales y contables.</li>
+          </ul>
+          <h3>4.3. Contenido de los tableros (roles Responsable / Encargado)</h3>
+          <p>
+            Cada persona que usa {site.name} —el dueño de la cuenta o cualquier colaborador que
+            invita a un proyecto— crea su propia cuenta y es Titular de sus datos de cuenta,
+            frente a los cuales {site.company} actúa como <strong>Responsable</strong>.
+          </p>
+          <p>
+            El contenido que un equipo ingresa dentro de sus tableros (tareas, comentarios,
+            sprints, OKRs, respuestas de retros) puede incluir datos personales de terceros si
+            el propio equipo decide escribirlos allí (por ejemplo, el nombre de un cliente
+            mencionado en una tarea o en un reporte). Sobre esos datos, quien los ingresa es el            <strong>Responsable</strong> (decide qué información registrar y con qué fin) y            {site.company} actúa como <strong>Encargado</strong>: los aloja y procesa —incluida
+            la generación de reportes y respuestas de chat con IA a partir de ese contenido—
+            únicamente para prestar el servicio, siguiendo las instrucciones del equipo.
+          </p>
+
+          <h2>5. Derechos del Titular</h2>
+          <p>Como Titular, tienes derecho a:</p>
+          <ol>
+            <li>Conocer, actualizar y rectificar tus datos personales.</li>
+            <li>Solicitar prueba de la autorización otorgada.</li>
+            <li>Ser informado, previa solicitud, sobre el uso que se ha dado a tus datos.</li>
+            <li>Presentar quejas ante la Superintendencia de Industria y Comercio (SIC) por infracciones.</li>
+            <li>Revocar la autorización y/o solicitar la supresión del dato cuando no se respeten los principios, derechos y garantías legales, salvo deber legal o contractual de permanencia.</li>
+            <li>Acceder gratuitamente a tus datos personales objeto de tratamiento.</li>
+          </ol>
+
+          <h2>6. Autorización</h2>
+          <p>
+            El tratamiento requiere autorización previa, expresa e informada del Titular (Ley
+            1581 de 2012, artículo 9; Decreto 1377 de 2013, artículos 5 a 9). La autorización se
+            obtiene por medios que permiten su posterior consulta: la casilla de aceptación al
+            crear tu cuenta, o el envío de un formulario del sitio conociendo esta política.
+            {site.company} conserva prueba de la autorización otorgada.
+          </p>
+          <p>
+            Tratándose de menores de edad, el tratamiento solo procede en los términos del
+            artículo 7 de la Ley 1581 de 2012 y con autorización del representante legal.            {site.name} está dirigido a personas mayores de edad.
+          </p>
+
+          <h2>7. Procedimiento para ejercer tus derechos (consultas y reclamos)</h2>
+          <p>
+            <strong>Canal de atención:</strong> {CORREO} · <strong>Teléfono:</strong> {TELEFONO} ·            <strong>Dirección:</strong> {DIRECCION}, {CIUDAD}.
+          </p>
+          <h3>7.1. Consultas</h3>
+          <p>
+            Puedes consultar tus datos en cualquier momento. La consulta se atiende en un
+            máximo de <strong>diez (10) días hábiles</strong> desde su recibo. Si no es
+            posible, te informaremos los motivos y la fecha de atención, que no superará los            <strong>cinco (5) días hábiles</strong> siguientes al vencimiento del primer término.
+          </p>
+          <h3>7.2. Reclamos</h3>
+          <p>
+            Puedes presentar un reclamo cuando consideres que tu información debe corregirse,
+            actualizarse o suprimirse, o cuando adviertas un presunto incumplimiento. El
+            reclamo debe indicar tu identificación, la descripción de los hechos, una dirección
+            de contacto y los documentos que quieras hacer valer. Si está incompleto, te lo
+            haremos saber dentro de los <strong>cinco (5) días</strong> siguientes; transcurridos            <strong>dos (2) meses</strong> sin que completes la información, se entenderá
+            desistido. Resolvemos el reclamo en un máximo de            <strong>quince (15) días hábiles</strong> desde el día siguiente a su recibo,
+            prorrogables por <strong>ocho (8) días hábiles</strong> más, informándote
+            previamente los motivos y la fecha de respuesta.
+          </p>
+          <p class="small muted">
+            Solo puedes acudir a la SIC una vez hayas agotado la consulta o el reclamo
+            directamente con nosotros (Ley 1581 de 2012, artículo 16).
+          </p>
+
+          <h2>8. Medidas de seguridad</h2>
+          <p>
+            Aplicamos medidas técnicas, humanas y administrativas razonables para proteger tus
+            datos frente a adulteración, pérdida, consulta, uso o acceso no autorizado: control
+            de acceso por roles, aislamiento de datos por cuenta y por proyecto (Row Level
+            Security), cifrado en tránsito (HTTPS/TLS) y gestión de secretos fuera del código.
+            Ningún sistema es completamente infalible; ante un incidente que afecte datos
+            personales, actuaremos conforme a la ley y lo reportaremos a la SIC cuando
+            corresponda.
+          </p>
+
+          <h2>9. Encargados y transferencia internacional de datos</h2>
+          <p>
+            Para prestar el servicio nos apoyamos en proveedores tecnológicos que actúan como            <strong>Encargados</strong> y que pueden almacenar o procesar datos            <strong>fuera de Colombia</strong>:
+          </p>
+          <table>
+            <thead><tr><th>Proveedor</th><th>Servicio</th><th>Ubicación de los datos</th></tr></thead>
+            <tbody>
+              <tr><td>Supabase / Amazon Web Services (AWS)</td><td>Base de datos, autenticación, almacenamiento</td><td>Estados Unidos</td></tr>
+              <tr><td>Vercel</td><td>Alojamiento y entrega de la aplicación web</td><td>Estados Unidos / red global</td></tr>
+              <tr><td>Anthropic</td><td>Generación de reportes y chat con IA a partir de tu tablero</td><td>Estados Unidos</td></tr>
+              <tr><td>MercadoPago</td><td>Procesamiento del pago de la suscripción</td><td>Colombia</td></tr>
+              <tr><td>Wompi (a través del Hub de {site.company})</td><td>Procesamiento del pago de la suscripción</td><td>Colombia</td></tr>
+              <tr><td>Resend</td><td>Envío de correos transaccionales</td><td>Estados Unidos</td></tr>
+            </tbody>
+          </table>
+          <p>
+            Estas operaciones constituyen <strong>transmisión internacional</strong> a
+            Encargados que tratan los datos por cuenta del Responsable, amparada por: (i)
+            contratos de tratamiento con cada proveedor que exigen confidencialidad, seguridad
+            y respeto de los principios de la Ley 1581; y (ii) la            <strong>autorización expresa del Titular</strong> al aceptar esta política, en los
+            términos de la excepción del artículo 26, literal a), de la Ley 1581 de 2012. Al
+            aceptar esta política, autorizas expresamente la transmisión y el almacenamiento de
+            tus datos en dichos proveedores y jurisdicciones para las finalidades descritas.
+          </p>
+
+          <h2>10. Vigencia de la política y período de conservación</h2>
+          <ul>
+            <li><strong>Entrada en vigencia de esta política:</strong> {VIGENCIA}.</li>
+            <li>
+              <strong>Período de conservación:</strong> tus datos se conservan mientras exista
+              la relación contractual o la finalidad que justifica el tratamiento y, después,
+              durante los plazos exigidos por obligaciones legales (contables, tributarias,
+              comerciales). Cumplidos esos plazos, se suprimen o anonimizan.
+            </li>
+            <li>Cualquier cambio sustancial se comunicará por los canales habituales (sitio web, app o correo) antes de su entrada en vigor.</li>
+          </ul>
+
+          <h2>11. Registro Nacional de Bases de Datos (RNBD)</h2>
+          <p>
+            Conforme al Decreto 090 de 2018, solo están obligadas a inscribir sus bases de
+            datos ante la SIC las sociedades y entidades sin ánimo de lucro con activos totales
+            superiores a 100.000 UVT, y las entidades públicas. {EMPRESA} evaluará y cumplirá
+            esta obligación si supera dicho umbral; en todo caso, cumple las demás obligaciones
+            de la Ley 1581 de 2012 con independencia del registro.
+          </p>
+
+          <h2>12. Normas aplicables</h2>
+          <ul>
+            <li>Constitución Política de Colombia, artículo 15 (habeas data) y artículo 20.</li>
+            <li>Ley Estatutaria 1581 de 2012 — régimen general de protección de datos personales.</li>
+            <li>Decreto 1377 de 2013 (compilado en el Decreto 1074 de 2015) — el artículo 13 fija el contenido mínimo de esta política.</li>
+            <li>Circular Única de la Superintendencia de Industria y Comercio (SIC) — RNBD y transferencias internacionales.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

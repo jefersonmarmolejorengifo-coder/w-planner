@@ -11,7 +11,7 @@ import {
   jsonResponse,
   requireDateRange,
 } from "./_auth.js";
-import { AI_MODELS } from "../src/aiModels.js";
+import { AI_MODELS, computeCostUsd, embedUsageComment } from "../src/aiModels.js";
 
 // Edge runtime con streaming: el reporte mensual puede generar 60-120s. Con
 // streaming SSE de Anthropic la función Vercel "termina" en ms al retornar
@@ -443,10 +443,13 @@ export default async function handler(req) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
 
-  // Métricas que el cliente puede leer si quiere (server-side las usamos
-  // solo para el header de respuesta y para guardar en archive history).
-  let _inputTokens = null;
-  let _outputTokens = null;
+  // Métricas de uso (H-cost): input_tokens/tokens de cache llegan en
+  // message_start, output_tokens cerca del final en message_delta. Se usan
+  // para calcular cost_usd y adjuntarlo como marcador al cierre del stream.
+  let inputTokens = null;
+  let outputTokens = null;
+  let cacheWriteTokens = 0;
+  let cacheReadTokens = 0;
   let stopReason = null;
 
   const htmlStream = new ReadableStream({
@@ -469,10 +472,12 @@ export default async function handler(req) {
               if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
                 controller.enqueue(encoder.encode(evt.delta.text));
               } else if (evt.type === "message_start" && evt.message?.usage) {
-                _inputTokens = evt.message.usage.input_tokens;
+                inputTokens = evt.message.usage.input_tokens;
+                cacheWriteTokens = evt.message.usage.cache_creation_input_tokens || 0;
+                cacheReadTokens = evt.message.usage.cache_read_input_tokens || 0;
               } else if (evt.type === "message_delta") {
                 if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
-                if (evt.usage?.output_tokens) _outputTokens = evt.usage.output_tokens;
+                if (evt.usage?.output_tokens) outputTokens = evt.usage.output_tokens;
               } else if (evt.type === "error") {
                 upstreamError = new Error(evt.error?.message || "Error del flujo de IA");
               }
@@ -492,6 +497,20 @@ export default async function handler(req) {
         controller.enqueue(encoder.encode(
           "\n<!-- WPLANNER_TRUNCATED: el reporte alcanzó el límite de max_tokens. -->\n"
         ));
+      }
+      // Best-effort: no debe tumbar la generación si el cálculo/enqueue falla.
+      try {
+        const costUsd = computeCostUsd(AI_MODELS.monthlyReport.id, {
+          inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens,
+        });
+        controller.enqueue(encoder.encode(embedUsageComment({
+          model: AI_MODELS.monthlyReport.id,
+          tokensInput: inputTokens,
+          tokensOutput: outputTokens,
+          costUsd,
+        })));
+      } catch (e) {
+        console.warn("[generate-monthly] No pude adjuntar métricas de uso:", e?.message);
       }
       controller.close();
     },

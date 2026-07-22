@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { getAuthJsonHeaders } from "../../lib/authHeaders";
+import { extractUsageMarker } from "../../aiModels";
 
 // Configuración de los reportes IA por correo (Scrum / Semanal PO / Mensual).
 // Extraído del monolito (H-002). REPORT_TYPES, DAY_NAMES_ES y ReportCard son
@@ -142,7 +143,8 @@ export default function ReportsConfigSection({ projectId }) {
         body: JSON.stringify({ projectId, ...range }),
       });
 
-      // El endpoint weekly_po devuelve text/html (streaming); los otros JSON.
+      // weekly_po/monthly_team devuelven text/html (streaming); scrum devuelve
+      // JSON con la metadata de costo ya incluida.
       const contentType = genRes.headers.get("content-type") || "";
       let payload;
       if (!genRes.ok) {
@@ -152,7 +154,23 @@ export default function ReportsConfigSection({ projectId }) {
       if (contentType.includes("application/json")) {
         payload = await genRes.json();
       } else {
-        payload = { html: await genRes.text() };
+        // Los endpoints en streaming adjuntan el costo real como un comentario
+        // HTML al final (no pueden ir en headers: los tokens de salida solo se
+        // conocen cuando Anthropic termina). Se extrae acá, best-effort: si
+        // falla, se sigue con el HTML crudo y sin metadata de costo.
+        const raw = await genRes.text();
+        try {
+          const { usage, html } = extractUsageMarker(raw);
+          payload = {
+            html,
+            model: usage?.model,
+            tokens_input: usage?.tokens_input,
+            tokens_output: usage?.tokens_output,
+            cost_usd: usage?.cost_usd,
+          };
+        } catch {
+          payload = { html: raw };
+        }
       }
 
       setMsg(m => ({ ...m, [type]: "📨 Enviando correo..." }));

@@ -20,7 +20,7 @@ import {
   jsonResponse,
   requireDateRange,
 } from "./_auth.js";
-import { AI_MODELS } from "../src/aiModels.js";
+import { AI_MODELS, computeCostUsd, embedUsageComment } from "../src/aiModels.js";
 
 export const config = { runtime: "edge" };
 
@@ -29,6 +29,15 @@ function jsonError(msg, status, headers) {
 }
 
 const MIN_DAYS = 60;
+
+// Límite de caracteres del plain_text de cada evolutivo anterior embebido en
+// el prompt (H-cost). A diferencia de otros campos de este mismo prompt
+// (comentarios, retros) que ya truncan con .slice(), el plain_text de los
+// evolutivos previos se embebía completo: con 2 evolutivos previos sin tope,
+// el input de Opus (el modelo más caro, $5/$25 por 1M tok) crecía sin control
+// en cada generación. 3000 chars por evolutivo es suficiente para que el
+// modelo compare tono/patrones sin cargar el documento entero.
+const PREVIOUS_EVOLUTION_TEXT_LIMIT = 3000;
 
 const SYSTEM_PROMPT = `Regla de estilo: no uses el guion largo (—) ni rayas como conector entre frases; usa comas, dos puntos o puntos seguidos. Escribe en español natural y directo, sin sonar a texto generado por IA.
 
@@ -119,7 +128,7 @@ function buildUserPrompt({ project, periodStart, periodEnd, profiles, previousEv
   const historicTxt = previousEvolutions.length
     ? previousEvolutions.map((e, i) => `
 === EVOLUTIVO ANTERIOR ${i+1} (${e.period_start} → ${e.period_end}) ===
-${e.plain_text || "(sin texto plano disponible)"}
+${e.plain_text ? e.plain_text.slice(0, PREVIOUS_EVOLUTION_TEXT_LIMIT) : "(sin texto plano disponible)"}
 === FIN EVOLUTIVO ANTERIOR ${i+1} ===
 `).join("\n")
     : "(Este es el primer evolutivo del proyecto. No hay comparación posible.)";
@@ -486,6 +495,11 @@ export default async function handler(req) {
       let buffer = "";
       let stopReason = null;
       let upstreamError = null;
+      // Métricas de uso (H-cost): igual patrón que generate-report.js/monthly.
+      let inputTokens = null;
+      let outputTokens = null;
+      let cacheWriteTokens = 0;
+      let cacheReadTokens = 0;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -501,8 +515,13 @@ export default async function handler(req) {
               const evt = JSON.parse(data);
               if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
                 controller.enqueue(encoder.encode(evt.delta.text));
-              } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
-                stopReason = evt.delta.stop_reason;
+              } else if (evt.type === "message_start" && evt.message?.usage) {
+                inputTokens = evt.message.usage.input_tokens;
+                cacheWriteTokens = evt.message.usage.cache_creation_input_tokens || 0;
+                cacheReadTokens = evt.message.usage.cache_read_input_tokens || 0;
+              } else if (evt.type === "message_delta") {
+                if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+                if (evt.usage?.output_tokens) outputTokens = evt.usage.output_tokens;
               } else if (evt.type === "error") {
                 upstreamError = new Error(evt.error?.message || "Error del flujo de IA");
               }
@@ -520,6 +539,20 @@ export default async function handler(req) {
         controller.enqueue(encoder.encode(
           "\n<!-- WPLANNER_TRUNCATED: el evolutivo alcanzó max_tokens. -->\n"
         ));
+      }
+      // Best-effort: no debe tumbar la generación si el cálculo/enqueue falla.
+      try {
+        const costUsd = computeCostUsd(AI_MODELS.evolution.id, {
+          inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens,
+        });
+        controller.enqueue(encoder.encode(embedUsageComment({
+          model: AI_MODELS.evolution.id,
+          tokensInput: inputTokens,
+          tokensOutput: outputTokens,
+          costUsd,
+        })));
+      } catch (e) {
+        console.warn("[generate-evolution] No pude adjuntar métricas de uso:", e?.message);
       }
       controller.close();
     },

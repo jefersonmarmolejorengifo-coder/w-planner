@@ -1,6 +1,7 @@
 import { createSupabase, createAdminClient, fetchWithTimeout } from "./_auth.js";
 import { getResendConfig, normalizeRecipients, sanitizeReportHtml } from "./_email.js";
 import { notificarPagoAlHub } from "./_hub-client.js";
+import { extractUsageMarker } from "../src/aiModels.js";
 
 // ─── Helpers de tiempo en Colombia ─────────────────────────
 const DAY_MAP = {
@@ -152,13 +153,32 @@ async function generateReport({ projectId, reportType, range }) {
     throw new Error(`Generate failed (${genRes.status}): ${errText.substring(0, 200)}`);
   }
 
-  // weekly_po devuelve text/html stream; los otros JSON con metadata.
+  // scrum devuelve JSON con metadata de costo ya incluida; weekly_po y
+  // monthly_team devuelven text/html en streaming (Anthropic no entrega
+  // output_tokens hasta el final, así que no pueden ir en un header). El
+  // productor adjunta un comentario HTML con el uso real al cierre del
+  // stream (embedUsageComment); acá se extrae ANTES de sanitizar/enviar el
+  // email para que el HTML quede limpio y el costo no se pierda (H-cost).
   const contentType = genRes.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     return await genRes.json();
   }
-  const html = await genRes.text();
-  return { html };
+  const raw = await genRes.text();
+  try {
+    const { usage, html } = extractUsageMarker(raw);
+    return {
+      html,
+      model: usage?.model ?? null,
+      tokens_input: usage?.tokens_input ?? null,
+      tokens_output: usage?.tokens_output ?? null,
+      cost_usd: usage?.cost_usd ?? null,
+    };
+  } catch (e) {
+    // Best-effort: un fallo extrayendo el costo no debe tumbar el envío del
+    // reporte. Se envía igual, solo sin metadata de costo.
+    console.warn("[cron] No pude extraer métricas de uso del stream:", e?.message);
+    return { html: raw };
+  }
 }
 
 // ─── Envío + archivo histórico ─────────────────────────────

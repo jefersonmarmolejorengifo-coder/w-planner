@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { getAuthJsonHeaders } from "../../lib/authHeaders";
+import { extractUsageMarker } from "../../aiModels";
 
 // Evolutivo profesional del equipo (Pro Power+ con IA). Owner ve el histórico y
 // puede generar uno nuevo (bimensual). El HTML se renderiza en un iframe
@@ -82,11 +83,31 @@ export default function EvolutionTab({ projectId, isOwner }) {
       }
 
       setMsg("Guardando...");
+      // El stream adjunta el costo real (Opus 4.8) como un comentario HTML al
+      // final, porque los tokens de salida solo se conocen cuando Anthropic
+      // termina de generar (no pueden ir en un header de la respuesta). Se
+      // extrae acá, best-effort: si algo falla, se guarda igual el evolutivo
+      // con el HTML crudo, solo sin metadata de costo (el costo es dato
+      // secundario, nunca debe bloquear el guardado del reporte).
+      let cleanHtml = html;
+      let usage = null;
+      try {
+        const extracted = extractUsageMarker(html);
+        cleanHtml = extracted.html;
+        usage = extracted.usage;
+      } catch (e) {
+        console.warn("[evolution] No pude extraer métricas de uso:", e?.message);
+      }
+
       const saveRes = await fetch("/api/save-evolution", {
         method: "POST",
         headers,
         body: JSON.stringify({
-          projectId, periodStart, periodEnd, html,
+          projectId, periodStart, periodEnd, html: cleanHtml,
+          modelUsed: usage?.model,
+          tokensInput: usage?.tokens_input,
+          tokensOutput: usage?.tokens_output,
+          costUsd: usage?.cost_usd,
           truncated: html.includes("WPLANNER_TRUNCATED"),
         }),
       });

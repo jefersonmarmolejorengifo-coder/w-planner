@@ -10,7 +10,7 @@ import {
   getOrigin,
   jsonResponse,
 } from "./_auth.js";
-import { AI_MODELS } from "../src/aiModels.js";
+import { AI_MODELS, computeCostUsd, embedUsageComment } from "../src/aiModels.js";
 
 export const config = { runtime: 'edge' };
 
@@ -441,6 +441,13 @@ export default async function handler(req) {
       let buffer = "";
       let upstreamError = null;
       let stopReason = null;
+      // Métricas de uso (H-cost): input_tokens llega en message_start, los de
+      // cache (prompt caching del SYSTEM_INSTRUCTIONS) también; output_tokens
+      // solo se conoce cerca del final, en message_delta.
+      let inputTokens = null;
+      let outputTokens = null;
+      let cacheWriteTokens = 0;
+      let cacheReadTokens = 0;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -456,8 +463,13 @@ export default async function handler(req) {
               const evt = JSON.parse(data);
               if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
                 controller.enqueue(encoder.encode(evt.delta.text));
-              } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
-                stopReason = evt.delta.stop_reason;
+              } else if (evt.type === "message_start" && evt.message?.usage) {
+                inputTokens = evt.message.usage.input_tokens;
+                cacheWriteTokens = evt.message.usage.cache_creation_input_tokens || 0;
+                cacheReadTokens = evt.message.usage.cache_read_input_tokens || 0;
+              } else if (evt.type === "message_delta") {
+                if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+                if (evt.usage?.output_tokens) outputTokens = evt.usage.output_tokens;
               } else if (evt.type === "error") {
                 upstreamError = new Error(evt.error?.message || "Error del flujo de IA");
               }
@@ -480,6 +492,21 @@ export default async function handler(req) {
           "\n<!-- WPLANNER_TRUNCATED: el reporte alcanzó el límite de max_tokens. " +
           "Sube max_tokens en api/generate-report.js o reduce el alcance del proyecto. -->\n"
         ));
+      }
+      // Best-effort: el costo es informativo (dashboards de gasto), nunca debe
+      // tumbar la generación del reporte si el cálculo o el enqueue fallaran.
+      try {
+        const costUsd = computeCostUsd(AI_MODELS.weeklyReport.id, {
+          inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens,
+        });
+        controller.enqueue(encoder.encode(embedUsageComment({
+          model: AI_MODELS.weeklyReport.id,
+          tokensInput: inputTokens,
+          tokensOutput: outputTokens,
+          costUsd,
+        })));
+      } catch (e) {
+        console.warn("[generate-report] No pude adjuntar métricas de uso:", e?.message);
       }
       controller.close();
     },

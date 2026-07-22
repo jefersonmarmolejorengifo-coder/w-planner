@@ -11,7 +11,7 @@ import {
   jsonResponse,
   requirePositiveInt,
 } from "./_auth.js";
-import { AI_MODELS } from "../src/aiModels.js";
+import { AI_MODELS, computeCostUsd } from "../src/aiModels.js";
 
 export const config = { runtime: "edge" };
 
@@ -372,9 +372,12 @@ export default async function handler(req) {
   const usage = geminiData?.usageMetadata || {};
   const inputTokens  = usage.promptTokenCount     || null;
   const outputTokens = usage.candidatesTokenCount || null;
-  const costUsd = (inputTokens && outputTokens)
-    ? (inputTokens * 1.5 + outputTokens * 9) / 1_000_000
-    : null;
+  // Precio centralizado en AI_PRICING (src/aiModels.js): Gemini 2.5 Flash real
+  // es $0.30/$2.50 por 1M tokens. Antes esto tenía el precio viejo ($1.50/$9.00)
+  // hardcodeado acá, ~5x el costo real. Si `model` (override por GEMINI_MODEL)
+  // no está en la tabla de precios, computeCostUsd devuelve null en vez de
+  // inventar un costo con un precio que no le corresponde.
+  const costUsd = computeCostUsd(model, { inputTokens, outputTokens });
 
   return jsonResponse({
     html,

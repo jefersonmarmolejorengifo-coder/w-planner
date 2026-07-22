@@ -22,7 +22,7 @@ import {
   requireString,
   MAX_USER_MESSAGE_CHARS,
 } from "./_auth.js";
-import { AI_MODELS } from "../src/aiModels.js";
+import { AI_MODELS, computeCostUsd } from "../src/aiModels.js";
 
 export const config = { runtime: "edge" };
 
@@ -367,12 +367,14 @@ export default async function handler(req) {
         return;
       }
 
-      // Persiste el mensaje del assistant con costo desglosado.
-      // Sonnet 4.6 pricing por 1M tokens: input $3, cache_write $3.75, cache_read $0.30, output $15.
+      // Persiste el mensaje del assistant con costo desglosado. Precio en
+      // AI_PRICING (src/aiModels.js): única fuente de verdad, evita que este
+      // endpoint quede con un precio de Sonnet desincronizado del resto.
       if (admin && fullAssistant.length > 0) {
-        const cost = (inputTokens != null && outputTokens != null)
-          ? (inputTokens * 3 + cacheCreateTokens * 3.75 + cacheReadTokens * 0.30 + outputTokens * 15) / 1_000_000
-          : null;
+        const cost = computeCostUsd(AI_MODELS.chat.id, {
+          inputTokens, outputTokens,
+          cacheWriteTokens: cacheCreateTokens, cacheReadTokens,
+        });
         try {
           await admin.from("chat_messages").insert({
             session_id: session.id,

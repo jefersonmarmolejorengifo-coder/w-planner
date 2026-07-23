@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
+import { getAuthJsonHeaders } from "../../lib/authHeaders";
 
 // Dos cards: (1) estado de suscripción del usuario actual + botón upgrade,
 // y (2) toggle "Activar IA en este proyecto" si el usuario es owner. El
@@ -12,6 +13,28 @@ export default function PremiumPanel({ projectId }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalErr, setPortalErr] = useState("");
+
+  // Abre el panel central de Soft a Tu Medida (Hub) con un link firmado. La
+  // firma la hace el servidor (/api/subscription-portal) con el email del JWT;
+  // acá solo pedimos la URL ya firmada y navegamos a ella.
+  const abrirPortal = async () => {
+    setPortalBusy(true);
+    setPortalErr("");
+    try {
+      const headers = await getAuthJsonHeaders();
+      const res = await fetch("/api/subscription-portal", { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || "No pudimos abrir el panel de gestión.");
+      }
+      window.location.assign(data.url);
+    } catch (e) {
+      setPortalErr(e instanceof Error ? e.message : "Error inesperado.");
+      setPortalBusy(false);
+    }
+  };
 
   const load = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -96,8 +119,28 @@ export default function PremiumPanel({ projectId }) {
         )}
 
         {isPaid && (
-          <div style={{ fontSize: 12, marginTop: 10, opacity: 0.9 }}>
-            Suscripción activa. Para cancelar o ajustar tu plan, ingresa a tu cuenta de Mercado Pago. Puedes ver los planes con el botón <b>✨ Planes</b> de la barra superior.
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 10 }}>
+              Suscripción activa. Gestiona o cancela tu plan desde el panel de Soft a Tu Medida.
+            </div>
+            <button
+              type="button"
+              onClick={abrirPortal}
+              disabled={portalBusy}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                background: "rgba(255,255,255,0.15)", color: "#fff",
+                border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8,
+                padding: "8px 14px", fontSize: 13, fontWeight: 600,
+                cursor: portalBusy ? "default" : "pointer", opacity: portalBusy ? 0.7 : 1,
+              }}
+            >
+              {portalBusy ? "Abriendo…" : "Gestionar o cancelar mi plan"}
+              {!portalBusy && <span aria-hidden="true">↗</span>}
+            </button>
+            {portalErr && (
+              <div role="alert" style={{ fontSize: 12, color: "#ffd7d7", marginTop: 8 }}>{portalErr}</div>
+            )}
           </div>
         )}
       </div>

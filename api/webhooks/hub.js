@@ -319,10 +319,17 @@ export default async function handler(req, res) {
   // procesar cobros destinados a otra app.
   // IMPORTANTE: esta validación va ANTES de tocar la BD para no insertar
   // candados de idempotencia por payloads inválidos.
-  if (payload.app_slug !== "w-planner") {
-    console.warn("[hub-webhook] app_slug inesperado en payload:", {
+  //
+  // CORREGIDO 2026-07-26: antes solo se miraba el payload, así que un evento
+  // con `X-App-Slug: otra-app` y payload propio pasaba el filtro. No era
+  // explotable —el header entra en el HMAC, así que hace falta nuestro
+  // secreto— pero dejaba esta app más permisiva que sus hermanas ante el
+  // mismo contrato. Ahora se exige que AMBOS sean el nuestro.
+  if (appSlugHeader !== "w-planner" || payload.app_slug !== "w-planner") {
+    console.warn("[hub-webhook] app_slug inesperado:", {
       esperado: "w-planner",
-      recibido: payload.app_slug,
+      recibidoHeader: appSlugHeader,
+      recibidoPayload: payload.app_slug,
     });
     return res.status(401).json({ error: "unauthorized" });
   }

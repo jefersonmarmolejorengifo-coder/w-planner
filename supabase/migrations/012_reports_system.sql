@@ -96,16 +96,30 @@ CREATE POLICY report_history_owner_select ON public.report_history
 -- ── 3. Backfill desde email_config ─────────────────────────
 -- El reporte semanal actual vive en email_config. Migramos cada fila a
 -- report_configs(weekly_po) sin tocar email_config (lo dejamos como respaldo).
--- email_config.emails es JSONB (array de strings), lo convertimos a text[].
+--
+-- ⚠️ CORREGIDO 2026-07-26: esto usaba jsonb_array_length() y
+-- jsonb_array_elements_text() sobre e.emails, dando por hecho que la columna
+-- era JSONB. No lo es: `000_initial_schema.sql:53` la declara como
+--     emails TEXT[] DEFAULT '{}'::text[]
+-- y ninguna migración intermedia cambia ese tipo.
+--
+-- El repositorio era internamente inconsistente: esta migración NO podía
+-- aplicarse sobre el esquema que crea la 000. Un despliegue desde cero moría
+-- justo aquí con:
+--     ERROR: function jsonb_array_length(text[]) does not exist  (42883)
+--
+-- En producción no se nota: la 012 se aplicó hace tiempo y las migraciones no
+-- se re-ejecutan. El problema solo aparece al crear un proyecto nuevo
+-- (staging, restauración o entorno local) — que es justo cuando más duele.
+--
+-- Detectado al incorporar w-planner al entorno de pruebas local.
+-- Al ser TEXT[], el backfill es directo: no hay nada que convertir.
 INSERT INTO public.report_configs (project_id, report_type, enabled, recipients, schedule, window_cfg, last_sent)
 SELECT
   e.project_id,
   'weekly_po',
-  COALESCE(jsonb_array_length(e.emails), 0) > 0,
-  CASE
-    WHEN e.emails IS NULL OR jsonb_typeof(e.emails) <> 'array' THEN '{}'::text[]
-    ELSE ARRAY(SELECT jsonb_array_elements_text(e.emails))
-  END,
+  COALESCE(cardinality(e.emails), 0) > 0,
+  COALESCE(e.emails, '{}'::text[]),
   jsonb_build_object(
     'frequency', COALESCE(e.frequency, 'weekly'),
     'send_day',  COALESCE(e.send_day, 'monday'),

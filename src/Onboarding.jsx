@@ -469,7 +469,10 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
   const patch = async (changes) => {
     setState(prev => ({ ...(prev || {}), ...changes }));
     if (!authUser?.id || !supabase) return;
-    await supabase.from("user_onboarding").upsert({ user_id: authUser.id, ...changes }, { onConflict: "user_id" });
+    // El estado ya se pintó de forma optimista arriba. Si la escritura falla, el
+    // avance del onboarding se pierde al recargar: al menos que quede la traza.
+    const { error } = await supabase.from("user_onboarding").upsert({ user_id: authUser.id, ...changes }, { onConflict: "user_id" });
+    if (error) console.error("[Onboarding] no se pudo guardar el avance", changes, error);
   };
 
   const skipOnboarding = async () => {

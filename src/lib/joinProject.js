@@ -73,7 +73,7 @@ export const joinProjectByCode = async (code, user) => {
   }
 
   if (user) {
-    await supabase.from('project_members').upsert(
+    const { error: memberError } = await supabase.from('project_members').upsert(
       {
         project_id: proj.id,
         email: user.email,
@@ -82,6 +82,12 @@ export const joinProjectByCode = async (code, user) => {
       },
       { onConflict: 'project_id,email' }
     );
+    // Sin la fila en project_members el usuario no es miembro y la RLS le
+    // cerrará el tablero: dar el join por bueno aquí sería mentir otra vez.
+    if (memberError) {
+      console.error('[joinProject] no se pudo registrar la membresía', memberError);
+      return { project: null, error: `No pudimos registrarte en el tablero (${memberError.code || 'error'}). Avisa al dueño del tablero.` };
+    }
   }
   return { project: proj, error: null };
 };

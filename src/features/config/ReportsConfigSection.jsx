@@ -199,12 +199,22 @@ export default function ReportsConfigSection({ projectId }) {
       const sendData = await sendRes.json().catch(() => ({}));
       if (!sendRes.ok || sendData.error) throw new Error(sendData.error || `Send falló (${sendRes.status})`);
 
-      await supabase.from("report_configs")
+      // last_sent es la marca que el cron lee (api/cron.js:29) para no volver a
+      // enviar. Si no se graba, el informe puede salir otra vez solo y el
+      // cliente lo recibe duplicado: hay que decirlo, no callarlo.
+      const { data: marked, error: markErr } = await supabase.from("report_configs")
         .update({ last_sent: new Date().toISOString() })
         .eq("project_id", projectId)
-        .eq("report_type", type);
+        .eq("report_type", type)
+        .select("id");
 
-      setMsg(m => ({ ...m, [type]: `✓ Enviado a ${row.recipients.length} correo${row.recipients.length === 1 ? "" : "s"}${payload.truncated ? " (truncado por tokens)" : ""}` }));
+      const enviado = `✓ Enviado a ${row.recipients.length} correo${row.recipients.length === 1 ? "" : "s"}${payload.truncated ? " (truncado por tokens)" : ""}`;
+      if (markErr || !marked?.length) {
+        console.error("[ReportsConfigSection] no se pudo marcar last_sent tras el envío manual", markErr);
+        setMsg(m => ({ ...m, [type]: `${enviado} — aviso: no se pudo registrar el envío, el sistema podría reenviarlo.` }));
+      } else {
+        setMsg(m => ({ ...m, [type]: enviado }));
+      }
     } catch (err) {
       setMsg(m => ({ ...m, [type]: "Error: " + err.message }));
     }

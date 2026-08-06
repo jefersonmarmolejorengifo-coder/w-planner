@@ -473,12 +473,18 @@ export default function App() {
         const pid = Number(stored);
         const { data: proj } = await supabase.from('projects').select('*').eq('id', pid).single();
         if (proj) {
-          // Ensure user is registered as member (self-healing for projects created before auth)
-          if (user) {
-            supabase.from('project_members').upsert(
-              { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email },
+          // Autorregistro como miembro para tableros creados antes de que
+          // existiera la autenticación. Solo tiene sentido para el DUEÑO: las
+          // policies de project_members reservan INSERT y UPDATE al dueño, así
+          // que para un invitado esta escritura se bloqueaba siempre y en
+          // silencio. Y se incluye user_id — omitirlo dejaba la fila sin
+          // vincular al usuario, que es lo que my_role_in_project() consulta.
+          if (user && proj.owner_id === user.id) {
+            const { error: memberErr } = await supabase.from('project_members').upsert(
+              { project_id: proj.id, email: user.email, name: user.user_metadata?.full_name || user.email, user_id: user.id },
               { onConflict: 'project_id,email' }
             );
+            if (memberErr) console.error('[routeAfterAuth] no se pudo autorregistrar al dueño como miembro', memberErr);
           }
           setProjectId(pid); setProject(proj);
           await loadAllForProject(pid, proj, user);

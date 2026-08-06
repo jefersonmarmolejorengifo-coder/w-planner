@@ -175,11 +175,20 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
       try { sendData = JSON.parse(sendText); } catch { throw new Error(`Error del servidor (${sendRes.status}): la función de envío no respondió correctamente`); }
       if (sendData.error) throw new Error(sendData.error);
 
-      await supabase.from('email_config')
+      // last_sent es la marca que el cron lee (api/cron.js:29) para no volver a
+      // enviar. Si no se graba, el informe puede salir otra vez solo y el
+      // cliente lo recibe duplicado: hay que decirlo, no callarlo.
+      const { data: marked, error: markErr } = await supabase.from('email_config')
         .update({ last_sent: new Date().toISOString() })
-        .eq('project_id', project.id);
+        .eq('project_id', project.id)
+        .select('id');
 
-      setReportMsg("✓ Reporte enviado a " + emails.length + " correo(s)");
+      if (markErr || !marked?.length) {
+        console.error('[ConfigTab] no se pudo marcar last_sent tras el envío manual', markErr);
+        setReportMsg(`✓ Reporte enviado a ${emails.length} correo(s) — aviso: no se pudo registrar el envío, así que el sistema podría reenviarlo automáticamente.`);
+      } else {
+        setReportMsg("✓ Reporte enviado a " + emails.length + " correo(s)");
+      }
     } catch (err) {
       setReportMsg("Error: " + err.message);
     }

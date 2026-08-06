@@ -126,7 +126,11 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
           });
           for (const f of tracked) {
             if (f.oldV !== f.newV) {
-              supabase.from('task_history').insert({ task_id: task.id, project_id: projectId, changed_by: activeUser.name, field_name: f.field, old_value: f.oldV, new_value: f.newV }).then(() => {});
+              // El historial no bloquea al usuario, pero su fallo tampoco puede
+              // desaparecer: antes se descartaba el resultado con .then(() => {})
+              // y una traza perdida no dejaba ni rastro en consola.
+              supabase.from('task_history').insert({ task_id: task.id, project_id: projectId, changed_by: activeUser.name, field_name: f.field, old_value: f.oldV, new_value: f.newV })
+                .then(({ error }) => { if (error) console.error('[useTasks] no se pudo registrar el historial del campo', f.field, error); });
             }
           }
         }

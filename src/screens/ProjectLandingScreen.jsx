@@ -104,11 +104,18 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null,
         const { data: p } = await supabase.from('projects').select('*').eq('id', Number(pid)).single();
         if (p) {
           add(p);
-          // Auto-register in project_members so future loads work without localStorage
-          await supabase.from('project_members').upsert(
-            { project_id: p.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email },
-            { onConflict: 'project_id,email' }
-          );
+          // Autorregistro para no depender de localStorage en la próxima carga.
+          // Solo para el DUEÑO: las policies de project_members reservan INSERT
+          // y UPDATE al dueño, así que para un invitado esto fallaba siempre en
+          // silencio. Se incluye user_id: sin él la fila queda sin vincular al
+          // usuario y my_role_in_project() no resuelve su rol.
+          if (p.owner_id === authUser.id) {
+            const { error: memberErr } = await supabase.from('project_members').upsert(
+              { project_id: p.id, email: authUser.email, name: authUser.user_metadata?.full_name || authUser.email, user_id: authUser.id },
+              { onConflict: 'project_id,email' }
+            );
+            if (memberErr) console.error('[loadMyProjects] no se pudo autorregistrar al dueño como miembro', memberErr);
+          }
         }
       }));
 
@@ -249,10 +256,18 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null,
       setCreating(false);
       return;
     }
-    await supabase.from('project_members').upsert(
+    // Si esta fila no se graba, el dueño no consta como miembro y la RLS le
+    // cierra su propio tablero recién creado. No puede fallar en silencio.
+    const { error: memberErr } = await supabase.from('project_members').upsert(
       { project_id: data.id, email: session.user.email, name: session.user.user_metadata?.full_name || session.user.email, user_id: ownerId },
       { onConflict: 'project_id,email' }
     );
+    if (memberErr) {
+      console.error('[createProject] no se pudo registrar al dueño como miembro', memberErr);
+      setErr('El tablero se creó, pero no pudimos registrarte como miembro: ' + memberErr.message);
+      setCreating(false);
+      return;
+    }
     localStorage.setItem('pp_project_id', String(data.id));
     onProjectLoaded(data);
   };
@@ -284,11 +299,22 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null,
       setTplCreating(false);
       return;
     }
-    await supabase.from('project_members').upsert(
+    // Si esta fila no se graba, el dueño no consta como miembro y la RLS le
+    // cierra su propio tablero recién creado. No puede fallar en silencio.
+    const { error: memberErr } = await supabase.from('project_members').upsert(
       { project_id: proj.id, email: session.user.email, name: session.user.user_metadata?.full_name || session.user.email, user_id: ownerId },
       { onConflict: 'project_id,email' }
     );
-    // Insert sample tasks
+    if (memberErr) {
+      console.error('[createFromTemplate] no se pudo registrar al dueño como miembro', memberErr);
+      setErr('El tablero se creó, pero no pudimos registrarte como miembro: ' + memberErr.message);
+      setTplCreating(false);
+      return;
+    }
+    // El contenido de ejemplo es accesorio: si falla, el tablero ya existe y se
+    // abre igual. Pero el fallo se avisa en vez de fingir que se creó completo
+    // (los indicadores de plantilla llevaban tiempo fallando sin que se notara).
+    const avisos = [];
     const taskSchema = Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : [];
     if (taskSchema.length) {
       const sampleTasks = [];
@@ -300,13 +326,15 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null,
           progress_percent: 0, subtasks: [], indicators: [],
         });
       }
-      await supabase.from('tasks').insert(sampleTasks);
+      const { error: tasksErr } = await supabase.from('tasks').insert(sampleTasks);
+      if (tasksErr) { console.error('[createFromTemplate] tareas de ejemplo', tasksErr); avisos.push('las tareas de ejemplo'); }
     }
-    // Insert sample indicators
     const inds = Array.isArray(tpl.indicators) ? tpl.indicators : [];
     if (inds.length) {
-      await supabase.from('indicators').insert(inds.map((name) => ({ name, project_id: proj.id })));
+      const { error: indErr } = await supabase.from('indicators').insert(inds.map((name) => ({ name, project_id: proj.id })));
+      if (indErr) { console.error('[createFromTemplate] indicadores de ejemplo', indErr); avisos.push('los indicadores de ejemplo'); }
     }
+    if (avisos.length) setErr(`El tablero se creó, pero no se pudieron añadir ${avisos.join(' ni ')}.`);
     localStorage.setItem('pp_project_id', String(proj.id));
     onProjectLoaded(proj);
   };

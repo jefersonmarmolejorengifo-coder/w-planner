@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../../supabaseClient";
+import { applyWrite, describeWriteError } from '../../lib/dbWrite';
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
 
@@ -31,44 +32,56 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
     if (form.end_date < form.start_date) { toast('La fecha fin debe ser mayor o igual a la fecha inicio', { type: 'error' }); return; }
     const payload = { title: form.title, description: form.description, start_date: form.start_date, end_date: form.end_date };
     if (editId) {
-      await supabase.from('okrs').update(payload).eq('id', editId).eq('project_id', projectId);
+      const { ok, error } = await applyWrite(
+        supabase.from('okrs').update(payload).eq('id', editId).eq('project_id', projectId).select('id'));
+      if (!ok) { toast('No se pudo guardar el objetivo: ' + describeWriteError(error), { type: 'error' }); return; }
       setOkrs(prev => prev.map(o => o.id === editId ? { ...o, ...payload } : o));
     } else {
-      const { data } = await supabase.from('okrs').insert({ ...payload, project_id: projectId, status: 'active' }).select().single();
-      if (data) setOkrs(prev => [...prev, data]);
+      const { data, error } = await supabase.from('okrs').insert({ ...payload, project_id: projectId, status: 'active' }).select().single();
+      if (error || !data) { toast('No se pudo crear el objetivo: ' + describeWriteError(error), { type: 'error' }); return; }
+      setOkrs(prev => [...prev, data]);
     }
     resetForm();
   };
 
   const deleteOkr = async (id) => {
     if (!(await confirm('¿Eliminar este objetivo y todos sus resultados clave?', { title: 'Eliminar objetivo', confirmText: 'Eliminar', danger: true }))) return;
-    await supabase.from('okrs').delete().eq('id', id).eq('project_id', projectId);
+    const { ok, error } = await applyWrite(
+      supabase.from('okrs').delete().eq('id', id).eq('project_id', projectId).select('id'));
+    if (!ok) { toast('No se pudo eliminar el objetivo: ' + describeWriteError(error), { type: 'error' }); return; }
     setOkrs(prev => prev.filter(o => o.id !== id));
     setKeyResults(prev => prev.filter(kr => kr.okr_id !== id));
   };
 
   const toggleStatus = async (okr) => {
     const ns = okr.status === 'active' ? 'closed' : 'active';
-    await supabase.from('okrs').update({ status: ns }).eq('id', okr.id).eq('project_id', projectId);
+    const { ok, error } = await applyWrite(
+      supabase.from('okrs').update({ status: ns }).eq('id', okr.id).eq('project_id', projectId).select('id'));
+    if (!ok) { toast('No se pudo cambiar el estado: ' + describeWriteError(error), { type: 'error' }); return; }
     setOkrs(prev => prev.map(o => o.id === okr.id ? { ...o, status: ns } : o));
   };
 
   const saveKr = async () => {
     if (!krForm.title.trim() || !addingKrFor) return;
-    const { data } = await supabase.from('key_results').insert({ ...krForm, okr_id: addingKrFor, project_id: projectId, current_value: 0 }).select().single();
-    if (data) setKeyResults(prev => [...prev, data]);
+    const { data, error } = await supabase.from('key_results').insert({ ...krForm, okr_id: addingKrFor, project_id: projectId, current_value: 0 }).select().single();
+    if (error || !data) { toast('No se pudo crear el resultado clave: ' + describeWriteError(error), { type: 'error' }); return; }
+    setKeyResults(prev => [...prev, data]);
     setKrForm({ title: '', target_value: 100, unit: '%' });
     setAddingKrFor(null);
   };
 
   const updateKrValue = async (kr, delta) => {
     const nv = Math.max(0, Math.min(Number(kr.target_value), Number(kr.current_value) + delta));
-    await supabase.from('key_results').update({ current_value: nv }).eq('id', kr.id).eq('project_id', projectId);
+    const { ok, error } = await applyWrite(
+      supabase.from('key_results').update({ current_value: nv }).eq('id', kr.id).eq('project_id', projectId).select('id'));
+    if (!ok) { toast('No se pudo actualizar el avance: ' + describeWriteError(error), { type: 'error' }); return; }
     setKeyResults(prev => prev.map(k => k.id === kr.id ? { ...k, current_value: nv } : k));
   };
 
   const deleteKr = async (id) => {
-    await supabase.from('key_results').delete().eq('id', id).eq('project_id', projectId);
+    const { ok, error } = await applyWrite(
+      supabase.from('key_results').delete().eq('id', id).eq('project_id', projectId).select('id'));
+    if (!ok) { toast('No se pudo eliminar el resultado clave: ' + describeWriteError(error), { type: 'error' }); return; }
     setKeyResults(prev => prev.filter(k => k.id !== id));
   };
 

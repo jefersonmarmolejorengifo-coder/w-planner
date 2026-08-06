@@ -287,9 +287,13 @@ export default async function handler(req) {
   // INSERT a authenticated por diseño). `admin` ya se creó arriba (cuota);
   // es null si faltan las variables admin.
   if (admin) {
-    await admin.from("chat_messages").insert({
+    // Si el mensaje del usuario no se guarda, el turno siguiente arranca sin
+    // contexto y la conversacion parece amnesica. No bloquea la respuesta, pero
+    // tiene que quedar traza: antes se descartaba el resultado sin mas.
+    const { error: msgErr } = await admin.from("chat_messages").insert({
       session_id: session.id, role: "user", content: userMessageClean,
     });
+    if (msgErr) console.error("[chat-stream] no se pudo guardar el mensaje del usuario:", msgErr);
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -407,14 +411,17 @@ export default async function handler(req) {
           cacheWriteTokens: cacheCreateTokens, cacheReadTokens,
         });
         try {
-          await admin.from("chat_messages").insert({
+          // Aqui ademas del historial se pierde la contabilidad de coste de la
+          // IA si falla, asi que es console.error y no un warn discreto.
+          const { error: respErr } = await admin.from("chat_messages").insert({
             session_id: session.id,
             role: "assistant",
             content: fullAssistant,
             tokens_input: inputTokens, tokens_output: outputTokens,
             cost_usd: cost,
           });
-        } catch (e) { console.warn("[chat] persist failed:", e?.message); }
+          if (respErr) console.error("[chat-stream] no se pudo guardar la respuesta ni su coste:", respErr);
+        } catch (e) { console.error("[chat-stream] excepcion guardando la respuesta:", e?.message); }
       }
       controller.close();
     },

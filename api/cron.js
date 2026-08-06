@@ -230,9 +230,12 @@ async function sendAndArchive({ supabase, projectId, reportType, generated, reci
     throw new Error("Send failed: " + JSON.stringify(sendData.error || sendData));
   }
 
-  // Archiva (sin bloquear si la tabla aún no existe).
+  // Archiva (sin bloquear si la tabla aún no existe). El correo ya salió, así
+  // que un fallo aquí no debe tumbar el envío — pero sí tiene que verse: sin
+  // esta fila el informe no existe para la comparativa del mensual ni para el
+  // seguimiento de costes de IA.
   try {
-    await supabase.from("report_history").insert({
+    const { error: histErr } = await supabase.from("report_history").insert({
       project_id: projectId,
       report_type: reportType,
       period_start: range.weekStart,
@@ -246,6 +249,7 @@ async function sendAndArchive({ supabase, projectId, reportType, generated, reci
       tokens_output: generated.tokens_output || null,
       cost_usd: generated.cost_usd || null,
     });
+    if (histErr) console.error("[cron] el informe se envió pero no se pudo archivar:", histErr.message);
   } catch (archiveErr) {
     console.warn("[cron] No pude archivar el reporte:", archiveErr?.message);
   }
@@ -525,14 +529,15 @@ export default async function handler(req, res) {
         });
 
         // Marca last_sent. Usa la tabla correcta según fuente.
-        if (config._legacy) {
-          await supabase.from("email_config")
-            .update({ last_sent: new Date().toISOString() })
-            .eq("id", config.id);
-        } else {
-          await supabase.from("report_configs")
-            .update({ last_sent: new Date().toISOString() })
-            .eq("id", config.id);
+        // Es la marca que shouldSendNow() consulta para no reenviar: si no se
+        // graba, la próxima ventana vuelve a generar el informe (doble coste de
+        // IA) y el cliente lo recibe dos veces.
+        const tablaMarca = config._legacy ? "email_config" : "report_configs";
+        const { error: markErr } = await supabase.from(tablaMarca)
+          .update({ last_sent: new Date().toISOString() })
+          .eq("id", config.id);
+        if (markErr) {
+          console.error(`[cron] ${config.report_type} enviado pero NO se marcó last_sent en ${tablaMarca}; puede reenviarse:`, markErr.message);
         }
 
         results.push({

@@ -97,7 +97,9 @@ export default async function handler(req, res) {
     // el primero que llega gana (lifetime attribution).
     if (referralCodeFromBody && referralCode) {
       try {
-        await admin.from("user_referrals").upsert(
+        // Si esto no se graba, el afiliado pierde la atribucion de todas las
+        // renovaciones futuras. No bloquea el cobro, pero tiene que verse.
+        const { error: refErr } = await admin.from("user_referrals").upsert(
           {
             user_id:      user.id,
             referral_code: referralCode,
@@ -105,8 +107,9 @@ export default async function handler(req, res) {
           },
           { onConflict: "user_id", ignoreDuplicates: true },
         );
+        if (refErr) console.error("[mp-subscribe] no se pudo persistir user_referrals (se pierde la atribucion):", refErr.message);
       } catch (upsertErr) {
-        console.warn("[mp-subscribe] No se pudo persistir user_referrals:", upsertErr?.message);
+        console.error("[mp-subscribe] excepcion persistiendo user_referrals:", upsertErr?.message);
       }
     }
 
@@ -156,14 +159,40 @@ export default async function handler(req, res) {
     // #2 — Chequear el error: si el registro pending no se pudo guardar, no
     // iniciar el cobro. El usuario pagaría sin que tengamos registro del intento,
     // dificultando la reconciliación. Coherente con H-019 (fail-closed antes del cobro).
-    const { error: pendingUpsertErr } = await admin.from("users_premium").upsert({
-      user_id: user.id,
-      tier: "free",          // se promueve a 'pro_*' cuando llegue el webhook
-      status: "pending",
-      mp_preapproval_id: mpData.id,
-      mp_payer_email: user.email,
-      metadata: { target_tier: tier },
-    }, { onConflict: "user_id" });
+    // OJO: este upsert NO puede pisar un plan ya activo. Antes escribia
+    // siempre tier:'free', status:'pending' y reemplazaba metadata entera, asi
+    // que un usuario con plan vigente que solo iniciaba el checkout de otro
+    // plan perdia el suyo en el acto — y si abandonaba el pago, para siempre
+    // (el acceso exige status='active'). Ademas, reemplazar metadata borraba
+    // hub_evento_id y rompia el matching de reembolsos del Hub.
+    const { data: filaActual } = await admin
+      .from("users_premium")
+      .select("tier, status, metadata")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const tienePlanVivo = filaActual && filaActual.status === "active" && filaActual.tier && filaActual.tier !== "free";
+
+    const filaPendiente = tienePlanVivo
+      ? {
+          // Plan vigente: solo se anota el intento, sin tocar tier ni status.
+          user_id: user.id,
+          mp_preapproval_id: mpData.id,
+          mp_payer_email: user.email,
+          metadata: { ...(filaActual.metadata || {}), target_tier: tier },
+        }
+      : {
+          user_id: user.id,
+          tier: "free",          // se promueve a 'pro_*' cuando llegue el webhook
+          status: "pending",
+          mp_preapproval_id: mpData.id,
+          mp_payer_email: user.email,
+          metadata: { ...(filaActual?.metadata || {}), target_tier: tier },
+        };
+
+    const { error: pendingUpsertErr } = await admin
+      .from("users_premium")
+      .upsert(filaPendiente, { onConflict: "user_id" });
     if (pendingUpsertErr) {
       console.error("[mp-subscribe] upsert users_premium pending falló:", pendingUpsertErr.message);
       return res.status(500).json({ error: "No se pudo registrar la suscripción. Intenta de nuevo." });

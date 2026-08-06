@@ -22,32 +22,20 @@ import { join, relative, sep } from 'node:path';
 const RAIZ = new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const DIRS = ['src', 'api'];
 
-// Escrituras que pueden descartar su resultado con una razón de peso.
+// Escrituras que pueden descartar su resultado con una razon de peso.
 const EXCEPCIONES_JUSTIFICADAS = {
-  // 'src/ejemplo.js:42': 'motivo concreto por el que aquí da igual',
+  "api/cron.js » await supabase.from(\"_keepalive\").update({ ch, pinged_at: new Date().toISOString() }).eq(\"id\", 1);":
+    'ping de mantenimiento para que Supabase no duerma el proyecto; su fallo no afecta a ningun dato ni a ningun usuario',
 };
 
-// DEUDA CONOCIDA — escrituras mudas que este escáner encontró el 2026-08-06 en
-// zonas todavía sin auditar. NO están justificadas: están pendientes. Se listan
-// para que el test bloquee desde hoy cualquier escritura muda NUEVA en vez de
+// DEUDA CONOCIDA - escrituras mudas pendientes en zonas aun sin auditar.
+// NO son excepciones justificadas: son trabajo por hacer. La lista existe para
+// que el test bloquee desde ya cualquier escritura muda NUEVA en vez de
 // quedarse en rojo permanente (un test que siempre falla deja de leerse).
 //
-// Al corregir una, BÓRRALA de esta lista. La lista debe encoger, nunca crecer.
+// El 2026-08-06 arranco con 23 entradas y quedo VACIA el mismo dia. Si vuelve a
+// crecer, algo se esta escapando: la lista solo debe encoger.
 const DEUDA_CONOCIDA = {
-  "src/features/okrs/OKRsTab.jsx » await supabase.from('okrs').update(payload).eq('id', editId).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "src/features/okrs/OKRsTab.jsx » await supabase.from('okrs').delete().eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "src/features/okrs/OKRsTab.jsx » await supabase.from('okrs').update({ status: ns }).eq('id', okr.id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "src/features/okrs/OKRsTab.jsx » await supabase.from('key_results').update({ current_value: nv }).eq('id', kr.id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "src/features/okrs/OKRsTab.jsx » await supabase.from('key_results').delete().eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "src/features/sprints/SprintsTab.jsx » await supabase.from('sprints').update({ status: 'active' }).eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "src/features/sprints/SprintsTab.jsx » await supabase.from('sprints').update({ status: 'closed' }).eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "src/features/sprints/SprintsTab.jsx » await supabase.from('sprints').delete().eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
-  "api/chat-stream.js » await admin.from(\"chat_messages\").insert({": "pendiente — si falla, el turno no queda en el historial",
-  "api/cron.js » await supabase.from(\"report_history\").insert({": "pendiente — archivado y marcas last_sent del cron",
-  "api/cron.js » await supabase.from(\"_keepalive\").update({ ch, pinged_at: new Date().toISOString() }).eq(\"id\", 1);": "aceptable — ping de mantenimiento sin consecuencia",
-  "api/cron.js » await supabase.from(\"email_config\")": "pendiente — archivado y marcas last_sent del cron",
-  "api/cron.js » await supabase.from(\"report_configs\")": "pendiente — archivado y marcas last_sent del cron",
-  "api/mp-subscribe.js » await admin.from(\"user_referrals\").upsert(": "pendiente — auditoría de pagos",
 };
 
 const VERBOS_ESCRITURA = /\.(insert|upsert|update|delete)\s*\(/;

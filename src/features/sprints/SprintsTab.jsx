@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../../supabaseClient";
+import { applyWrite, describeWriteError } from '../../lib/dbWrite';
 import { STATUS_COLORS } from "../../constants";
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
@@ -110,26 +111,33 @@ export default function SprintsTab({ projectId, sprints, setSprints, tasks }) {
 
   const saveSprint = async () => {
     if (!form.name.trim()) return;
-    const { data } = await supabase.from('sprints').insert({ ...form, project_id: projectId, status: 'planning' }).select().single();
-    if (data) setSprints(prev => [...prev, data]);
+    const { data, error } = await supabase.from('sprints').insert({ ...form, project_id: projectId, status: 'planning' }).select().single();
+    if (error || !data) { toast('No se pudo crear el sprint: ' + describeWriteError(error), { type: 'error' }); return; }
+    setSprints(prev => [...prev, data]);
     setForm({ name: '', goal: '', start_date: '', end_date: '' });
     setCreating(false);
   };
 
   const startSprint = async (id) => {
     if (activeSprint) { toast('Ya hay un sprint activo. Ciérralo antes de iniciar otro.', { type: 'info' }); return; }
-    await supabase.from('sprints').update({ status: 'active' }).eq('id', id).eq('project_id', projectId);
+    const { ok, error } = await applyWrite(
+      supabase.from('sprints').update({ status: 'active' }).eq('id', id).eq('project_id', projectId).select('id'));
+    if (!ok) { toast('No se pudo iniciar el sprint: ' + describeWriteError(error), { type: 'error' }); return; }
     setSprints(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
   };
 
   const closeSprint = async (id) => {
-    await supabase.from('sprints').update({ status: 'closed' }).eq('id', id).eq('project_id', projectId);
+    const { ok, error } = await applyWrite(
+      supabase.from('sprints').update({ status: 'closed' }).eq('id', id).eq('project_id', projectId).select('id'));
+    if (!ok) { toast('No se pudo cerrar el sprint: ' + describeWriteError(error), { type: 'error' }); return; }
     setSprints(prev => prev.map(s => s.id === id ? { ...s, status: 'closed' } : s));
   };
 
   const deleteSprint = async (id) => {
     if (!(await confirm('¿Eliminar este sprint?', { title: 'Eliminar sprint', confirmText: 'Eliminar', danger: true }))) return;
-    await supabase.from('sprints').delete().eq('id', id).eq('project_id', projectId);
+    const { ok, error } = await applyWrite(
+      supabase.from('sprints').delete().eq('id', id).eq('project_id', projectId).select('id'));
+    if (!ok) { toast('No se pudo eliminar el sprint: ' + describeWriteError(error), { type: 'error' }); return; }
     setSprints(prev => prev.filter(s => s.id !== id));
   };
 

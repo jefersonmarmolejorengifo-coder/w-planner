@@ -149,10 +149,22 @@ export default async function handler(req, res) {
       }
     }
 
-    // Marca notifications_sent
-    await admin.from("sprint_retro_periods")
-      .update({ notifications_sent: true })
-      .eq("id", period.id);
+    // Marca notifications_sent SOLO si de verdad salió algún correo. Antes se
+    // marcaba siempre: si Resend fallaba, el período quedaba abierto con
+    // notifications_sent=true y nadie volvía a intentarlo nunca (el cron no
+    // reabre un período existente y una llamada manual responde "already
+    // sent"). El equipo no se enteraba de la retro y el PO solo veía baja
+    // participación. Si no había destinatarios, marcamos: no hay nada que
+    // reintentar.
+    const nadaQueNotificar = emails.length === 0;
+    if (emailsSent > 0 || nadaQueNotificar) {
+      const { error: markErr } = await admin.from("sprint_retro_periods")
+        .update({ notifications_sent: true })
+        .eq("id", period.id);
+      if (markErr) console.error("[open-retro] no se pudo marcar notifications_sent:", markErr.message);
+    } else {
+      console.error("[open-retro] envío fallido: se deja notifications_sent=false para reintentar", { period_id: period.id });
+    }
 
     return res.status(200).json({
       ok: true,

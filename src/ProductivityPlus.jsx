@@ -403,7 +403,7 @@ export default function App() {
     saveParticipants, saveIndicators, saveTaskTypes, saveDimensions, saveProjectPin,
     taskFieldDefs,
     addTaskFieldDef, updateTaskFieldDefById, deleteTaskFieldDef, reorderTaskFieldDefs,
-    tasks, setTasks, nextId,
+    tasks, setTasks,
     createTask, updateTask, deleteTask, exportCSV,
     loadAllForProject,
   } = useProjectData({ activeUser, setActiveUser });
@@ -1141,7 +1141,7 @@ export default function App() {
       <div style={{ padding: "20px 20px 40px" }}>
         {activeTab === "board" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Cargando…</div>}>
-            <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} projectId={projectId} nextId={nextId} keyResults={keyResults} sprints={sprints} taskFieldDefs={taskFieldDefs} />
+            <BoardTab tasks={tasks} createTask={createTask} updateTask={updateTask} deleteTask={deleteTask} participants={participants} indicators={indicators} currentUser={currentUser} taskTypes={taskTypes} weights={dimensions} dimensions={dimensions} editTaskFromDep={depEditTask} onDepEditDone={() => setDepEditTask(null)} projectId={projectId} keyResults={keyResults} sprints={sprints} taskFieldDefs={taskFieldDefs} />
           </Suspense>
         )}
         {activeTab === "gantt" && (

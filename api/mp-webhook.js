@@ -452,10 +452,14 @@ export default async function handler(req, res) {
                   { onConflict: "mp_payment_id", ignoreDuplicates: true },
                 );
               if (upsertErr) {
-                // No propagamos: el cobro ya fue registrado, la notificación al hub
-                // es auxiliar. El cron no puede drenar lo que no se encoló, pero es
-                // mejor eso que bloquear la respuesta a MP.
-                console.error("[mp-webhook] hub_outbox upsert error:", upsertErr.message);
+                // ANTES se dejaba pasar "para no bloquear la respuesta a MP", y el
+                // resultado era plan otorgado sin comisión: el cron no puede drenar
+                // lo que nunca se encoló y MP, al recibir 200, no reintenta jamás.
+                // Devolver 500 no cuesta nada: el upsert de users_premium es
+                // idempotente, el evento sigue en 'processing' para el reintento y
+                // el Hub deduplica por mp_payment_id.
+                console.error("[mp-webhook] hub_outbox upsert error; se pide reintento a MP:", upsertErr.message);
+                return res.status(500).json({ error: "No se pudo encolar la notificación al hub" });
               } else {
                 enqueued = true;
               }

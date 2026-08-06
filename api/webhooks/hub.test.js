@@ -31,7 +31,7 @@
 //   4.  Timestamp vencido → 401.
 //   5.  app_slug distinto → 401.
 //   6a. Duplicado (hub_reclamar_evento devuelve 'duplicate') → 200 sin upsert.
-//   6b. In-flight (hub_reclamar_evento devuelve 'in_flight') → 200 sin upsert.
+//   6b. In-flight (hub_reclamar_evento devuelve 'in_flight') → 409 sin upsert.
 //   7.  Evento no manejado → 200 skipped.
 //   8.  Email no resuelve → parqueado 200.
 //   9.  Plan desconocido → parqueado 200.
@@ -433,7 +433,7 @@ describe("hub.js — receptor cable Hub→w-planner", () => {
 
   // ── Test 6b: In-flight → 200 sin upsert ──────────────────────────────────────
   // hub_reclamar_evento devuelve 'in_flight' = otra corrida activa (<15 min) tiene el evento.
-  it("(6b) hub_reclamar_evento 'in_flight' → 200 sin upsert (self-heal si muere)", async () => {
+  it("(6b) hub_reclamar_evento 'in_flight' → 409 para que el Hub reintente", async () => {
     const payload = buildPayload();
     const rawBody = JSON.stringify(payload);
     const headers = buildHeaders(rawBody);
@@ -447,8 +447,13 @@ describe("hub.js — receptor cable Hub→w-planner", () => {
     const res = makeRes();
     await handler(req, res);
 
-    expect(res._status).toBe(200);
-    expect(res._body).toMatchObject({ ok: true, in_flight: true });
+    // 409, no 200. Este test afirmaba 200 y con ello fijaba el propio bug: un
+    // 200 le dice al Hub "entregado, no reintentes", pero el auto-sanado del
+    // candado depende justo de que llegue un reintento pasados los 15 min. Si
+    // la corrida anterior murió, con 200 el evento quedaba en 'procesando'
+    // para siempre y el cobro no se aplicaba nunca.
+    expect(res._status).toBe(409);
+    expect(res._body).toMatchObject({ in_flight: true, retry: true });
 
     // No debe haber upsert a users_premium.
     const upsert = _mockAdmin.calls.upserts.find((u) => u.table === "users_premium");
@@ -834,7 +839,7 @@ describe("hub.js — receptor cable Hub→w-planner", () => {
 //   6. cliente_email ausente en el payload → parqueado.
 //   7. evento_id_original ausente → 400.
 //   8. periodicidad inválida → 400.
-//   9. Candado 'duplicate'/'in_flight' → 200 sin tocar users_premium.
+//   9. Candado 'duplicate' → 200; 'in_flight' → 409. Sin tocar users_premium.
 //   10. Fallo del UPDATE → hub_revertir_evento + 500.
 describe("hub.js — pago.reembolsado (revocación de acceso)", () => {
   const EVENTO_ORIGINAL = "sus-abc123:2026-07-01";
@@ -1124,7 +1129,7 @@ describe("hub.js — pago.reembolsado (revocación de acceso)", () => {
     expect(update).toBeUndefined();
   });
 
-  it("(9b) hub_reclamar_evento 'in_flight' → 200 sin tocar users_premium", async () => {
+  it("(9b) hub_reclamar_evento 'in_flight' → 409 sin tocar users_premium", async () => {
     const payload = buildPayloadReembolso();
     const rawBody = JSON.stringify(payload);
     const headers = buildHeaders(rawBody);
@@ -1138,8 +1143,13 @@ describe("hub.js — pago.reembolsado (revocación de acceso)", () => {
     const res = makeRes();
     await handler(req, res);
 
-    expect(res._status).toBe(200);
-    expect(res._body).toMatchObject({ ok: true, in_flight: true });
+    // 409, no 200. Este test afirmaba 200 y con ello fijaba el propio bug: un
+    // 200 le dice al Hub "entregado, no reintentes", pero el auto-sanado del
+    // candado depende justo de que llegue un reintento pasados los 15 min. Si
+    // la corrida anterior murió, con 200 el evento quedaba en 'procesando'
+    // para siempre y el cobro no se aplicaba nunca.
+    expect(res._status).toBe(409);
+    expect(res._body).toMatchObject({ in_flight: true, retry: true });
   });
 
   // ── Test 10: Fallo del UPDATE → hub_revertir_evento + 500 ────────────────────

@@ -25,9 +25,17 @@ export function useProjectConfig({ projectId, project, setProject }) {
   // Ejecuta una escritura y acumula su error sin cortar la secuencia: se
   // mantiene el comportamiento previo de intentar todas las operaciones, pero
   // ahora sabemos cuáles fallaron.
-  const run = async (errors, query) => {
-    const { error } = await query;
-    if (error) errors.push(error);
+  //
+  // Ojo con `esperaFilas`: un UPDATE o DELETE que la RLS deniega NO devuelve
+  // error, devuelve CERO FILAS. Por eso las escrituras piden `.select('id')` y
+  // comprobamos que volvió algo. Mirar solo `error` deja pasar exactamente el
+  // fallo silencioso que este archivo intenta erradicar.
+  const run = async (errors, query, esperaFilas = true) => {
+    const { data, error } = await query;
+    if (error) { errors.push(error); return; }
+    if (esperaFilas && Array.isArray(data) && data.length === 0) {
+      errors.push({ message: 'el servidor no aplicó el cambio (sin permisos sobre este tablero)', code: 'ZERO_ROWS' });
+    }
   };
 
   // Un único sitio donde se reporta el fallo, para que ninguna escritura pueda
@@ -46,11 +54,11 @@ export function useProjectConfig({ projectId, project, setProject }) {
     const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
     const errors = [];
     for (const p of toInsert)
-      await run(errors, supabase.from('participants').insert({ id: p.id, name: p.name, is_super_user: p.isSuperUser, project_id: projectId || undefined }));
+      await run(errors, supabase.from('participants').insert({ id: p.id, name: p.name, is_super_user: p.isSuperUser, project_id: projectId || undefined }).select('id'));
     for (const p of toUpdate)
-      await run(errors, supabase.from('participants').update({ name: p.name, is_super_user: p.isSuperUser }).eq('id', p.id).eq('project_id', projectId));
+      await run(errors, supabase.from('participants').update({ name: p.name, is_super_user: p.isSuperUser }).eq('id', p.id).eq('project_id', projectId).select('id'));
     for (const p of toDelete)
-      await run(errors, supabase.from('participants').delete().eq('id', p.id).eq('project_id', projectId));
+      await run(errors, supabase.from('participants').delete().eq('id', p.id).eq('project_id', projectId).select('id'));
     if (errors.length) { reportSaveError('los participantes', errors); return false; }
     setParticipants(next);
     return true;
@@ -63,9 +71,9 @@ export function useProjectConfig({ projectId, project, setProject }) {
     const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
     const errors = [];
     for (const i of toInsert)
-      await run(errors, supabase.from('indicators').insert({ id: i.id, name: i.name, project_id: projectId || undefined }));
+      await run(errors, supabase.from('indicators').insert({ id: i.id, name: i.name, project_id: projectId || undefined }).select('id'));
     for (const i of toDelete)
-      await run(errors, supabase.from('indicators').delete().eq('id', i.id).eq('project_id', projectId));
+      await run(errors, supabase.from('indicators').delete().eq('id', i.id).eq('project_id', projectId).select('id'));
     if (errors.length) { reportSaveError('los indicadores', errors); return false; }
     setIndicators(next);
     return true;
@@ -79,11 +87,11 @@ export function useProjectConfig({ projectId, project, setProject }) {
     const toDelete = prev.filter(p => !next.find(n => n.id === p.id));
     const errors = [];
     for (const t of toInsert)
-      await run(errors, supabase.from('task_types').insert({ name: t.name, project_id: projectId || undefined }));
+      await run(errors, supabase.from('task_types').insert({ name: t.name, project_id: projectId || undefined }).select('id'));
     for (const t of toUpdate)
-      await run(errors, supabase.from('task_types').update({ name: t.name }).eq('id', t.id).eq('project_id', projectId));
+      await run(errors, supabase.from('task_types').update({ name: t.name }).eq('id', t.id).eq('project_id', projectId).select('id'));
     for (const t of toDelete)
-      await run(errors, supabase.from('task_types').delete().eq('id', t.id).eq('project_id', projectId));
+      await run(errors, supabase.from('task_types').delete().eq('id', t.id).eq('project_id', projectId).select('id'));
     if (errors.length) reportSaveError('los tipos de tarea', errors);
     // Relee siempre: aunque algo fallara, la lista queda igual a la base y no a
     // lo que el usuario creía haber guardado.

@@ -438,9 +438,14 @@ async function handleSuscripcionCobrada(req, res, payload) {
   if (claimResult === "in_flight") {
     // Otra corrida activa (estado='procesando', timestamp reciente <15 min) tiene el evento.
     // No re-procesamos para evitar escrituras duplicadas en users_premium.
-    // Si esa corrida muere sin revertir, el auto-sanado la tomará a los 15 min.
+    // 409 y NO 200: un 200 significa "entregado, no reintentes", y todo el
+    // auto-sanado depende justamente de que llegue un reintento pasados los
+    // 15 min. Si la corrida anterior murió y el Hub deja de reintentar porque
+    // le dijimos 200, el candado queda en 'procesando' para siempre y el cobro
+    // nunca se aplica. Con 409 el reintento llega: si la otra corrida terminó
+    // bien, recibira 'duplicate' -> 200.
     console.log("[hub-webhook] evento en vuelo (otra corrida activa):", eventoId);
-    return res.status(200).json({ ok: true, in_flight: true });
+    return res.status(409).json({ ok: false, in_flight: true, retry: true });
   }
 
   // claimResult === 'claimed': somos el procesador designado.
@@ -702,8 +707,10 @@ async function handlePagoReembolsado(req, res, payload) {
   }
 
   if (claimResult === "in_flight") {
+    // 409, mismo motivo que en la rama de cobro: un 200 mataría el reintento
+    // del que depende el auto-sanado y el reembolso nunca se aplicaria.
     console.log("[hub-webhook] pago.reembolsado en vuelo (otra corrida activa):", eventoId);
-    return res.status(200).json({ ok: true, in_flight: true });
+    return res.status(409).json({ ok: false, in_flight: true, retry: true });
   }
 
   // claimResult === 'claimed': somos el procesador designado.

@@ -216,7 +216,7 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
 // Tablero Kanban: columnas por estado, filtros, y modal de creación/edición
 // (Modal + TaskForm). Dirigido 100% por props. Extraído del monolito
 // (H-002, núcleo fase C).
-export default function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, nextId, keyResults = [], sprints = [], taskFieldDefs = [] }) {
+export default function BoardTab({ tasks, createTask, updateTask, deleteTask, participants, indicators, currentUser, weights, taskTypes, dimensions, editTaskFromDep, onDepEditDone, projectId, keyResults = [], sprints = [], taskFieldDefs = [] }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [modal, setModal] = useState(null);
@@ -272,17 +272,22 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
       // Reservar el id atómicamente recién ahora (lock-free vía SEQUENCE, H-014).
       let id = form.id;
       if (id == null) {
+        // Antes, si claim_task_id fallaba se usaba `nextId` (un contador local).
+        // Ese "fallback" no salvaba nada: el id ya estaba tomado y el INSERT
+        // moría con 23505 clave duplicada. Preferimos parar y decirlo: fabricar
+        // un id condenado al choque solo mueve el fallo a un sitio más confuso.
+        let claimErr = null;
         try {
           const { data: claimedId, error } = await supabase.rpc('claim_task_id');
-          if (error || claimedId == null) {
-            console.warn('[save] claim_task_id falló, usando fallback nextId:', error?.message || claimedId);
-            id = nextId;
-          } else {
-            id = claimedId;
-          }
+          if (error || claimedId == null) claimErr = error?.message || 'sin respuesta';
+          else id = claimedId;
         } catch (err) {
-          console.warn('[save] claim_task_id excepción, usando fallback nextId:', err?.message);
-          id = nextId;
+          claimErr = err?.message || 'excepción';
+        }
+        if (id == null) {
+          console.error('[save] claim_task_id falló:', claimErr);
+          toast('No se pudo reservar el número de la tarea. Revisa tu conexión e inténtalo de nuevo.', { type: 'error' });
+          return;
         }
       }
       const activeDimensions = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;

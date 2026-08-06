@@ -261,6 +261,15 @@ async function loadConfigs(supabase) {
 
   if (!newErr && Array.isArray(newConfigs)) return { source: "new", configs: newConfigs };
 
+  // Solo se cae al sistema viejo si report_configs NO EXISTE (42P01). Antes se
+  // caía ante CUALQUIER error: un timeout puntual bastaba para que el cron
+  // evaluara las agendas de email_config, que conserva destinatarios y horarios
+  // antiguos, y mandara datos actuales a listas de correo obsoletas.
+  if (newErr && newErr.code !== "42P01") {
+    console.error("[cron] error leyendo report_configs; NO se usa el sistema legacy:", newErr);
+    throw new Error("No se pudieron leer las configuraciones de informes: " + newErr.message);
+  }
+
   // Fallback al sistema viejo de email_config.
   const { data: oldConfigs, error: oldErr } = await supabase
     .from("email_config")
@@ -535,6 +544,19 @@ export default async function handler(req, res) {
         });
       } catch (err) {
         console.error(`[cron] ${config.report_type} fallo:`, err?.message);
+        // Deja rastro EN LA BASE, no solo en logs efimeros. El check constraint
+        // de report_history contempla status='failed' y hasta hoy nadie lo
+        // escribia nunca: 16 informes generados y 0 fallidos registrados no
+        // significaba que ninguno fallara, sino que no habia forma de saberlo.
+        const { error: logErr } = await supabase.from("report_history").insert({
+          project_id: config.project_id,
+          report_type: config.report_type,
+          period_start: range?.weekStart ?? null,
+          period_end: range?.weekEnd ?? null,
+          status: "failed",
+          plain_text: String(err?.message || err).slice(0, 2000),
+        });
+        if (logErr) console.error("[cron] tampoco se pudo registrar el fallo:", logErr.message);
         results.push({
           project_id: config.project_id,
           type: config.report_type,

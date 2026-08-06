@@ -235,20 +235,51 @@ export default async function handler(req) {
     session = data;
   }
   if (!session) {
-    const { data } = await supabase.from("chat_sessions")
+    const { data, error: insErr } = await supabase.from("chat_sessions")
       .insert({ project_id: projectId, owner_user_id: user.id, title: "Chat principal" })
       .select("*")
       .single();
-    session = data;
+    if (insErr) {
+      // 23505: otra petición simultánea creó la sesión primero (el índice
+      // chat_sessions_active_uniq lo garantiza). No es un fallo: releemos la
+      // que ganó. Antes no había índice y quedaban dos sesiones activas, lo
+      // que dejaba al chat sin memoria de forma permanente.
+      if (insErr.code === "23505") {
+        const { data: existente } = await supabase.from("chat_sessions")
+          .select("*")
+          .eq("project_id", projectId)
+          .eq("owner_user_id", user.id)
+          .is("archived_at", null)
+          .maybeSingle();
+        session = existente;
+      } else {
+        console.error("[chat-stream] no se pudo crear la sesión de chat:", insErr);
+      }
+    } else {
+      session = data;
+    }
+  }
+  if (!session) {
+    // Sin sesión no hay dónde escribir. La cuota ya se reservó arriba, así que
+    // hay que devolverla antes de rendirse.
+    await supabase.rpc("project_chat_release_quota", { p_project_id: projectId }).catch?.(() => {});
+    return new Response(JSON.stringify({ error: "No se pudo abrir la sesión de chat. Intenta de nuevo." }), {
+      status: 503, headers: { "Content-Type": "application/json" },
+    });
   }
 
-  // Historial de la sesión (últimos 20 turnos para no inflar contexto).
-  const { data: history } = await supabase
+  // Historial de la sesión: los ÚLTIMOS 20 turnos (40 mensajes).
+  // Iba en ascending:true, que traía los 40 mensajes MÁS VIEJOS: a partir del
+  // mensaje 41 el modelo recibía siempre el arranque de la conversación y nunca
+  // lo recién dicho. Se piden los últimos y se reordenan cronológicamente.
+  const { data: historyDesc, error: histErr } = await supabase
     .from("chat_messages")
-    .select("role, content")
+    .select("role, content, created_at")
     .eq("session_id", session.id)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(40);
+  if (histErr) console.error("[chat-stream] no se pudo leer el historial:", histErr);
+  const history = (historyDesc || []).slice().reverse();
 
   const context = await loadContext(supabase, projectId);
 

@@ -475,7 +475,12 @@ export default async function handler(req) {
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userPrompt }],
     }),
-  }, 55000); // streaming LLM: timeout largo
+  // 240 s, no 55: el AbortSignal aborta tambien la LECTURA del stream, asi que
+  // el tope anterior mataba a mitad de generacion justo los informes largos
+  // (este archivo estima 60-120 s). Al cortarse, los tokens ya se pagaron,
+  // el correo no sale y no queda ninguna fila que lo delate. Edge no tiene
+  // maxDuration, asi que el limite real lo pone la plataforma, no nosotros.
+  }, 240000); // streaming LLM: por encima del peor caso medido
 
   if (!anthropicRes.ok) {
     // #9 — Loguear detalle del proveedor server-side, devolver mensaje genérico al cliente.

@@ -317,15 +317,17 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null,
     const avisos = [];
     const taskSchema = Array.isArray(tpl.tasks_schema) ? tpl.tasks_schema : [];
     if (taskSchema.length) {
-      const sampleTasks = [];
-      for (const [i, t] of taskSchema.entries()) {
-        const { data: claimedId } = await supabase.rpc('claim_task_id');
-        sampleTasks.push({
-          id: claimedId || Date.now() + i, title: t.title, type: t.type || 'Operativa', status: t.status || 'Sin iniciar',
-          project_id: proj.id, estimated_time: 5, difficulty: 5, strategic_value: 5,
-          progress_percent: 0, subtasks: [], indicators: [],
-        });
-      }
+      // Sin `id`: desde la migración 20260806220000 la columna lo genera sola,
+      // con la misma secuencia que usa claim_task_id. El fallback anterior era
+      // `Date.now() + i` ≈ 1,78e12 sobre una columna **integer** (máximo
+      // 2.147.483.647): cuando claim_task_id devolvía null, el lote entero
+      // moría con "integer out of range". De paso nos ahorramos una llamada
+      // por tarea.
+      const sampleTasks = taskSchema.map((t) => ({
+        title: t.title, type: t.type || 'Operativa', status: t.status || 'Sin iniciar',
+        project_id: proj.id, estimated_time: 5, difficulty: 5, strategic_value: 5,
+        progress_percent: 0, subtasks: [], indicators: [],
+      }));
       const { error: tasksErr } = await supabase.from('tasks').insert(sampleTasks);
       if (tasksErr) { console.error('[createFromTemplate] tareas de ejemplo', tasksErr); avisos.push('las tareas de ejemplo'); }
     }

@@ -13,7 +13,7 @@
 //
 // SI ESTE TEST FALLA: no lo debilites. O capturas el error
 // (`const { error } = await …` y lo tratas), o si de verdad da igual, añade el
-// archivo:línea a EXCEPCIONES_JUSTIFICADAS explicando por qué.
+// la línea a EXCEPCIONES_JUSTIFICADAS explicando por qué.
 
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -34,22 +34,20 @@ const EXCEPCIONES_JUSTIFICADAS = {
 //
 // Al corregir una, BÓRRALA de esta lista. La lista debe encoger, nunca crecer.
 const DEUDA_CONOCIDA = {
-  'src/features/okrs/OKRsTab.jsx:34':  'pendiente — auditoría de features de análisis',
-  'src/features/okrs/OKRsTab.jsx:45':  'pendiente — auditoría de features de análisis',
-  'src/features/okrs/OKRsTab.jsx:52':  'pendiente — auditoría de features de análisis',
-  'src/features/okrs/OKRsTab.jsx:66':  'pendiente — auditoría de features de análisis',
-  'src/features/okrs/OKRsTab.jsx:71':  'pendiente — auditoría de features de análisis',
-  'src/features/sprints/SprintsTab.jsx:121': 'pendiente — auditoría de features de análisis',
-  'src/features/sprints/SprintsTab.jsx:126': 'pendiente — auditoría de features de análisis',
-  'src/features/sprints/SprintsTab.jsx:132': 'pendiente — auditoría de features de análisis',
-  'api/chat-stream.js:259': 'pendiente — auditoría de endpoints de negocio',
-  'api/chat-stream.js:379': 'pendiente — auditoría de endpoints de negocio',
-  'api/cron.js:235':        'pendiente — auditoría de endpoints de negocio',
-  'api/cron.js:435':        'pendiente — auditoría de endpoints de negocio',
-  'api/cron.js:520':        'pendiente — auditoría de endpoints de negocio',
-  'api/cron.js:524':        'pendiente — auditoría de endpoints de negocio',
-  'api/mp-subscribe.js:100': 'pendiente — auditoría de pagos y webhooks',
-  'api/open-retro.js:153':  'pendiente — auditoría de endpoints de negocio',
+  "src/features/okrs/OKRsTab.jsx » await supabase.from('okrs').update(payload).eq('id', editId).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "src/features/okrs/OKRsTab.jsx » await supabase.from('okrs').delete().eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "src/features/okrs/OKRsTab.jsx » await supabase.from('okrs').update({ status: ns }).eq('id', okr.id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "src/features/okrs/OKRsTab.jsx » await supabase.from('key_results').update({ current_value: nv }).eq('id', kr.id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "src/features/okrs/OKRsTab.jsx » await supabase.from('key_results').delete().eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "src/features/sprints/SprintsTab.jsx » await supabase.from('sprints').update({ status: 'active' }).eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "src/features/sprints/SprintsTab.jsx » await supabase.from('sprints').update({ status: 'closed' }).eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "src/features/sprints/SprintsTab.jsx » await supabase.from('sprints').delete().eq('id', id).eq('project_id', projectId);": "pendiente — auditoría de features de análisis",
+  "api/chat-stream.js » await admin.from(\"chat_messages\").insert({": "pendiente — si falla, el turno no queda en el historial",
+  "api/cron.js » await supabase.from(\"report_history\").insert({": "pendiente — archivado y marcas last_sent del cron",
+  "api/cron.js » await supabase.from(\"_keepalive\").update({ ch, pinged_at: new Date().toISOString() }).eq(\"id\", 1);": "aceptable — ping de mantenimiento sin consecuencia",
+  "api/cron.js » await supabase.from(\"email_config\")": "pendiente — archivado y marcas last_sent del cron",
+  "api/cron.js » await supabase.from(\"report_configs\")": "pendiente — archivado y marcas last_sent del cron",
+  "api/mp-subscribe.js » await admin.from(\"user_referrals\").upsert(": "pendiente — auditoría de pagos",
 };
 
 const VERBOS_ESCRITURA = /\.(insert|upsert|update|delete)\s*\(/;
@@ -57,6 +55,12 @@ const VERBOS_ESCRITURA = /\.(insert|upsert|update|delete)\s*\(/;
 // está capturando (una asignación, un argumento, el cuerpo de una flecha…),
 // no una sentencia suelta cuyo resultado se pierde.
 const CONTINUACION = /(=>|=|\(|,|\[|&&|\|\||\?|:|return)\s*$/;
+
+// La clave identifica la escritura por su TEXTO, no por su número de línea:
+// con números, cualquier edición ajena al archivo rompía el test y obligaba a
+// renumerar la lista de deuda entera. Con el texto, la entrada sigue valiendo
+// mientras la línea exista tal cual, y deja de valer en cuanto se corrige.
+const claveDe = (rel, linea) => `${rel} » ${linea.trim()}`;
 
 const listarArchivos = (dir) => {
   const salida = [];
@@ -102,14 +106,14 @@ const buscarEscriturasMudas = (rutaAbs) => {
       // `.then(({ error }) => …)` sí recoge el resultado: no es una escritura muda.
       const loRecogeUnThen = /\.then\s*\(\s*(async\s*)?\(?\s*\{[^}]*\berror\b/.test(sentencia);
       if (!CONTINUACION.test(anterior) && !loRecogeUnThen && VERBOS_ESCRITURA.test(sentencia)) {
-        hallazgos.push({ clave: `${rel}:${i + 1}`, linea, motivo: 'el resultado de la escritura se descarta' });
+        hallazgos.push({ clave: claveDe(rel, linea), ubicacion: `${rel}:${i + 1}`, linea, motivo: 'el resultado de la escritura se descarta' });
       }
     }
 
     // Caso 2: el resultado se recibe y se tira explícitamente.
     if (/\.then\s*\(\s*\(\s*\)\s*=>\s*\{?\s*\}?\s*\)/.test(linea)
         && VERBOS_ESCRITURA.test(lineas.slice(Math.max(0, i - 11), i + 1).join(''))) {
-      hallazgos.push({ clave: `${rel}:${i + 1}`, linea, motivo: '.then(() => {}) descarta el error' });
+      hallazgos.push({ clave: claveDe(rel, linea), ubicacion: `${rel}:${i + 1}`, linea, motivo: '.then(() => {}) descarta el error' });
     }
   }
   return hallazgos;
@@ -124,7 +128,7 @@ describe('ninguna escritura a Supabase puede quedarse muda', () => {
       .flatMap(buscarEscriturasMudas)
       .filter(h => !(h.clave in EXCEPCIONES_JUSTIFICADAS) && !(h.clave in DEUDA_CONOCIDA));
 
-    const informe = mudas.map(h => `  ${h.clave} — ${h.motivo}\n    ${h.linea}`).join('\n');
+    const informe = mudas.map(h => `  ${h.ubicacion} — ${h.motivo}\n    ${h.linea}`).join('\n');
     expect(mudas, `Escrituras nuevas que ignoran su error:\n${informe}\n\n` +
       'Captura el error y trátalo. No la añadas a DEUDA_CONOCIDA: esa lista solo encoge.').toEqual([]);
   });

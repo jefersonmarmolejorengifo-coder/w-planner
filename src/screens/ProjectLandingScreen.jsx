@@ -13,15 +13,19 @@ const ConsolidatedDashboard = lazy(() => import('../features/dashboard/Consolida
 // sesión de "Reportes IA" que lista y muestra los reportes archivados
 // (report_history) de cada tablero. RLS: el dueño solo ve sus propios tableros.
 
-export default function ProjectLandingScreen({ onProjectLoaded, authUser = null }) {
+// initialJoinCode / initialJoinError: cuando el usuario llega por un enlace
+// /app?join=CODE y el alta automática falla, App nos manda aquí con el código ya
+// escrito y el motivo a la vista, para que pueda reintentar de un clic en vez de
+// aterrizar en una pantalla muda.
+export default function ProjectLandingScreen({ onProjectLoaded, authUser = null, initialJoinCode = "", initialJoinError = "" }) {
   const [tab, setTab] = useState('join'); // 'create' | 'join' | 'template'
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [projName, setProjName] = useState("");
   const [projDesc, setProjDesc] = useState("");
   const [projPin, setProjPin] = useState("");
-  const [joinCode, setJoinCode] = useState("");
-  const [err, setErr] = useState("");
+  const [joinCode, setJoinCode] = useState(initialJoinCode);
+  const [err, setErr] = useState(initialJoinError);
   const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [tplPin, setTplPin] = useState("");
@@ -311,10 +315,10 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null 
     const code = joinCode.trim();
     if (!code) { setErr("Ingresa el código de invitación."); return; }
     setJoining(true); setErr("");
-    const data = await joinProjectByCode(code, authUser);
-    if (!data) { setErr("Código inválido o proyecto no encontrado."); setJoining(false); return; }
-    localStorage.setItem('pp_project_id', String(data.id));
-    onProjectLoaded(data);
+    const { project, error } = await joinProjectByCode(code, authUser);
+    if (!project) { setErr(error || "Código inválido o proyecto no encontrado."); setJoining(false); return; }
+    localStorage.setItem('pp_project_id', String(project.id));
+    onProjectLoaded(project);
   };
 
   const btnBase = { border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontSize: 14, width: "100%", transition: "all 0.2s" };

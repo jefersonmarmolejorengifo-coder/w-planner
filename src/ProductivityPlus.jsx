@@ -380,6 +380,9 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [activeUser, setActiveUser] = useState(null);
   const [showProjectLanding, setShowProjectLanding] = useState(false);
+  // Invitación por enlace que no se pudo aceptar: { code, error }. Se le pasa a
+  // ProjectLandingScreen para precargar el código y mostrar el motivo real.
+  const [pendingJoin, setPendingJoin] = useState(null);
   const [depEditTask, setDepEditTask] = useState(null);
 
   // Todos los datos del proyecto (estado + carga masiva + realtime + CRUD/saves)
@@ -446,14 +449,22 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       const joinCode = params.get('join');
       if (joinCode) {
-        const proj = await joinProjectByCode(joinCode, user);
+        const { project: proj, error: joinErr } = await joinProjectByCode(joinCode, user);
+        // Limpiamos el ?join= pase lo que pase: si se reintenta, se hace desde
+        // la pantalla de selección, no recargando una URL que ya falló.
+        window.history.replaceState({}, '', window.location.pathname);
         if (proj) {
           localStorage.setItem('pp_project_id', String(proj.id));
           setProjectId(proj.id); setProject(proj);
-          window.history.replaceState({}, '', window.location.pathname);
           await loadAllForProject(proj.id, proj, user);
           return;
         }
+        // La invitación no se pudo aceptar. Antes se caía en silencio a la
+        // pantalla de proyectos y el invitado no sabía qué había pasado.
+        setPendingJoin({ code: joinCode, error: joinErr });
+        setShowProjectLanding(true);
+        setLoading(false);
+        return;
       }
 
       // 3. Load stored project
@@ -650,12 +661,17 @@ export default function App() {
       <BillingReturnOverlay />
 
       {showProjectLanding && !loading && (
-        <ProjectLandingScreen authUser={authUser} onProjectLoaded={(proj) => {
-          setProject(proj);
-          setProjectId(proj.id);
-          setShowProjectLanding(false);
-          loadAllForProject(proj.id, proj, authUser);
-        }} />
+        <ProjectLandingScreen
+          authUser={authUser}
+          initialJoinCode={pendingJoin?.code || ""}
+          initialJoinError={pendingJoin?.error || ""}
+          onProjectLoaded={(proj) => {
+            setProject(proj);
+            setProjectId(proj.id);
+            setShowProjectLanding(false);
+            setPendingJoin(null);
+            loadAllForProject(proj.id, proj, authUser);
+          }} />
       )}
 
       {loading && (

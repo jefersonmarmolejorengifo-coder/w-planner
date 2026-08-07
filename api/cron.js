@@ -4,10 +4,6 @@ import { notificarPagoAlHub } from "./_hub-client.js";
 import { extractUsageMarker } from "../src/aiModels.js";
 
 // ─── Helpers de tiempo en Colombia ─────────────────────────
-const DAY_MAP = {
-  sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
-  thursday: 4, friday: 5, saturday: 6,
-};
 const DAY_NAMES = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
 
 function getColombiaNow() {
@@ -19,64 +15,152 @@ function getColombiaNow() {
 
 const fmt = (d) => d.toISOString().split("T")[0];
 
-// ─── Helpers de schedule por tipo ──────────────────────────
-// Decide si AHORA toca enviar este reporte. Devuelve true sólo en la hora
-// pactada y sólo si hace suficiente tiempo desde el último envío.
-function shouldSendNow(config) {
-  const colombia = getColombiaNow();
-  const currentHour = colombia.getHours();
-  const todayName = DAY_NAMES[colombia.getDay()];
-  const lastSent = config.last_sent ? new Date(config.last_sent) : null;
-  const sched = config.schedule || {};
+// ─── Programación: ¿toca enviar este informe AHORA? ────────────────────────
+//
+// Esta es la pieza con más aristas del cron —horarios, husos, duplicados,
+// reintentos— así que se escribe como una FUNCIÓN PURA y se exporta: toda su
+// casuística está cubierta en api/cron.schedule.test.js. Un error aquí no se
+// nota hasta que un cliente no recibe su informe, o lo recibe dos veces.
 
-  // Mínimo 4 horas entre envíos (evita re-disparos por bug en cron).
-  const hoursSinceLast = lastSent
-    ? (Date.now() - lastSent.getTime()) / 3_600_000
-    : Infinity;
-  if (hoursSinceLast < 4) return false;
+// Colombia no aplica horario de verano, así que un offset fijo es exacto.
+const COL_OFFSET_H = -5;
+
+// Cuántas horas después de la hora pactada seguimos considerando que el informe
+// toca.
+//
+// Antes la ventana era CERO: la hora tenía que coincidir clavada. Como el cron
+// dispone de 60 s por invocación y un informe con IA puede tardar decenas de
+// segundos, bastaba que dos informes cayeran a la misma hora para que el
+// segundo no saliera nunca — sin reintento, sin correo y sin una fila que lo
+// delatara. Con la ventana, el siguiente tick horario lo recoge.
+//
+// La ventana por sí sola no basta: sin la reserva atómica de más abajo,
+// permitiría enviar el mismo informe una vez por hora durante toda la ventana.
+// Las dos piezas se necesitan mutuamente.
+export const TOLERANCIA_HORAS = 6;
+
+// Partes de la hora de pared en Colombia. Solo aritmética UTC: no depende de la
+// zona horaria de la máquina que ejecute esto (en local no es UTC).
+export const partesColombia = (instante) => {
+  const d = new Date(instante.getTime() + COL_OFFSET_H * 3600000);
+  return {
+    anio: d.getUTCFullYear(), mes: d.getUTCMonth(), dia: d.getUTCDate(),
+    hora: d.getUTCHours(), diaSemana: d.getUTCDay(),
+  };
+};
+
+// Instante real (UTC) que corresponde a una hora de pared colombiana.
+const instanteColombia = (p, hora) =>
+  new Date(Date.UTC(p.anio, p.mes, p.dia, hora - COL_OFFSET_H, 0, 0, 0));
+
+const mismoDiaColombia = (a, b) => {
+  const pa = partesColombia(a), pb = partesColombia(b);
+  return pa.anio === pb.anio && pa.mes === pb.mes && pa.dia === pb.dia;
+};
+
+const horaValida = (h, pordefecto) => {
+  const n = Number(h);
+  return Number.isInteger(n) && n >= 0 && n <= 23 ? n : pordefecto;
+};
+
+// Devuelve el INSTANTE de la ocurrencia pendiente de enviarse, o null si ahora
+// no toca.
+//
+// La deduplicación NO se hace ya por "horas transcurridas desde el último
+// envío" —una regla que, con una ventana de varias horas, permitiría
+// duplicados— sino comparando last_sent contra el instante exacto de la
+// ocurrencia. Si ya se envió para ESTA ocurrencia, last_sent >= ocurrencia y se
+// salta. Es exacto por construcción: da igual cuántas veces corra el cron
+// dentro de la ventana.
+export function ocurrenciaPendiente(config, ahora = new Date()) {
+  const p = partesColombia(ahora);
+  const nombreDia = DAY_NAMES[p.diaSemana];
+  const sched = config.schedule || {};
+  let targetHour;
 
   if (config.report_type === "scrum") {
-    // schedule: { days: ["wednesday","friday"], hour: 8 } o por día:
-    //           { days: [...], hours: { wednesday: 8, friday: 17 } }
-    const days = Array.isArray(sched.days) && sched.days.length
-      ? sched.days
-      : ["wednesday", "friday"];
-    const targetHour = (sched.hours && sched.hours[todayName])
-      ?? sched.hour ?? 8;
-    if (!days.includes(todayName)) return false;
-    if (currentHour !== targetHour) return false;
-    return true;
+    const dias = Array.isArray(sched.days) && sched.days.length ? sched.days : ["wednesday", "friday"];
+    if (!dias.includes(nombreDia)) return null;
+    targetHour = horaValida(sched.hours?.[nombreDia] ?? sched.hour, 8);
+  } else if (config.report_type === "weekly_po") {
+    if (nombreDia !== (sched.send_day || "monday")) return null;
+    targetHour = horaValida(sched.hour, 8);
+  } else if (config.report_type === "monthly_team") {
+    if (nombreDia !== (sched.send_day || "monday")) return null;
+    const semana = Number(sched.week ?? 1);
+    if (p.dia < (semana - 1) * 7 + 1 || p.dia > semana * 7) return null;
+    targetHour = horaValida(sched.hour, 8);
+  } else {
+    return null;
   }
 
-  if (config.report_type === "weekly_po") {
-    // schedule: { send_day: "monday", hour: 8 }
-    const targetDay = sched.send_day || "monday";
-    const targetHour = sched.hour ?? 8;
-    if (todayName !== targetDay) return false;
-    if (currentHour !== targetHour) return false;
-    // Al menos 5 días desde el último envío (defensa contra duplicados).
-    const days = hoursSinceLast / 24;
-    return days >= 5;
+  const ocurrencia = instanteColombia(p, targetHour);
+  if (ahora < ocurrencia) return null; // aún no es la hora
+
+  // La ventana nunca cruza la medianoche colombiana: pasado ese punto el
+  // predicado del día ya no se cumpliría y el estado quedaría incoherente.
+  const horasVentana = Math.min(TOLERANCIA_HORAS, 24 - targetHour);
+  if (ahora.getTime() >= ocurrencia.getTime() + horasVentana * 3600000) return null;
+
+  if (config.last_sent) {
+    const enviado = new Date(config.last_sent);
+    if (!Number.isNaN(enviado.getTime())) {
+      // Ya se cubrió esta ocurrencia…
+      if (enviado >= ocurrencia) return null;
+      // …o ya salió un informe de esta configuración hoy (por ejemplo, un envío
+      // manual desde Configuración un rato antes). Un informe programado por
+      // día y configuración: nadie quiere el mismo resumen dos veces.
+      if (mismoDiaColombia(enviado, ocurrencia)) return null;
+    }
   }
 
-  if (config.report_type === "monthly_team") {
-    // schedule: { send_day: "monday", week: 1, hour: 8 } → primer lunes del mes.
-    const targetDay = sched.send_day || "monday";
-    const targetWeek = sched.week ?? 1; // primera semana
-    const targetHour = sched.hour ?? 8;
-    if (todayName !== targetDay) return false;
-    if (currentHour !== targetHour) return false;
-    // ¿Estamos en la N-ésima semana del mes? Para "primera semana" → día 1-7.
-    const dayOfMonth = colombia.getDate();
-    const minDay = (targetWeek - 1) * 7 + 1;
-    const maxDay = targetWeek * 7;
-    if (dayOfMonth < minDay || dayOfMonth > maxDay) return false;
-    // Al menos 25 días desde el último envío.
-    const days = hoursSinceLast / 24;
-    return days >= 25;
-  }
+  return ocurrencia;
+}
 
-  return false;
+// Reserva la ocurrencia ANTES de generar nada, con un compare-and-set: escribe
+// last_sent = <ocurrencia> solo si nadie la ha reservado ya. Devuelve true si
+// somos los dueños de este envío.
+//
+// Sin esto, la ventana de 6 h sería un multiplicador de duplicados: cada tick
+// horario volvería a considerar el informe pendiente hasta que el marcado final
+// tuviera éxito. Con la reserva, el primero que llega gana y los demás ticks lo
+// ven ya cubierto. Resuelve además el solapamiento de dos invocaciones del cron.
+//
+// Nota sobre email_config.last_sent, que es TEXT y no timestamptz: la
+// comparación `lt` es lexicográfica, pero toISOString() siempre produce
+// YYYY-MM-DDTHH:mm:ss.sssZ, formato en el que el orden lexicográfico coincide
+// con el cronológico. Los valores heredados se escribieron igual.
+async function reservarOcurrencia(supabase, config, ocurrencia) {
+  const tabla = config._legacy ? "email_config" : "report_configs";
+  const iso = ocurrencia.toISOString();
+  const { data, error } = await supabase
+    .from(tabla)
+    .update({ last_sent: iso })
+    .eq("id", config.id)
+    .or(`last_sent.is.null,last_sent.lt.${iso}`)
+    .select("id");
+
+  if (error) return { reservada: false, error };
+  return { reservada: Array.isArray(data) && data.length === 1, error: null };
+}
+
+// Devuelve la reserva si la generación o el envío fallan, para que el siguiente
+// tick pueda reintentar dentro de la misma ventana. Solo suelta lo que seguimos
+// teniendo reservado, por si otra corrida ya avanzó.
+//
+// Si esta liberación falla, la ocurrencia se pierde hasta el próximo periodo.
+// Es el sentido correcto en el que equivocarse: mejor un informe que no sale
+// —y que queda registrado como 'failed'— que uno duplicado al cliente.
+async function liberarOcurrencia(supabase, config, ocurrencia) {
+  const tabla = config._legacy ? "email_config" : "report_configs";
+  const { error } = await supabase
+    .from(tabla)
+    .update({ last_sent: config.last_sent ?? null })
+    .eq("id", config.id)
+    .eq("last_sent", ocurrencia.toISOString());
+  if (error) {
+    console.error(`[cron] no se pudo liberar la reserva de ${config.report_type} (proyecto ${config.project_id}); no se reintentará hasta el próximo periodo:`, error.message);
+  }
 }
 
 // Calcula la ventana de análisis según el tipo.
@@ -501,24 +585,63 @@ export default async function handler(req, res) {
     }
 
     const results = [];
+    // La función tiene maxDuration 60 s (vercel.json) y un informe con IA puede
+    // comerse casi todo. Si no queda margen NO se empieza otro: se deja para el
+    // siguiente tick horario, que sigue dentro de la ventana de tolerancia.
+    // Antes se intentaban todos en serie y Vercel mataba la función a mitad, sin
+    // log y sin fila en report_history.
+    const INICIO_MS = Date.now();
+    const PRESUPUESTO_MS = 40_000;
+    let diferidos = 0;
+
     for (const config of configs) {
       if (!Array.isArray(config.recipients) || !config.recipients.length) {
         results.push({ project_id: config.project_id, type: config.report_type, skipped: true, reason: "Sin destinatarios" });
         continue;
       }
 
-      if (!shouldSendNow(config)) {
+      const ocurrencia = ocurrenciaPendiente(config);
+      if (!ocurrencia) {
         results.push({ project_id: config.project_id, type: config.report_type, skipped: true, reason: "No toca ahora" });
         continue;
       }
 
+      if (Date.now() - INICIO_MS > PRESUPUESTO_MS) {
+        diferidos++;
+        results.push({
+          project_id: config.project_id, type: config.report_type,
+          deferred: true, reason: `sin presupuesto en esta pasada; se reintenta dentro de la ventana de ${TOLERANCIA_HORAS} h`,
+        });
+        continue;
+      }
+
+      // Reserva antes de gastar un céntimo de IA.
+      const { reservada, error: resErr } = await reservarOcurrencia(supabase, config, ocurrencia);
+      if (resErr) {
+        console.error(`[cron] no se pudo reservar ${config.report_type} (proyecto ${config.project_id}):`, resErr.message);
+        results.push({ project_id: config.project_id, type: config.report_type, error: "reserva fallida: " + resErr.message });
+        continue;
+      }
+      if (!reservada) {
+        results.push({ project_id: config.project_id, type: config.report_type, skipped: true, reason: "ya cubierto por otra pasada" });
+        continue;
+      }
+
       const range = computeRange(config);
+      // Distinguir en qué fase se rompe no es un lujo: si falla la GENERACIÓN,
+      // no salió ningún correo y liberar la reserva es seguro. Si falla el
+      // ENVÍO, el correo pudo haber salido igual (un timeout contra Resend no
+      // dice si el mensaje se entregó), así que NO se libera. Ante la duda,
+      // preferimos un informe que no se reintenta —y que queda como 'failed'—
+      // antes que un cliente recibiendo el mismo correo dos veces.
+      let faseEnvio = false;
       try {
         const generated = await generateReport({
           projectId: config.project_id,
           reportType: config.report_type,
           range,
         });
+        faseEnvio = true;
         await sendAndArchive({
           supabase,
           projectId: config.project_id,
@@ -528,17 +651,10 @@ export default async function handler(req, res) {
           range,
         });
 
-        // Marca last_sent. Usa la tabla correcta según fuente.
-        // Es la marca que shouldSendNow() consulta para no reenviar: si no se
-        // graba, la próxima ventana vuelve a generar el informe (doble coste de
-        // IA) y el cliente lo recibe dos veces.
-        const tablaMarca = config._legacy ? "email_config" : "report_configs";
-        const { error: markErr } = await supabase.from(tablaMarca)
-          .update({ last_sent: new Date().toISOString() })
-          .eq("id", config.id);
-        if (markErr) {
-          console.error(`[cron] ${config.report_type} enviado pero NO se marcó last_sent en ${tablaMarca}; puede reenviarse:`, markErr.message);
-        }
+        // No hace falta marcar last_sent: la reserva de arriba ya lo dejó en el
+        // instante de la ocurrencia. Marcarlo aquí era el punto débil del
+        // diseño anterior — si esa escritura fallaba, el informe ya había
+        // salido y podía volver a salir.
 
         results.push({
           project_id: config.project_id,
@@ -549,6 +665,14 @@ export default async function handler(req, res) {
         });
       } catch (err) {
         console.error(`[cron] ${config.report_type} fallo:`, err?.message);
+        if (faseEnvio) {
+          console.error(`[cron] ${config.report_type} falló durante el envío; NO se libera la reserva porque el correo pudo haber salido.`);
+        } else {
+          // Falló generando: no hay correo posible. Se suelta la reserva para
+          // que el siguiente tick lo reintente dentro de la ventana, en vez de
+          // perder el informe hasta el próximo periodo.
+          await liberarOcurrencia(supabase, config, ocurrencia);
+        }
         // Deja rastro EN LA BASE, no solo en logs efimeros. El check constraint
         // de report_history contempla status='failed' y hasta hoy nadie lo
         // escribia nunca: 16 informes generados y 0 fallidos registrados no
@@ -570,7 +694,11 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, source, results });
+    if (diferidos) {
+      console.warn(`[cron] ${diferidos} informe(s) diferidos por presupuesto; la ventana de ${TOLERANCIA_HORAS} h permite recogerlos en los siguientes ticks.`);
+    }
+
+    return res.status(200).json({ ok: true, source, results, deferred: diferidos });
   } catch (err) {
     console.error("[cron] Error:", err);
     return res.status(500).json({ error: err.message });

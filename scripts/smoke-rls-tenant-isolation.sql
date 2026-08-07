@@ -69,6 +69,24 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- ── A bis) Segundo cerrojo: anon no debe tener ni un GRANT ───────────────────
+-- Que la RLS lo tape hoy no basta. Con el GRANT puesto, una sola policy futura
+-- mal escrita reabre la puerta entera; sin el GRANT, esa policy no sirve de
+-- nada. Es la condición que permitió la fuga del 2026-08-06.
+DO $$
+DECLARE
+  v_tablas TEXT;
+BEGIN
+  SELECT string_agg(DISTINCT table_name, ', ' ORDER BY table_name) INTO v_tablas
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public' AND grantee = 'anon';
+
+  IF v_tablas IS NOT NULL THEN
+    RAISE EXCEPTION 'anon ha recuperado privilegios de tabla sobre: %', v_tablas;
+  END IF;
+  RAISE NOTICE '✔ A bis) anon no tiene ningún privilegio de tabla';
+END $$;
+
 -- ── B) Un miembro legítimo sigue pudiendo trabajar ───────────────────────────
 SET LOCAL ROLE authenticated;
 DO $$

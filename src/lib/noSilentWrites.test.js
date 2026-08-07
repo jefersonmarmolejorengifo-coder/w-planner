@@ -8,8 +8,15 @@
 // todo el proyecto.
 //
 // Así que este test no prueba comportamiento: recorre el código fuente y falla
-// si encuentra una escritura (`insert`/`update`/`delete`/`upsert`) cuyo
-// resultado no se captura. Es la regla escrita de forma ejecutable.
+// si encuentra una escritura (`insert`/`update`/`delete`/`upsert`) cuyo fallo
+// pueda pasar desapercibido. Es la regla escrita de forma ejecutable.
+//
+// Detecta las tres formas de tragarse un error, en orden de descaro:
+//   1. la sentencia no captura nada          → `await supabase.from(x).insert(y);`
+//   2. lo captura y lo tira                  → `.then(() => {})`
+//   3. lo captura pero no mira `error`       → `const { data } = await ...`
+// La tercera es la traicionera: parece código responsable. Fue la que mantuvo
+// task_history vacía y 534 tareas sin autor durante tres meses.
 //
 // SI ESTE TEST FALLA: no lo debilites. O capturas el error
 // (`const { error } = await …` y lo tratas), o si de verdad da igual, añade el
@@ -95,6 +102,21 @@ const buscarEscriturasMudas = (rutaAbs) => {
       const loRecogeUnThen = /\.then\s*\(\s*(async\s*)?\(?\s*\{[^}]*\berror\b/.test(sentencia);
       if (!CONTINUACION.test(anterior) && !loRecogeUnThen && VERBOS_ESCRITURA.test(sentencia)) {
         hallazgos.push({ clave: claveDe(rel, linea), ubicacion: `${rel}:${i + 1}`, linea, motivo: 'el resultado de la escritura se descarta' });
+      }
+    }
+
+    // Caso 3: el resultado SE captura, pero sin `error`. Es el punto ciego que
+    // dejó el producto medio mudo tres meses: `const { data: created } = await
+    // supabase...insert(...)` parece código responsable —hay una asignación—
+    // pero si la escritura falla, `data` queda undefined y nadie se entera.
+    const capturaSinError = /^const\s*\{([^}]*)\}\s*=\s*await\s+(supabase|admin|client)\b/.exec(linea);
+    if (capturaSinError && !/\berror\b/.test(capturaSinError[1])) {
+      const sentencia = sentenciaDesde(lineas, i);
+      if (VERBOS_ESCRITURA.test(sentencia)) {
+        hallazgos.push({
+          clave: claveDe(rel, linea), ubicacion: `${rel}:${i + 1}`, linea,
+          motivo: 'captura el resultado pero no comprueba `error`',
+        });
       }
     }
 

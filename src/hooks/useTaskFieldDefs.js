@@ -44,13 +44,15 @@ export function useTaskFieldDefs(projectId) {
       show_on_card: !!payload.show_on_card,
       show_in_presentation: !!payload.show_in_presentation,
     };
-    let { data, error } = await supabase.from('task_field_defs').insert(insertPayload).select().single();
-    // Graceful: si la migración 011 aún no se aplicó, reintenta sin la columna nueva.
-    if (error && /show_in_presentation/i.test(error.message || '')) {
-      const fallback = { ...insertPayload };
-      delete fallback.show_in_presentation;
-      ({ data, error } = await supabase.from('task_field_defs').insert(fallback).select().single());
-    }
+    const { data, error } = await supabase.from('task_field_defs').insert(insertPayload).select().single();
+    // Aquí había un reintento "amable": si el error mencionaba
+    // show_in_presentation, se volvía a insertar SIN esa columna y se devolvía
+    // éxito. La columna no existía en producción (la migración 011 nunca se
+    // aplicó), así que el interruptor "Mostrar en Presentación" parecía
+    // guardarse, nunca persistía, y ningún campo salía en esa vista. Un fallo
+    // de esquema disfrazado de éxito: exactamente lo que dejó las invitaciones
+    // rotas durante meses. La columna ya existe (migración 20260807000000) y el
+    // disfraz se retira: si vuelve a faltar algo, que se vea.
     if (!error && data) {
       setTaskFieldDefs(prev => {
         if (prev.find(d => d.id === data.id)) return prev;
@@ -66,25 +68,15 @@ export function useTaskFieldDefs(projectId) {
     // Never let the client move a def to another project or undelete via update.
     delete safePatch.project_id;
     delete safePatch.id;
-    let { data, error } = await supabase
+    // Mismo caso que en el alta: se retira el reintento sin la columna, que
+    // convertía un esquema desalineado en un guardado "exitoso" que no guardaba.
+    const { data, error } = await supabase
       .from('task_field_defs')
       .update(safePatch)
       .eq('id', id)
       .eq('project_id', projectId)
       .select()
       .single();
-    // Graceful: si la migración 011 aún no se aplicó, reintenta sin la columna nueva.
-    if (error && /show_in_presentation/i.test(error.message || '')) {
-      const fallback = { ...safePatch };
-      delete fallback.show_in_presentation;
-      ({ data, error } = await supabase
-        .from('task_field_defs')
-        .update(fallback)
-        .eq('id', id)
-        .eq('project_id', projectId)
-        .select()
-        .single());
-    }
     if (!error && data) {
       setTaskFieldDefs(prev => prev.map(d => d.id === id ? data : d).sort((a, b) => (a.position - b.position) || (a.id - b.id)));
     }

@@ -54,14 +54,19 @@ export function useProjectData({ activeUser, setActiveUser }) {
       const TASK_COLS = 'id, created_at_colombia, indicator, indicators, title, start_date, end_date, estimated_time, type, status, validation_close, ext_progress1, ext_progress2, difficulty, strategic_value, expected_delivery, responsible, comments, progress_percent, subtasks, dependent_task, aporte_snapshot, finalized_at, dimension_values, kr_id, sprint_id, custom_fields, updated_at, closed_at, last_modified_by';
       const q = (table) => pid ? supabase.from(table).select('*').eq('project_id', pid) : supabase.from(table).select('*');
       const qTasks = () => pid ? supabase.from('tasks').select(TASK_COLS).eq('project_id', pid) : supabase.from('tasks').select(TASK_COLS);
+      // Se destructura el `error` de TODAS, no solo de fieldDefs: supabase-js no
+      // lanza, devuelve { error }. Sin mirarlo, una consulta que falla dejaba
+      // `data` en undefined, el `if (tasksData)` se saltaba el setState, y la
+      // carga terminaba "bien": tablero vacío —o peor, con los datos del
+      // proyecto anterior al cambiar de tablero— sin una sola línea de aviso.
       const [
-        { data: tasksData },
-        { data: partsData },
-        { data: indsData },
-        { data: typesData },
-        { data: configData },
-        { data: okrsData },
-        { data: sprintsData },
+        { data: tasksData, error: tasksErr },
+        { data: partsData, error: partsErr },
+        { data: indsData, error: indsErr },
+        { data: typesData, error: typesErr },
+        { data: configData, error: configErr },
+        { data: okrsData, error: okrsErr },
+        { data: sprintsData, error: sprintsErr },
         { data: fieldDefsData, error: fieldDefsErr },
       ] = await Promise.all([
         qTasks().order('id'),
@@ -76,6 +81,18 @@ export function useProjectData({ activeUser, setActiveUser }) {
           : Promise.resolve({ data: [], error: null }),
       ]);
 
+      // Un fallo parcial de carga tiene que verse. No abortamos —lo que sí
+      // llegó es utilizable— pero deja de ser invisible.
+      const fallos = [
+        ['tareas', tasksErr], ['participantes', partsErr], ['indicadores', indsErr],
+        ['tipos de tarea', typesErr], ['configuración', configErr],
+        ['OKRs', okrsErr], ['sprints', sprintsErr],
+      ].filter(([, e]) => e);
+      if (fallos.length) {
+        console.error('[loadAllForProject] no se pudieron cargar:',
+          fallos.map(([n, e]) => `${n}: ${e.message}`).join(' | '));
+      }
+
       if (tasksData) setTasks(tasksData.map(dbToTask));
       if (partsData) setParticipants(partsData.map(p => ({ id: p.id, name: p.name, isSuperUser: p.is_super_user, isLegacy: p.is_legacy === true, authUserId: p.auth_user_id || null })));
       if (indsData) setIndicators(indsData);
@@ -89,6 +106,11 @@ export function useProjectData({ activeUser, setActiveUser }) {
 
       if (okrsData) {
         setOkrs(okrsData);
+        // Sin este else, al abrir un tablero SIN OKRs los key results del
+        // tablero anterior seguían en memoria: el selector "Resultado clave"
+        // de una tarea nueva ofrecía KRs de otro proyecto y el vínculo cruzado
+        // se guardaba sin error (la FK no valida que compartan proyecto).
+        if (!okrsData.length) setKeyResults([]);
         if (okrsData.length) {
           const okrIds = okrsData.map(o => o.id);
           const { data: krsData } = await supabase.from('key_results').select('*').in('okr_id', okrIds).order('id');
@@ -130,11 +152,15 @@ export function useProjectData({ activeUser, setActiveUser }) {
       }
 
       if (!partsData?.length && pid) {
-        const { data: createdDefault } = await supabase
+        const { data: createdDefault, error: defaultErr } = await supabase
           .from('participants')
           .insert({ name: 'Usuario', is_super_user: true, project_id: pid })
           .select()
           .single();
+        // Solo el dueño puede crear fichas sin auth_user_id (policy
+        // participants_owner_all); para un invitado esto se deniega y es
+        // esperado, porque justo debajo se crea su ficha propia.
+        if (defaultErr) console.warn('[loadAllForProject] no se creó el participante por defecto:', defaultErr.message);
         if (createdDefault) setParticipants([{ id: createdDefault.id, name: createdDefault.name, isSuperUser: true }]);
       }
 
@@ -144,10 +170,25 @@ export function useProjectData({ activeUser, setActiveUser }) {
         const isOwner = (proj || p)?.owner_id === authUser.id;
         let part = partsData?.find(p2 => p2.auth_user_id === authUser.id || (p2.email && p2.email === authUser.email));
         if (!part) {
-          const { data: created } = await supabase.from('participants').insert({
+          // ESTE insert es el que dejó el producto medio mudo durante tres
+          // meses: fallaba con 23502 (participants.id no tenía DEFAULT), su
+          // error se ignoraba, `part` quedaba undefined y activeUser nunca se
+          // fijaba. Sin activeUser no se escribe task_history NI
+          // last_modified_by: 534 tareas, 0 filas de historial, 0 sellos de
+          // autor. La columna ya se arregló; el error deja de ignorarse.
+          const { data: created, error: createErr } = await supabase.from('participants').insert({
             name: userName, is_super_user: isOwner, project_id: pid,
             auth_user_id: authUser.id, email: authUser.email
           }).select().single();
+          if (createErr) {
+            console.error('[loadAllForProject] no se pudo registrar al usuario como participante; se queda sin usuario activo (sin historial ni sello de autor):', createErr);
+            // 23505: otra pestaña ganó la carrera. La ficha existe: se relee.
+            if (createErr.code === '23505') {
+              const { data: existente } = await supabase.from('participants')
+                .select('*').eq('project_id', pid).eq('auth_user_id', authUser.id).maybeSingle();
+              if (existente) part = existente;
+            }
+          }
           if (created) {
             part = created;
             setParticipants(prev => [...prev.filter(p2 => p2.id !== created.id), { id: created.id, name: created.name, isSuperUser: isOwner }]);

@@ -261,8 +261,11 @@ export default async function handler(req) {
   }
   if (!session) {
     // Sin sesión no hay dónde escribir. La cuota ya se reservó arriba, así que
-    // hay que devolverla antes de rendirse.
-    await supabase.rpc("project_chat_release_quota", { p_project_id: projectId }).catch?.(() => {});
+    // hay que devolverla antes de rendirse — y con el cliente correcto:
+    // project_chat_release_quota solo tiene EXECUTE para service_role, así que
+    // llamarla con el cliente del usuario fallaba por permisos y dejaba el
+    // mensaje descontado de la cuota sin haber entregado nada.
+    await releaseQuota();
     return new Response(JSON.stringify({ error: "No se pudo abrir la sesión de chat. Intenta de nuevo." }), {
       status: 503, headers: { "Content-Type": "application/json" },
     });

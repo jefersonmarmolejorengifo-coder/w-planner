@@ -61,13 +61,16 @@ export default function FieldDefEditor({ defs = [], onAdd, onUpdate, onDelete, o
     if (!label) { setError('Pon una etiqueta para el campo.'); return; }
     let key = slugifyKey(label);
     // Avoid collisions with existing active keys.
-    let n = 1;
-    let candidate = key;
-    while (usedKeys.has(candidate)) {
-      n += 1;
-      candidate = (key + '_' + n).slice(0, 50);
+    // El slug se trunca a 50 (máximo del CHECK). Si ya existía uno de 50
+    // caracteres, `(key + '_' + n).slice(0, 50)` devolvía SIEMPRE el mismo
+    // valor y el while no terminaba nunca: la pestaña del navegador se
+    // congelaba. Se deja sitio para el sufijo, igual que hace useTaskFieldDefs.
+    if (usedKeys.has(key)) {
+      const base = key.slice(0, 47);
+      let n = 2;
+      while (usedKeys.has(`${base}_${n}`) && n < 1000) n += 1;
+      key = `${base}_${n}`;
     }
-    key = candidate;
     const config = buildConfigFromDraft(draft);
     if ((draft.type === 'select' || draft.type === 'multiselect') && (!config.options || !config.options.length)) {
       setError('Agrega al menos una opción (una por línea o separadas por coma).'); return;

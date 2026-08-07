@@ -199,9 +199,13 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
     const target = participants.find((p) => p.id === id);
     if (!target) return;
     if (target.name === "Jeferson Marmolejo") return;
+    // El botón dice "Quitar super" cuando ya lo es, pero antes siempre ponía
+    // true: quitar era imposible y el clic no hacía nada, sin aviso alguno.
+    const quitando = !!target.isSuperUser;
     setParticipants((prev) => prev.map((p) => {
-      if (p.id === id) return { ...p, isSuperUser: true };
-      return { ...p, isSuperUser: false };
+      if (p.id === id) return { ...p, isSuperUser: !quitando };
+      // Solo hay un super a la vez: al conceder, se lo quitamos a los demás.
+      return quitando ? p : { ...p, isSuperUser: false };
     }));
   };
   const removeP = async (id) => { if (await confirm("¿Eliminar participante?", { title: 'Eliminar participante', confirmText: 'Eliminar', danger: true })) setParticipants((prev) => prev.filter((p) => p.id !== id)); };

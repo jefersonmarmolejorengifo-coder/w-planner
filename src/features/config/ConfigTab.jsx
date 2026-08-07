@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { getAuthJsonHeaders } from "../../lib/authHeaders";
 import { ConfigSection } from "../../lib/ConfigSection";
@@ -8,6 +8,7 @@ import FieldDefEditor from "./FieldDefEditor";
 import PremiumPanel from "./PremiumPanel";
 import ReportsConfigSection from "./ReportsConfigSection";
 import { useConfirm } from "../../ui/ConfirmDialog";
+import { fechaColombiaHoy, isoLocal } from '../../lib/format';
 
 // Pestaña de configuración del proyecto (owner-only): datos del proyecto,
 // invitaciones, roles, PIN, participantes, indicadores, tipos de tarea,
@@ -28,6 +29,9 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
   const [daysBack, setDaysBack] = useState(7);
   const [daysForward, setDaysForward] = useState(7);
   const [emailSaving, setEmailSaving] = useState(false);
+  // Solo se permite guardar si antes se leyó la configuración de ESTE proyecto.
+  // Es una ref y no estado para no llamar a setState en el cuerpo del efecto.
+  const emailCargadoDe = useRef(null);
   const [emailMsg, setEmailMsg] = useState("");
   const [generating, setGenerating] = useState(false);
   const [reportMsg, setReportMsg] = useState("");
@@ -62,10 +66,13 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
     setTimeout(() => setInviteMsg(""), 4000);
   };
 
-  const handleChangePin = () => {
+  const handleChangePin = async () => {
     if (!newPin || newPin.length < 4) { setPinChangeMsg("La clave debe tener al menos 4 caracteres."); return; }
     if (newPin !== newPinConfirm) { setPinChangeMsg("Las claves no coinciden."); return; }
-    onChangePin(newPin);
+    // Antes se pintaba el "✓" sin esperar: si el guardado fallaba, salían a la
+    // vez el visto bueno y el aviso de error, con los campos ya vaciados.
+    const ok = await onChangePin(newPin);
+    if (ok === false) { setPinChangeMsg("No se pudo actualizar la clave."); return; }
     setNewPin(""); setNewPinConfirm("");
     setPinChangeMsg("✓ Clave actualizada correctamente");
     setTimeout(() => setPinChangeMsg(""), 3000);
@@ -74,7 +81,15 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
   useEffect(() => {
     if (!project?.id) return;
     supabase.from('email_config').select('*').eq('project_id', project.id).maybeSingle()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // Si la lectura falla se mostraban los valores por defecto (0 correos)
+        // sin avisar; al guardar, el upsert borraba los destinatarios reales.
+        if (error) {
+          console.error('[ConfigTab] no se pudo leer email_config:', error);
+          setEmailMsg('No se pudo cargar la configuración de correo; no la guardes hasta recargar.');
+          return;
+        }
+        emailCargadoDe.current = project.id;
         if (data) {
           setEmails(data.emails || []);
           setFrequency(data.frequency || 'weekly');
@@ -88,6 +103,7 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
 
   const saveEmailConfig = async () => {
     if (!project?.id) { setEmailMsg("No hay proyecto activo."); return; }
+    if (emailCargadoDe.current !== project.id) { setEmailMsg("Aún no se pudo leer la configuración actual: recarga antes de guardar."); return; }
     setEmailSaving(true);
     const { error } = await supabase.from('email_config')
       .upsert(
@@ -113,8 +129,10 @@ export default function ConfigTab({ participants, setParticipants, indicators, s
       return;
     }
 
-    const today = new Date();
-    const fmt = (d) => d.toISOString().split("T")[0];
+    // Aritmética y formateo en el mismo huso: mezclar getDate() (local) con
+    // toISOString() (UTC) desplazaba la ventana del informe un día por la tarde.
+    const today = fechaColombiaHoy();
+    const fmt = isoLocal;
     let weekStart;
     if (daysBack === 0) {
       weekStart = "2020-01-01";

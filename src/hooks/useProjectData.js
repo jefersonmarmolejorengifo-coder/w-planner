@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { dbToTask } from "../lib/taskMapping";
 import { useProjectConfig } from "./useProjectConfig";
@@ -16,6 +16,12 @@ import { useTasks } from "./useTasks";
 // junto con usePresence; loadAllForProject fija el usuario activo al cargar.
 export function useProjectData({ activeUser, setActiveUser }) {
   const [projectId, setProjectId] = useState(null);
+  // El canal realtime se suscribe una vez por proyecto; estas refs le dejan
+  // leer el estado más reciente al recargar tras un corte, sin tener que
+  // re-suscribirse cada vez que cambia `project` o el usuario.
+  const projectRef = useRef(null);
+  const authUserRef = useRef(null);
+  const huboCorteRef = useRef(false);
   const [project, setProject] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +49,8 @@ export function useProjectData({ activeUser, setActiveUser }) {
   } = useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeUser, taskFieldDefs });
 
   const loadAllForProject = async (pid, proj, authUser = null) => {
+    projectRef.current = proj || projectRef.current;
+    authUserRef.current = authUser || authUserRef.current;
     setLoading(true);
     try {
       // Columnas explícitas de tasks = exactamente las que lee dbToTask (taskMapping.js).
@@ -205,6 +213,16 @@ export function useProjectData({ activeUser, setActiveUser }) {
     setLoading(false);
   };
 
+  // Un solo mapeo de fila de participante, para que los eventos realtime no
+  // devuelvan un objeto más pobre que el de la carga inicial.
+  const mapaParticipante = (fila) => ({
+    id: fila.id,
+    name: fila.name,
+    isSuperUser: fila.is_super_user,
+    isLegacy: fila.is_legacy === true,
+    authUserId: fila.auth_user_id || null,
+  });
+
   // ── Suscripciones Realtime ─────────────────────────────────
   useEffect(() => {
     if (!projectId) return undefined;
@@ -215,12 +233,29 @@ export function useProjectData({ activeUser, setActiveUser }) {
       // TASKS
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
         setTasks(prev => {
-          if (prev.find(t => t.id === payload.new.id)) return prev;
-          return [...prev, dbToTask(payload.new)].sort((a, b) => a.id - b.id);
+          const fresca = dbToTask(payload.new);
+          // Si ya la tenemos, la REEMPLAZAMOS en vez de descartar el eco.
+          // createTask añade la tarea local sin `updatedAt` (no hace .select()),
+          // así que descartar el eco dejaba a toda tarjeta creada en la sesión
+          // sin ese sello: en su primera edición el guard de concurrencia H-016
+          // se omitía y un "0 filas afectadas" se tomaba por éxito.
+          if (prev.find(t => t.id === fresca.id)) {
+            return prev.map(t => t.id === fresca.id ? fresca : t);
+          }
+          return [...prev, fresca].sort((a, b) => a.id - b.id);
         });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
-        setTasks(prev => prev.map(t => t.id === payload.new.id ? dbToTask(payload.new) : t));
+        setTasks(prev => {
+          const fresca = dbToTask(payload.new);
+          // Si no la tenemos (su INSERT se perdió en un hueco de conexión),
+          // se añade en vez de descartar el evento: si no, esa tarjeta no
+          // existiría para este usuario aunque siga recibiendo sus updates.
+          if (!prev.some(t => t.id === fresca.id)) {
+            return [...prev, fresca].sort((a, b) => a.id - b.id);
+          }
+          return prev.map(t => t.id === fresca.id ? fresca : t);
+        });
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks', filter: projectFilter }, (payload) => {
         setTasks(prev => prev.filter(t => t.id !== payload.old.id));
@@ -230,12 +265,15 @@ export function useProjectData({ activeUser, setActiveUser }) {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
         setParticipants(prev => {
           if (prev.find(p => p.id === payload.new.id)) return prev;
-          return [...prev, { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user }];
+          // Mapeo completo: quedarse solo con {id, name, isSuperUser} borraba
+          // isLegacy y authUserId, y en Configuración los participantes
+          // ficticios saltaban a la lista de reales hasta recargar.
+          return [...prev, mapaParticipante(payload.new)];
         });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
         setParticipants(prev => prev.map(p =>
-          p.id === payload.new.id ? { id: payload.new.id, name: payload.new.name, isSuperUser: payload.new.is_super_user } : p
+          p.id === payload.new.id ? mapaParticipante(payload.new) : p
         ));
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'participants', filter: projectFilter }, (payload) => {
@@ -283,7 +321,37 @@ export function useProjectData({ activeUser, setActiveUser }) {
         setTaskFieldDefs(prev => prev.filter(d => d.id !== payload.old.id));
       })
 
-      .subscribe();
+      .subscribe((estado) => {
+
+        // Cuando el websocket se cae (suspensión del portátil, cambio de red),
+
+        // supabase-js vuelve a unirse al canal PERO los eventos del hueco no se
+
+        // reenvían: sin esto, el tablero se quedaba desactualizado para siempre en
+
+        // esa sesión, sin ningún indicio. Al recuperar la suscripción tras un
+
+        // fallo, se recarga todo.
+
+        if (estado === 'CHANNEL_ERROR' || estado === 'TIMED_OUT' || estado === 'CLOSED') {
+
+          huboCorteRef.current = true;
+
+          return;
+
+        }
+
+        if (estado === 'SUBSCRIBED' && huboCorteRef.current) {
+
+          huboCorteRef.current = false;
+
+          console.warn('[realtime] canal recuperado tras un corte: recargando el tablero para no quedar desincronizado');
+
+          loadAllForProject(projectId, projectRef.current, authUserRef.current);
+
+        }
+
+      });
 
     return () => { supabase.removeChannel(channel); };
     // Solo re-suscribir al cambiar de proyecto. Los setX provienen de hooks de

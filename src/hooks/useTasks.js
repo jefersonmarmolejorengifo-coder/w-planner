@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { calcAporte } from "../lib/aporte";
-import { getColombiaNow } from "../lib/format";
 import { readCustomFieldValue } from "../lib/customFields";
 import { dbToTask, taskToDb } from "../lib/taskMapping";
 import { useToast } from "../ui/Toast";
+import { getColombiaNow, hoyColombia } from "../lib/format";
 
 // Estado + CRUD de tareas (tasks/nextId) extraído del orquestador App
 // (H-002, núcleo fase D). Recibe del App el contexto que necesita
@@ -232,7 +232,7 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `productivity-plus_${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = `productivity-plus_${hoyColombia()}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();

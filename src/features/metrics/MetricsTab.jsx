@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { STATUS_COLORS, STATUS_LIGHT, ESTADOS, DEFAULT_TASK_TYPES } from "../../constants";
-import { getUserColor, getInitials } from "../../lib/format";
+import { getUserColor, getInitials, hoyColombia } from "../../lib/format";
 
 // Tab de Métricas (estados, tipos, indicadores, tiempos, cumplimiento, carga por
 // persona). Extraído del monolito (H-002), cargado con React.lazy.
@@ -201,7 +201,7 @@ export default function MetricsTab({ tasks, participants, taskTypes }) {
             <MetricsSection title="Carga de trabajo por persona">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {participants.map(p => {
-                  const today = new Date().toISOString().split('T')[0];
+                  const today = hoyColombia();
                   const myTasks = tasks.filter(t => t.responsible === p.name && !['Finalizada', 'Cancelada'].includes(t.status));
                   const overdue = myTasks.filter(t => t.endDate && t.endDate < today).length;
                   const blocked = myTasks.filter(t => t.status === 'Bloqueada').length;

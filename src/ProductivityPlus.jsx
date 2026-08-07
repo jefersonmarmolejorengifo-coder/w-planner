@@ -6,7 +6,6 @@ import { useBreakpoint } from './hooks/useBreakpoint';
 import { version as APP_VERSION } from "../package.json";
 import { supabase } from './supabaseClient';
 import { STATUS_COLORS, STATUS_LIGHT, ESTADOS, DEFAULT_TASK_TYPES } from './constants';
-import { getUserColor, getInitials } from './lib/format';
 import { CustomFieldsRenderer } from './lib/CustomFieldsRenderer';
 import { joinProjectByCode } from './lib/joinProject';
 
@@ -42,6 +41,7 @@ import { useProjectData } from './hooks/useProjectData';
 import { usePresence } from './hooks/usePresence';
 import { useReferralCapture } from './hooks/useReferralCapture';
 import { useReferralSync } from './hooks/useReferralSync';
+import { getUserColor, getInitials, hoyColombia } from "./lib/format";
 
 // getAuthJsonHeaders vive ahora en ./lib/authHeaders (importado arriba).
 // joinProjectByCode vive ahora en ./lib/joinProject (importado arriba). H-002 fase E.
@@ -540,7 +540,9 @@ export default function App() {
 
   const currentUser = useMemo(() => participants.find((p) => p.id === currentUserId) || null, [participants, currentUserId]);
 
-  const today = new Date().toISOString().split('T')[0];
+  // Antes en UTC: desde las 19:00 de Bogotá marcaba como vencidas las tareas
+  // que vencen hoy y todavía tienen horas por delante.
+  const today = hoyColombia();
   const alerts = useMemo(() => {
     const result = [];
     tasks.forEach(t => {

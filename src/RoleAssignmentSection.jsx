@@ -105,7 +105,12 @@ export default function RoleAssignmentSection({ supabase, projectId, currentUser
               <select
                 value={m.role}
                 onChange={(e) => changeRole(m, e.target.value)}
-                disabled={savingFor === m.user_id}
+                // project_members.user_id es nullable: un invitado que aún
+                // no entró aparece listado, pero la RPC actualiza por
+                // user_id y devolvía "ese miembro no existe en el tablero",
+                // incomprensible con la persona a la vista.
+                disabled={!m.user_id || savingFor === m.user_id}
+                title={m.user_id ? undefined : 'Pendiente de registro: podrás asignarle rol cuando entre por primera vez'}
                 style={{
                   background: "#fff", border: `1.5px solid ${def.color}`,
                   borderRadius: 8, padding: "6px 10px", fontSize: 12,

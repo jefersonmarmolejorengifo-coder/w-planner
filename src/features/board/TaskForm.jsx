@@ -82,6 +82,14 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
         setLoading(false);
         return;
       }
+      // Sin esto, un fallo al leer los enlaces dejaba TODOS los checkboxes
+      // desmarcados aunque la tarea sí estuviera enlazada: al "re-marcar" uno,
+      // el INSERT chocaba con la clave primaria y salía un error críptico.
+      if (lkRes.error) {
+        setError(lkRes.error.message);
+        setLoading(false);
+        return;
+      }
       setError("");
       setSuperTasks(stRes.data || []);
       const lmap = {};
@@ -363,7 +371,7 @@ function TaskCommentsThread({ taskId, projectId }) {
               </div>
               {editingId === c.id ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)}
+                  <textarea maxLength={4000} value={editDraft} onChange={(e) => setEditDraft(e.target.value)}
                     style={{ width: "100%", minHeight: 60, border: "1px solid #ddd", borderRadius: 6, padding: 6, fontSize: 13, fontFamily: "inherit" }}
                     autoFocus />
                   <div style={{ display: "flex", gap: 6 }}>
@@ -387,7 +395,10 @@ function TaskCommentsThread({ taskId, projectId }) {
 
       {/* Nuevo comentario */}
       <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+        {/* maxLength: el CHECK de task_comments corta en 4000 y devolvía un
+            23514 en inglés que no orientaba a nadie. */}
         <textarea
+          maxLength={4000}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {

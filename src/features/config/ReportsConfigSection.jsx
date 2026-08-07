@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { getAuthJsonHeaders } from "../../lib/authHeaders";
 import { extractUsageMarker } from "../../aiModels";
+import { fechaColombiaHoy, isoLocal } from '../../lib/format';
 
 // Configuración de los reportes IA por correo (Scrum / Semanal PO / Mensual).
 // Extraído del monolito (H-002). REPORT_TYPES, DAY_NAMES_ES y ReportCard son
@@ -117,8 +118,10 @@ export default function ReportsConfigSection({ projectId }) {
     try {
       const headers = await getAuthJsonHeaders();
       // Calcular ventana similar a lo que hace el cron
-      const now = new Date();
-      const fmt = (d) => d.toISOString().split("T")[0];
+      // Anclado a Colombia: antes la aritmetica usaba campos locales del
+      // navegador y el formateo iba en UTC, asi que la ventana se desplazaba.
+      const now = fechaColombiaHoy();
+      const fmt = isoLocal;
       let range;
       if (type === "monthly_team") {
         const firstThis = new Date(now.getFullYear(), now.getMonth(), 1);

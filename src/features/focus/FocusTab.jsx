@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../supabaseClient";
 import { getAuthJsonHeaders } from "../../lib/authHeaders";
 import { calcAporte } from "../../lib/aporte";
-import { getColombiaNow } from "../../lib/format";
 import { STATUS_COLORS } from "../../constants";
+import { getColombiaNow, hoyColombia } from "../../lib/format";
 
 // "Mi Día": tareas activas del usuario, ordenadas por vencimiento y aporte, con
 // acciones rápidas de estado. Incluye el banner de retros pendientes (cluster
@@ -217,7 +217,7 @@ function PendingRetrosBanner() {
 }
 
 export default function FocusTab({ tasks, activeUser, updateTask, dimensions }) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = hoyColombia();
 
   const myTasks = useMemo(() => {
     if (!activeUser) return [];

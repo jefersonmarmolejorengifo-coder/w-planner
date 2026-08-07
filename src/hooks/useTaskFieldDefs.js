@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
+import { useToast } from "../ui/Toast";
 
 // Estado + CRUD del esquema de campos personalizados por proyecto
 // (task_field_defs). Extraído del orquestador App (H-002, núcleo fase D).
@@ -9,6 +10,7 @@ import { supabase } from "../supabaseClient";
 // mutación. Cada helper devuelve la fila del servidor para que el modal de
 // formulario reaccione de inmediato (realtime mantiene la lista en sync).
 export function useTaskFieldDefs(projectId) {
+  const toast = useToast();
   const [taskFieldDefs, setTaskFieldDefs] = useState([]);
   // false when migration 008 is not yet applied (custom_fields column / table
   // missing). Used to gracefully degrade taskToDb / addTaskFieldDef.
@@ -99,8 +101,12 @@ export function useTaskFieldDefs(projectId) {
 
   const reorderTaskFieldDefs = async (orderedIds) => {
     if (!projectId) return;
+    // Guardamos el orden previo: si la persistencia falla, la pantalla no puede
+    // quedarse mostrando un orden que la base nunca aceptó.
+    let ordenPrevio = null;
     // Optimistic local reorder
     setTaskFieldDefs(prev => {
+      ordenPrevio = prev;
       const map = new Map(prev.map(d => [d.id, d]));
       return orderedIds
         .map((id, idx) => map.get(id) ? { ...map.get(id), position: idx } : null)
@@ -116,7 +122,11 @@ export function useTaskFieldDefs(projectId) {
     const firstErr = results.find(r => r.error);
     if (firstErr) {
       console.error('Error reordenando campos:', firstErr.error);
+      if (ordenPrevio) setTaskFieldDefs(ordenPrevio);
+      toast('No se pudo guardar el nuevo orden de los campos: ' + firstErr.error.message, { type: 'error' });
+      return false;
     }
+    return true;
   };
 
   return {

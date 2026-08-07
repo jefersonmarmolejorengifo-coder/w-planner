@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from '../../supabaseClient';
 import { REPORT_TYPE_LABEL } from '../../constants';
 import { useDialog } from '../../useDialog';
+import { hoyColombia } from '../../lib/format';
 
 // ─── ReportViewerDialog ────────────────────────────────────────
 // Modal accesible para ver un reporte IA archivado.
@@ -57,17 +58,25 @@ export default function BoardSummaryPill({ projectId, projectName }) {
       ]);
       if (cancelled) return;
       const ts = tk || [];
-      const today = new Date().toISOString().slice(0, 10);
+      const today = hoyColombia();
       const total = ts.length;
       const done = ts.filter(t => t.status === TASK_DONE).length;
       const blocked = ts.filter(t => t.status === TASK_BLOCKED).length;
       const notStarted = ts.filter(t => t.status === "Sin iniciar").length;
-      const inProgress = total - done - blocked - notStarted;
+      // "En proceso" se calculaba por RESTA, así que absorbía canceladas, en
+      // pausa y no programadas: un tablero con 1 tarea en curso podía anunciar
+      // "4 en proceso". Ahora se cuenta lo que de verdad está en proceso.
+      const inProgress = ts.filter(t => t.status === "En proceso").length;
+      const canceladas = ts.filter(t => t.status === "Cancelada").length;
       const overdue = ts.filter(t => t.status !== TASK_DONE && t.end_date && t.end_date < today).length;
       const aporteBy = {};
       ts.forEach(t => { if (t.responsible) aporteBy[t.responsible] = (aporteBy[t.responsible] || 0) + (Number(t.aporte_snapshot) || 0); });
       const top = Object.entries(aporteBy).sort((a, b) => b[1] - a[1]).slice(0, 3);
-      setS({ total, done, blocked, notStarted, inProgress, overdue, people: new Set(ts.map(t => t.responsible).filter(Boolean)).size, donePct: total ? Math.round(done / total * 100) : 0, top });
+      // El avance excluye canceladas, igual que MetricsTab. Antes esta pastilla
+      // y la pestaña de Métricas mostraban dos porcentajes distintos del MISMO
+      // tablero, porque una las contaba en el denominador y la otra no.
+      const elegibles = Math.max(0, total - canceladas);
+      setS({ total, done, blocked, notStarted, inProgress, overdue, people: new Set(ts.map(t => t.responsible).filter(Boolean)).size, donePct: elegibles ? Math.round(done / elegibles * 100) : 0, canceladas, top });
       setReports(rh || []);
       setLoading(false);
     })();

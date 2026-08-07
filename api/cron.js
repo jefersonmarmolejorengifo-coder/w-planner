@@ -79,7 +79,11 @@ export function ocurrenciaPendiente(config, ahora = new Date()) {
   let targetHour;
 
   if (config.report_type === "scrum") {
-    const dias = Array.isArray(sched.days) && sched.days.length ? sched.days : ["wednesday", "friday"];
+    // Tope de 2 días también en el servidor: report_configs es escribible por
+    // el dueño, y una lista con los 7 días multiplicaba por 3,5 el gasto de IA
+    // que paga el operador. La interfaz ya lo limitaba; el cron no.
+    const diasCfg = Array.isArray(sched.days) && sched.days.length ? sched.days : ["wednesday", "friday"];
+    const dias = diasCfg.slice(0, 2);
     if (!dias.includes(nombreDia)) return null;
     targetHour = horaValida(sched.hours?.[nombreDia] ?? sched.hour, 8);
   } else if (config.report_type === "weekly_po") {

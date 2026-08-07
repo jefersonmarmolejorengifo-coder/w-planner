@@ -4,6 +4,8 @@ import { applyWrite, describeWriteError } from '../../lib/dbWrite';
 import { STATUS_COLORS } from "../../constants";
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
+import { hoyColombia } from '../../lib/format';
+import { isoDeFinalizacion } from './burndown';
 
 // Tab de Sprints (planificación + activo + cerrados, con burndown). Extraído del
 // monolito (H-002), cargado con React.lazy. SprintCard y los estilos puros viven
@@ -74,7 +76,11 @@ function SprintCard({ sprint, tasks, today, onStart, onCloseSprint, onDelete }) 
 
       {bdPoints.length > 1 && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Burndown</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#542c9c', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+            {/* La curva se trunca en 14 días (Math.min(days, 14)); decirlo
+                evita leer una gráfica incompleta como si fuera el sprint entero. */}
+            Burndown{bdPoints.length >= 15 ? ' · primeros 14 días' : ''}
+          </div>
           <svg width={BDW} height={BDH + 16} style={{ display: 'block', overflow: 'visible' }}>
             <line x1={0} y1={0} x2={BDW} y2={BDH} stroke="#ddd" strokeWidth={1} strokeDasharray="4" />
             <polyline points={bdPoints.map((p, i) => `${(i / Math.max(bdPoints.length - 1, 1)) * BDW},${(p.y / bdMax) * BDH}`).join(' ')} fill="none" stroke="#ec6c04" strokeWidth={2} strokeLinejoin="round" />
@@ -103,25 +109,12 @@ function SprintCard({ sprint, tasks, today, onStart, onCloseSprint, onDelete }) 
   );
 }
 
-// `finalizedAt` se guarda con toLocaleString("es-CO") → "06/08/2026, 14:30",
-// mientras que el eje del burndown habla ISO ("2026-08-06"). Compararlos con >
-// como cadenas no da error: da un resultado que depende del primer dígito del
-// DÍA. Una tarea cerrada el 25 salía como pendiente para siempre; una cerrada
-// el 6, como terminada desde el día cero. La gráfica siempre parecía plausible.
-const isoDeFinalizacion = (valor) => {
-  if (!valor) return null;
-  const fecha = String(valor).split(' ')[0].replace(/,$/, '');
-  const m = fecha.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); // dd/mm/aaaa
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  return /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null; // ya venía en ISO
-};
-
 export default function SprintsTab({ projectId, sprints, setSprints, tasks }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: '', goal: '', start_date: '', end_date: '' });
-  const today = new Date().toISOString().split('T')[0];
+  const today = hoyColombia();
 
   const activeSprint = sprints.find(s => s.status === 'active');
 

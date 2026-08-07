@@ -3,6 +3,7 @@ import { supabase } from "../../supabaseClient";
 import { applyWrite, describeWriteError } from '../../lib/dbWrite';
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
+import { fechaDesdeISO } from '../../lib/format';
 
 // Tab de OKRs (Objetivos y Resultados Clave). Prop-driven: recibe okrs/keyResults
 // y sus setters desde el orquestador. Extraído del monolito (H-002), cargado con
@@ -94,7 +95,9 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
   // Agrupa por año del start_date; los más recientes primero.
   const grouped = {};
   okrs.forEach(o => {
-    const y = o.start_date ? new Date(o.start_date).getFullYear() : new Date().getFullYear();
+    // `new Date('2026-01-01')` es medianoche UTC: en Bogotá cae el 31/12 y el
+    // OKR se agrupaba bajo el año ANTERIOR. Típico en OKRs anuales.
+    const y = o.start_date ? fechaDesdeISO(o.start_date).getFullYear() : new Date().getFullYear();
     if (!grouped[y]) grouped[y] = [];
     grouped[y].push(o);
   });
@@ -103,7 +106,7 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
 
   const fmtRange = (start, end) => {
     if (!start || !end) return '';
-    const s = new Date(start), e = new Date(end);
+    const s = fechaDesdeISO(start), e = fechaDesdeISO(end);
     const f = (d) => d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
     const sameYear = s.getFullYear() === e.getFullYear();
     return sameYear ? `${f(s)} – ${f(e)} ${e.getFullYear()}` : `${f(s)} ${s.getFullYear()} – ${f(e)} ${e.getFullYear()}`;

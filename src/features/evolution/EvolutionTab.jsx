@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { getAuthJsonHeaders } from "../../lib/authHeaders";
 import { extractUsageMarker } from "../../aiModels";
+import { fechaColombiaHoy, isoLocal, formatearFechaISO } from '../../lib/format';
 
 // Evolutivo profesional del equipo (Pro Power+ con IA). Owner ve el histórico y
 // puede generar uno nuevo (bimensual). El HTML se renderiza en un iframe
@@ -46,9 +47,9 @@ export default function EvolutionTab({ projectId, isOwner }) {
     setProgress(0);
     try {
       // Periodo: últimos 60 días.
-      const today = new Date();
+      const today = fechaColombiaHoy();
       const start = new Date(today); start.setDate(today.getDate() - 60);
-      const fmt = (d) => d.toISOString().split("T")[0];
+      const fmt = isoLocal;
       const periodStart = fmt(start);
       const periodEnd = fmt(today);
 
@@ -168,7 +169,11 @@ export default function EvolutionTab({ projectId, isOwner }) {
       {evolutions.length === 0 ? (
         <div style={{ padding: 40, textAlign: "center", color: "#888", border: "2px dashed #e0e0e0", borderRadius: 12 }}>
           <div style={{ fontSize: 40, marginBottom: 10 }}>📋</div>
-          <div style={{ fontSize: 14, color: "#555", marginBottom: 6 }}>Aún no hay evolutivos generados.</div>
+          <div style={{ fontSize: 14, color: "#555", marginBottom: 6 }}>
+            {/* Sin esto, un PO que no es dueño veía el mismo vacío que si no
+                hubiera nada: la RLS de user_evolutions es solo para el dueño. */}
+            {isOwner ? "Aún no hay evolutivos generados." : "El evolutivo es un informe privado del dueño del tablero."}
+          </div>
           {isOwner && <div style={{ fontSize: 12, color: "#888" }}>Genera el primero con el botón de arriba. Tarda ~1-2 min.</div>}
         </div>
       ) : (
@@ -187,7 +192,7 @@ export default function EvolutionTab({ projectId, isOwner }) {
                   textAlign: "left", fontSize: 12,
                 }}>
                 <div style={{ fontWeight: 600, marginBottom: 3 }}>
-                  {new Date(e.period_start).toLocaleDateString("es-CO", { day: "numeric", month: "short" })} → {new Date(e.period_end).toLocaleDateString("es-CO", { day: "numeric", month: "short" })}
+                  {formatearFechaISO(e.period_start)} → {formatearFechaISO(e.period_end)}
                 </div>
                 <div style={{ fontSize: 10, opacity: 0.75 }}>
                   {new Date(e.generated_at).toLocaleDateString("es-CO")} · {e.status}

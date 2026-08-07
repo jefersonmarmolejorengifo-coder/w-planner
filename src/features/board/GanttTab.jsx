@@ -1,13 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { STATUS_COLORS, ESTADOS, DEFAULT_TASK_TYPES } from "../../constants";
 import { useBreakpoint } from "../../hooks/useBreakpoint";
+import { hoyColombia, fechaColombiaHoy, isoLocal } from '../../lib/format';
 
 // Diagrama de Gantt (timeline) de tareas con fechas. Dirigido por props.
 // Extraído del monolito (H-002, núcleo fase C).
 export default function GanttTab({ tasks, participants, indicators, taskTypes }) {
-  const today = new Date().toISOString().split("T")[0];
-  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().split("T")[0]; });
-  const [dateTo, setDateTo] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() + 2, 0); return d.toISOString().split("T")[0]; });
+  const today = hoyColombia();
+  const [dateFrom, setDateFrom] = useState(() => { const d = fechaColombiaHoy(); d.setDate(1); return isoLocal(d); });
+  const [dateTo, setDateTo] = useState(() => { const d = fechaColombiaHoy(); d.setMonth(d.getMonth() + 2, 0); return isoLocal(d); });
   const [fStatus, setFStatus] = useState("");
   const [fType, setFType] = useState("");
   const [fIndicator, setFIndicator] = useState("");

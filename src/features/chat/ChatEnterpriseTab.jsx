@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { getAuthJsonHeaders } from "../../lib/authHeaders";
+import { formatearFechaISO } from '../../lib/format';
 
 // Chat en vivo del PO con la IA cargada con datos del equipo. Feature Pro Power+.
 // Cada proyecto tiene su propia sesión activa por owner; el historial se persiste
@@ -74,7 +75,7 @@ export default function ChatEnterpriseTab({ projectId, isOwner }) {
         // 429 = cuota mensual agotada: muestra el detalle y refresca contador.
         if (res.status === 429) {
           await refreshQuota();
-          const renewLabel = e.renews_on ? new Date(e.renews_on).toLocaleDateString("es-CO", { day: "numeric", month: "long" }) : "el 1 del próximo mes";
+          const renewLabel = e.renews_on ? formatearFechaISO(e.renews_on, { day: "numeric", month: "long" }) : "el 1 del próximo mes";
           throw new Error(`Cuota mensual del chat alcanzada (${e.used}/${e.quota}). Se renueva el ${renewLabel}.`);
         }
         throw new Error(e.error || `HTTP ${res.status}`);

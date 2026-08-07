@@ -267,6 +267,20 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
 
   const save = async () => {
     if (!form.title.trim()) { toast("El título es obligatorio", { type: 'error' }); return; }
+    // El flag "Requerido" de los campos personalizados pintaba un asterisco y
+    // no lo validaba nadie: ni el cliente ni la base (custom_fields es jsonb sin
+    // CHECK). La tarea se guardaba vacía y el dato faltaba luego en informes.
+    const faltantes = (taskFieldDefs || [])
+      .filter(d => d.required && d.type !== 'auto' && !d.deleted_at)
+      .filter(d => {
+        const v = (form.customFields || {})[d.key];
+        return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+      })
+      .map(d => d.label || d.key);
+    if (faltantes.length) {
+      toast(`Falta completar: ${faltantes.join(', ')}`, { type: 'error' });
+      return;
+    }
     setModal(null);
     if (modal === "new") {
       // Reservar el id atómicamente recién ahora (lock-free vía SEQUENCE, H-014).

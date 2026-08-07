@@ -137,7 +137,7 @@ export default async function handler(req) {
 
     const { data: canChat } = await supabase.rpc("project_can_use_chat", { p_project_id: Number(projectId) });
     if (canChat !== true) {
-      return jsonError("Tu plan no incluye chat. Requiere Enterprise.", 402, headers);
+      return jsonError("Tu plan no incluye chat. Requiere Pro Power.", 402, headers);
     }
 
   } catch (err) {

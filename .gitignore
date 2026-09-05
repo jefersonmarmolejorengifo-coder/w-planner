@@ -41,3 +41,6 @@ dist-ssr
 
 # Salida del build de la app dentro del sitio Astro (vite base=/app)
 web/public/app
+
+# graphify (grafo de codigo local, se regenera con `/graphify .`)
+graphify-out/

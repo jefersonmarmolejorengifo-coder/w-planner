@@ -2,3 +2,4 @@
 # (vercel.json → script-src) sea idéntico en local (Windows) y en producción
 # (Vercel/Linux). Sin esto, core.autocrlf podría meter CRLF y romper el hash.
 index.html text eol=lf
+graphify-out/graph.json merge=graphify

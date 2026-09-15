@@ -1,6 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from '../supabaseClient';
 import { OTP_LENGTH, OTP_TTL_MINUTES, RESEND_COOLDOWN_SECONDS, normalizeEmail, isValidEmail, normalizeOtpInput, authErrorMessage, remainingSeconds } from '../lib/otp';
+import { initialAuthUrlError } from '../lib/initialAuthUrlError';
+import TurnstileWidget from '../ui/TurnstileWidget';
+
+// H-054: mientras esta variable no exista, todo funciona igual que hoy (sin
+// widget, sin captchaToken). El PM activa Turnstile en Supabase Auth DESPUÉS
+// de este despliegue; hasta entonces Supabase ignora cualquier token que
+// mandemos, así que desplegar con la env var puesta pero Turnstile aún
+// apagado en Supabase es seguro.
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 // ─── AuthScreen ───────────────────────────────────────────
 // Inicio de sesión por CÓDIGO DE ACCESO (passwordless). El usuario escribe su
@@ -21,11 +30,20 @@ export default function AuthScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [cooldown, setCooldown] = useState(0);
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const [captchaLoadError, setCaptchaLoadError] = useState(false);
+  const [captchaFailCount, setCaptchaFailCount] = useState(0); // desde el 2° fallo se ofrece contacto
+  const [turnstileAttempt, setTurnstileAttempt] = useState(0); // cambia `key` → remonta el widget desde cero
   const verifyingRef = useRef(false);
   const sendingRef = useRef(false);
   const codeInputRef = useRef(null);
   const cooldownIntervalRef = useRef(null);
   const cooldownEndAtRef = useRef(0); // timestamp (ms) al que se habilita el reenvío; 0 = sin cooldown activo
+  const turnstileRef = useRef(null);
+
+  // Si no hay clave, el login funciona exactamente igual que antes de H-054.
+  const necesitaCaptcha = !!TURNSTILE_SITE_KEY;
+  const captchaListo = !necesitaCaptcha || !!captchaToken;
 
   useEffect(() => () => {
     if (cooldownIntervalRef.current) clearInterval(cooldownIntervalRef.current);
@@ -72,23 +90,42 @@ export default function AuthScreen() {
   const enviarCodigo = async ({ mostrarComoReenvio = false } = {}) => {
     const mail = normalizeEmail(email);
     if (!isValidEmail(mail)) { setError("Escribe un correo válido."); return false; }
+    // El botón ya queda deshabilitado sin token, pero se repite la guarda
+    // aquí por si algo dispara enviarCodigo() sin pasar por el botón.
+    if (necesitaCaptcha && !captchaToken) return false;
     // Candado síncrono: un doble clic/doble Enter muy rápido llega antes de
     // que el re-render deshabilite el botón (setLoading es asíncrono), así
     // que sin esto se disparan dos signInWithOtp para el mismo correo.
     if (sendingRef.current) return false;
     sendingRef.current = true;
     setLoading(true); setError('');
-    const { error: err } = await supabase.auth.signInWithOtp({
-      email: mail,
-      options: { shouldCreateUser: true },
-    });
-    setLoading(false);
-    sendingRef.current = false;
-    if (err) {
-      console.error('[AuthScreen] signInWithOtp', err);
-      setError(authErrorMessage(err, 'send'));
-      return false;
+    const options = { shouldCreateUser: true };
+    if (captchaToken) options.captchaToken = captchaToken;
+    let ok = false;
+    try {
+      const res = await supabase.auth.signInWithOtp({ email: mail, options });
+      const err = res?.error;
+      if (err) {
+        console.error('[AuthScreen] signInWithOtp', err);
+        setError(authErrorMessage(err, 'send'));
+      } else {
+        ok = true;
+      }
+    } catch (e) {
+      // La promesa rechazó (o no devolvió el objeto esperado): sin este
+      // catch, sendingRef y loading quedaban tomados para siempre y la
+      // pantalla congelada en "Enviando código…" (hallazgo de testing).
+      console.error('[AuthScreen] signInWithOtp', e);
+      setError(authErrorMessage(e, 'send'));
+    } finally {
+      setLoading(false);
+      sendingRef.current = false;
+      // El token de Turnstile es de un solo uso: se reinicia tras CADA
+      // intento (éxito, error o excepción) para que el siguiente envío pida
+      // uno nuevo.
+      if (necesitaCaptcha) { setCaptchaToken(null); turnstileRef.current?.reset(); }
     }
+    if (!ok) return false;
     arrancarCooldown();
     setNotice(mostrarComoReenvio ? 'Te enviamos un código nuevo. Usa el más reciente.' : '');
     return true;
@@ -110,25 +147,38 @@ export default function AuthScreen() {
     if (verifyingRef.current) return;
     verifyingRef.current = true;
     setLoading(true); setError('');
-    const { error: err } = await supabase.auth.verifyOtp({
-      email: normalizeEmail(email),
-      token: valor,
-      type: 'email',
-    });
-    if (err) {
-      console.error('[AuthScreen] verifyOtp', err);
-      setLoading(false);
-      verifyingRef.current = false;
-      setError(authErrorMessage(err, 'verify'));
+    let exito = false;
+    try {
+      const res = await supabase.auth.verifyOtp({
+        email: normalizeEmail(email),
+        token: valor,
+        type: 'email',
+      });
+      const err = res?.error;
+      if (err) {
+        console.error('[AuthScreen] verifyOtp', err);
+        setError(authErrorMessage(err, 'verify'));
+        setCode('');
+      } else {
+        exito = true;
+      }
+    } catch (e) {
+      // La promesa rechazó (o no devolvió el objeto esperado): sin este
+      // catch, verifyingRef y loading quedaban tomados para siempre
+      // (hallazgo de testing).
+      console.error('[AuthScreen] verifyOtp', e);
+      setError(authErrorMessage(e, 'verify'));
       setCode('');
-      // El foco vuelve al input desde el useEffect de arriba: hacerlo aquí
-      // mismo llega antes de que React quite el readOnly y el navegador lo
-      // ignora.
-      return;
+    } finally {
+      verifyingRef.current = false;
+      // Tras un éxito, `loading` se queda a propósito en true: el botón
+      // sigue en "Entrando…" mientras App (ProductivityPlus.jsx) recibe el
+      // SIGNED_IN y desmonta esta pantalla. El foco vuelve al input desde el
+      // useEffect de arriba en el caso de error: hacerlo aquí mismo llega
+      // antes de que React quite el readOnly y el navegador lo ignora.
+      if (!exito) setLoading(false);
     }
-    // Éxito: dejamos el botón en "Entrando…" y no tocamos nada más. App
-    // (ProductivityPlus.jsx) recibe el SIGNED_IN y desmonta esta pantalla.
-    setVerified(true);
+    if (exito) setVerified(true);
   };
 
   const handleSubmitCode = (e) => {
@@ -146,6 +196,22 @@ export default function AuthScreen() {
   const reenviar = async () => {
     if (cooldown > 0 || loading) return;
     await enviarCodigo({ mostrarComoReenvio: true });
+  };
+
+  // H-054 (revisión de seguridad, ALTO): si Turnstile no carga o la
+  // verificación falla (bloqueador de anuncios, red corporativa que corta
+  // challenges.cloudflare.com), sin esto la persona se quedaba viendo
+  // "Verificando que eres una persona…" para siempre, sin salida.
+  const manejarErrorCaptcha = () => {
+    setCaptchaToken(null);
+    setCaptchaLoadError(true);
+    setCaptchaFailCount(n => n + 1);
+  };
+
+  const reintentarCaptcha = () => {
+    setCaptchaLoadError(false);
+    setCaptchaToken(null);
+    setTurnstileAttempt(n => n + 1); // key nueva → el widget se remonta y vuelve a intentar desde cero
   };
 
   const usarOtroCorreo = () => {
@@ -209,9 +275,9 @@ export default function AuthScreen() {
                   style={{ background: "transparent", color: "rgba(255,255,255,0.5)", border: "none", padding: "10px 6px", minHeight: 40, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textDecoration: "underline" }}>
                   Usar otro correo
                 </button>
-                <button type="button" onClick={reenviar} disabled={cooldown > 0 || loading}
-                  style={{ background: "transparent", color: (cooldown > 0 || loading) ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.7)", border: "none", padding: "10px 6px", minHeight: 40, cursor: (cooldown > 0 || loading) ? "default" : "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textDecoration: cooldown > 0 ? "none" : "underline" }}>
-                  {cooldown > 0 ? `Reenviar en ${cooldown} s` : "Reenviar código"}
+                <button type="button" onClick={reenviar} disabled={cooldown > 0 || loading || !captchaListo}
+                  style={{ background: "transparent", color: (cooldown > 0 || loading || !captchaListo) ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.7)", border: "none", padding: "10px 6px", minHeight: 40, cursor: (cooldown > 0 || loading || !captchaListo) ? "default" : "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textDecoration: (cooldown > 0 || !captchaListo) ? "none" : "underline" }}>
+                  {cooldown > 0 ? `Reenviar en ${cooldown} s` : !captchaListo ? "Verificando que eres una persona…" : "Reenviar código"}
                 </button>
               </div>
             </form>
@@ -223,20 +289,60 @@ export default function AuthScreen() {
                   Te enviamos un código de {OTP_LENGTH} dígitos para entrar, sin contraseña. Si es tu primera vez, tu cuenta se crea sola.
                 </div>
               </div>
+              {initialAuthUrlError && (
+                <div role="status" style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>
+                  Ese enlace ya no sirve: ahora entras con un código de {OTP_LENGTH} dígitos. Escribe tu correo y te lo enviamos.
+                </div>
+              )}
               <div>
                 <label htmlFor="auth-email" style={lbl}>Correo electrónico</label>
                 <input id="auth-email" style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@correo.com" autoFocus disabled={loading} />
               </div>
               {error && <div role="alert" style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{error}</div>}
-              <button type="submit" className="pp-auth-primary" disabled={loading}
-                style={{ background: loading ? "#555" : "linear-gradient(135deg,#bf5803,#a94d02)", color: "#fff", border: "none", borderRadius: 10, padding: "13px", cursor: loading ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: loading ? "none" : "0 4px 20px rgba(191,88,3,0.4)", marginTop: 4, fontFamily: "inherit" }}>
-                {loading ? "Enviando código…" : "Enviarme el código →"}
+              <button type="submit" className="pp-auth-primary" disabled={loading || !captchaListo}
+                style={{ background: (loading || !captchaListo) ? "#555" : "linear-gradient(135deg,#bf5803,#a94d02)", color: "#fff", border: "none", borderRadius: 10, padding: "13px", cursor: (loading || !captchaListo) ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: (loading || !captchaListo) ? "none" : "0 4px 20px rgba(191,88,3,0.4)", marginTop: 4, fontFamily: "inherit" }}>
+                {loading ? "Enviando código…" : !captchaListo ? "Verificando que eres una persona…" : "Enviarme el código →"}
               </button>
               <button type="button" onClick={irADigitarCodigo}
                 style={{ background: "transparent", color: "rgba(255,255,255,0.5)", border: "none", padding: "10px 6px", minHeight: 40, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textDecoration: "underline", textAlign: "center" }}>
                 ¿Ya tienes un código?
               </button>
             </form>
+          )}
+
+          {/* Turnstile: montado FUERA del cambio de paso ('email' | 'code')
+              para que la misma instancia sirva tanto al primer envío como al
+              reenvío, sin desmontarse ni pedir un token nuevo de más. */}
+          {necesitaCaptcha && (
+            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+              {!captchaLoadError && (
+                <TurnstileWidget
+                  key={turnstileAttempt}
+                  ref={turnstileRef}
+                  sitekey={TURNSTILE_SITE_KEY}
+                  onVerify={(token) => setCaptchaToken(token)}
+                  onError={manejarErrorCaptcha}
+                />
+              )}
+              {captchaLoadError ? (
+                <div role="alert" style={{ fontSize: 11.5, color: "#f87171", textAlign: "center", lineHeight: 1.5, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                  <span>No pudimos confirmar que eres una persona. Suele pasar con bloqueadores de anuncios o redes corporativas que bloquean la verificación.</span>
+                  <button type="button" onClick={reintentarCaptcha}
+                    style={{ background: "rgba(255,255,255,0.1)", color: "#fff", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}>
+                    Reintentar verificación
+                  </button>
+                  {captchaFailCount >= 2 && (
+                    <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 11 }}>
+                      Si sigue fallando, escríbenos a <a href="mailto:info@softatumedida.com" style={{ color: "#fff" }}>info@softatumedida.com</a>
+                    </span>
+                  )}
+                </div>
+              ) : !captchaToken ? (
+                <div aria-live="polite" style={{ fontSize: 11.5, color: "rgba(255,255,255,0.45)", textAlign: "center" }}>
+                  Verificando que eres una persona…
+                </div>
+              ) : null}
+            </div>
           )}
         </div>
         <div style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: "rgba(255,255,255,0.2)", letterSpacing: 2 }}>PRODUCTIVITY-PLUS · GESTIÓN ESTRATÉGICA</div>

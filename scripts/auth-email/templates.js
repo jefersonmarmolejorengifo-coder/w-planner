@@ -48,6 +48,7 @@
 // Cada plantilla de abajo usa solo un subconjunto de su lista permitida;
 // templates.test.js lo verifica clave por clave.
 
+import { createHash } from 'node:crypto';
 import { OTP_LENGTH, OTP_TTL_MINUTES } from '../../src/lib/otp.js';
 import { COLOR, FONT_STACK, MONO_STACK, SITE_URL, heading, paragraph, ctaButton, layout } from '../../api/_email-brand.js';
 
@@ -254,6 +255,16 @@ export function toAuthConfigPatch() {
   patch.mailer_otp_length = OTP_LENGTH;
   patch.mailer_otp_exp = OTP_TTL_MINUTES * 60;
   return patch;
+}
+
+// Huella de integridad del patch completo: sha256 hex de su JSON. No es un
+// hash de seguridad (el contenido no es secreto); es un detector barato de
+// "el código de las plantillas cambió". La compara published.test.js contra
+// scripts/auth-email/published.json (lo que --apply dejó publicado la
+// última vez) para que el CI falle en rojo si alguien toca una plantilla y
+// no vuelve a correr --apply — el 2026-09-14 (H-056) esto pasó en silencio.
+export function patchFingerprint() {
+  return createHash('sha256').update(JSON.stringify(toAuthConfigPatch())).digest('hex');
 }
 
 // Extrae el texto del div oculto del preheader (identificado por

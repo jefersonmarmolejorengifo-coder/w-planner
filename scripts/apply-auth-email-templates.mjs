@@ -7,22 +7,34 @@
 //
 // Uso:
 //   node scripts/apply-auth-email-templates.mjs                # dry-run (solo lectura, no toca nada)
+//   node scripts/apply-auth-email-templates.mjs --check        # solo lectura: compara y sale 1 si algo difiere (pensado para CI/cron)
 //   node scripts/apply-auth-email-templates.mjs --apply        # publica y verifica clave por clave
 //   node scripts/apply-auth-email-templates.mjs --preview=DIR  # escribe HTML de muestra en DIR, sin red
 //
 // Variables de entorno:
 //   SUPABASE_ACCESS_TOKEN  token personal de Supabase (obligatorio salvo --preview). NUNCA se imprime.
-//   SUPABASE_PROJECT_REF   ref del proyecto (por defecto pkccbrzsvcipkmnllxhz, Productivity-Plus).
+//   SUPABASE_PROJECT_REF   ref del proyecto. Dry-run y --check caen por
+//                          defecto en pkccbrzsvcipkmnllxhz (Productivity-Plus)
+//                          si no se define. --apply lo EXIGE explícito en el
+//                          entorno (sin valor por defecto): publicar sin ref
+//                          explícito es exactamente el descuido que casi deja
+//                          plantillas sin publicar el 2026-09-14 (H-058).
 //
 // ⚠️ --apply lo corre el PM en el momento exacto del despliegue: el orden de
 // publicación importa (config + código de la app deben quedar sincronizados).
+// Tras un --apply verificado, este script deja constancia en
+// scripts/auth-email/published.json (huella sha256 + ref + fecha), que
+// templates.test.js compara contra el código en cada CI (H-056: que un
+// cambio de plantilla sin publicar no vuelva a pasar en silencio).
 
 import { mkdir, writeFile } from 'node:fs/promises';
-import { AUTH_EMAIL_TEMPLATES, toAuthConfigPatch, renderSample, APP_URL } from './auth-email/templates.js';
+import { fileURLToPath } from 'node:url';
+import { AUTH_EMAIL_TEMPLATES, toAuthConfigPatch, renderSample, patchFingerprint, APP_URL } from './auth-email/templates.js';
 import { RESEND_COOLDOWN_SECONDS } from '../src/lib/otp.js';
 
 const DEFAULT_PROJECT_REF = 'pkccbrzsvcipkmnllxhz';
 const REQUEST_TIMEOUT_MS = 20000;
+const PUBLISHED_PATH = fileURLToPath(new URL('./auth-email/published.json', import.meta.url));
 
 // Valores de ejemplo para --preview: representan lo que Supabase sustituiría
 // en un envío real, para poder ver el correo terminado en un navegador.
@@ -35,10 +47,12 @@ const SAMPLE_VARS = {
 };
 
 function parseArgs(argv) {
-  const args = { apply: false, preview: null };
+  const args = { apply: false, check: false, preview: null };
   for (const raw of argv) {
     if (raw === '--apply') {
       args.apply = true;
+    } else if (raw === '--check') {
+      args.check = true;
     } else if (raw.startsWith('--preview=')) {
       args.preview = raw.slice('--preview='.length);
     } else if (raw === '--preview') {
@@ -46,6 +60,9 @@ function parseArgs(argv) {
     } else {
       throw new Error(`Argumento no reconocido: ${raw}`);
     }
+  }
+  if (args.apply && args.check) {
+    throw new Error('--apply y --check son mutuamente excluyentes.');
   }
   return args;
 }
@@ -148,6 +165,28 @@ async function runDryRun(ref, token) {
   console.log('\nDry-run completo. Nada se modificó. Usa --apply para publicar.');
 }
 
+// Solo lectura: compara las 14 claves contra lo publicado en producción y no
+// modifica nada. Pensado para correr en CI o en un cron de guardia: sale con
+// código 1 si algo no coincide (para que quien lo invoque falle visible),
+// 0 si todo coincide. Por eso puede usar el ref por defecto — a diferencia de
+// --apply, aquí un ref equivocado como mucho informa mal, no publica nada.
+async function runCheck(ref, token) {
+  const patch = toAuthConfigPatch();
+  console.log(`--check contra el proyecto ${ref} (solo lectura, no modifica nada)\n`);
+  const current = await fetchAuthConfig(ref, token);
+  const mismatches = Object.keys(patch).filter((key) => current[key] !== patch[key]);
+  if (mismatches.length === 0) {
+    console.log('Las 14 claves coinciden con lo publicado en producción. Nada pendiente.');
+    return;
+  }
+  console.log(`${mismatches.length} de 14 clave(s) NO coinciden con lo publicado:`);
+  for (const key of mismatches) {
+    console.log(`  ${key}: ${describeDiff(key, current[key], patch[key])}`);
+  }
+  console.error('\n--check encontró diferencias: corre --apply para publicarlas.');
+  process.exitCode = 1;
+}
+
 async function runApply(ref, token) {
   const patch = toAuthConfigPatch();
   console.log(`Publicando en el proyecto ${ref}...`);
@@ -167,6 +206,15 @@ async function runApply(ref, token) {
     return;
   }
   console.log('\nTodo publicado y verificado.');
+
+  // Deja constancia de qué huella quedó publicada y en qué proyecto. Es lo
+  // que templates.test.js compara contra el código en cada CI (H-056): si
+  // alguien cambia una plantilla y no vuelve a correr --apply, la huella del
+  // código ya no coincide con la de aquí y el test falla en rojo, en vez de
+  // quedar en silencio como pasó el 2026-09-14.
+  const record = { sha256: patchFingerprint(), ref, publishedAt: new Date().toISOString() };
+  await writeFile(PUBLISHED_PATH, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  console.log(`Registrado en ${PUBLISHED_PATH}`);
 }
 
 async function main() {
@@ -177,7 +225,17 @@ async function main() {
     return;
   }
 
-  const ref = process.env.SUPABASE_PROJECT_REF || DEFAULT_PROJECT_REF;
+  // --apply exige el ref EXPLÍCITO en el entorno, sin caer al valor por
+  // defecto: publicar en el proyecto equivocado por un ref no fijado es
+  // justo el descuido de H-058. Dry-run y --check sí pueden apoyarse en el
+  // valor por defecto porque no escriben nada.
+  const envRef = process.env.SUPABASE_PROJECT_REF;
+  if (args.apply && !envRef) {
+    throw new Error(
+      'Falta SUPABASE_PROJECT_REF en el entorno: --apply lo exige explícito (sin valor por defecto), para no publicar por accidente en el proyecto equivocado. Ej.: SUPABASE_PROJECT_REF=pkccbrzsvcipkmnllxhz node scripts/apply-auth-email-templates.mjs --apply'
+    );
+  }
+  const ref = envRef || DEFAULT_PROJECT_REF;
   const token = process.env.SUPABASE_ACCESS_TOKEN;
   if (!token) {
     throw new Error(
@@ -192,6 +250,8 @@ async function main() {
 
   if (args.apply) {
     await runApply(ref, token);
+  } else if (args.check) {
+    await runCheck(ref, token);
   } else {
     await runDryRun(ref, token);
   }

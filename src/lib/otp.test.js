@@ -113,6 +113,7 @@ describe('authErrorMessage', () => {
     { code: 'validation_failed', mensajeIngles: 'Token must be six characters', fase: 'verify' },
     { code: 'signup_disabled', mensajeIngles: 'Signups not allowed for this instance', fase: 'send' },
     { code: 'email_address_not_authorized', mensajeIngles: 'Email address not authorized', fase: 'send' },
+    { code: 'captcha_failed', mensajeIngles: 'The request could not be authorized', fase: 'send' },
     { code: 'algun_codigo_nuevo_que_no_conocemos', mensajeIngles: 'Something unexpected happened', fase: 'verify' },
   ];
 
@@ -130,6 +131,20 @@ describe('authErrorMessage', () => {
   it("validation_failed en 'verify' menciona la cantidad de dígitos", () => {
     const error = { name: 'AuthApiError', status: 422, code: 'validation_failed', message: 'Token must be six characters' };
     expect(authErrorMessage(error, 'verify')).toContain(String(OTP_LENGTH));
+  });
+
+  it('captcha_failed (H-054) pide recargar la página, no repite el mensaje interno de auth-js', () => {
+    const error = { name: 'AuthApiError', status: 422, code: 'captcha_failed', message: 'The request could not be authorized' };
+    const resultado = authErrorMessage(error, 'send');
+    expect(resultado.toLowerCase()).toContain('persona');
+    expect(resultado.toLowerCase()).toContain('recarga');
+  });
+
+  it('over_email_send_rate_limit (H-062) no distingue espera personal de tope global: el mensaje cubre ambos casos', () => {
+    const error = { name: 'AuthApiError', status: 429, code: 'over_email_send_rate_limit', message: 'Email rate limit exceeded' };
+    const resultado = authErrorMessage(error, 'send');
+    expect(resultado.toLowerCase()).toMatch(/espera/);
+    expect(resultado.toLowerCase()).toMatch(/demanda|hace muy poco/);
   });
 
   it('otp_expired cubre tanto código incorrecto como vencido (mismo código en auth-js)', () => {

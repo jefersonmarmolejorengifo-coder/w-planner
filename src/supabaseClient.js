@@ -1,3 +1,6 @@
+// Importa PRIMERO: limpia el hash de un error de enlace viejo (H-065) antes
+// de que createClient() lo lea y lance una excepción sin quitarlo de la URL.
+import './lib/initialAuthUrlError';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;

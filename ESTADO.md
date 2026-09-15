@@ -2,28 +2,29 @@
 
 > Resumen corto del último bloque de trabajo y de lo que falta. Lo mantiene el líder de sesión al cerrar.
 
-**Última actualización:** 2026-09-14
+**Última actualización:** 2026-09-15
 
-## Qué se hizo (2026-09-14)
+## Qué se hizo (2026-09-14/15)
 
-- **Login por código en vez de link mágico** (commit `f81fac9`, desplegado). Causa raíz demostrada con logs: Microsoft 365 Safe Links abría el enlace ~20 s después de que llegaba el correo y gastaba el token de un solo uso, así que los usuarios con correo corporativo nunca podían entrar. Ahora el correo trae un código de 8 dígitos que se escribe en la app.
-- **Plantillas de correo de Supabase Auth con la marca** (6: acceso, bienvenida, recuperación, invitación, reautenticación, cambio de correo) en `scripts/auth-email/templates.js`, con un script para publicarlas (`scripts/apply-auth-email-templates.mjs`). Procedimiento en `docs/operations.md`.
-- Revisiones antes del merge: seguridad (aprobado con condiciones, resueltas), testing (apto), UI/UX (contraste AA aplicado). Superauditor triple sobre el commit.
-- Verificación en producción: código equivocado se rechaza, el correcto da sesión, reutilizarlo se rechaza.
-- **Correos propios de la app con la misma identidad** (invitación a proyecto y apertura de retro) sobre una capa compartida `api/_email-brand.js`; el patch de Supabase quedó idéntico byte a byte.
-- Cierre de 5 hallazgos de la auditoría triple: cuenta regresiva robusta a pestaña en segundo plano, scroll del login en pantallas bajas, anillo de foco en los botones principales, `supabase/config.toml` alineado (8 dígitos / 15 min) y correos de la app.
-- **Plantillas publicadas en Supabase** con autorización de Jefer (14/14 claves verificadas) y correo real con código enviado a la cuenta corporativa: en los logs no hubo ningún acceso del escáner de Microsoft.
-- **Plan Pro Team sin cobro** para `jdmarmolejo@ingeniopichichi.com` (cuenta de Jefer) con la función oficial `admin_set_user_plan`: activo, sin suscripción de Mercado Pago ni vencimiento. Verificado como lo ve la app (`user_ia_capacity`: Pro Team, 5 proyectos IA / 9 en total).
+- **Login por código en vez de link mágico** (`f81fac9`). Causa raíz demostrada con logs: Microsoft 365 Safe Links abría el enlace ~20 s después de llegar el correo y gastaba el token de un solo uso; los usuarios con correo corporativo nunca podían entrar.
+- **Plantillas de correo de Supabase Auth con la marca** (6) en `scripts/auth-email/templates.js`, publicadas con `scripts/apply-auth-email-templates.mjs` (14/14 claves verificadas) y probadas con un correo real a la cuenta corporativa: ningún acceso del escáner.
+- **Correos propios de la app** (invitación, retro) con la misma identidad sobre `api/_email-brand.js` (`4b7a18f`).
+- **Plan Pro Team sin cobro** para `jdmarmolejo@ingeniopichichi.com` (cuenta de Jefer) con `admin_set_user_plan`: activo, sin suscripción ni vencimiento; verificado como lo ve la app.
+- **Detector de deriva de plantillas** (H-056, H-058): `--check` sale 1 si producción difiere, `--apply` exige `SUPABASE_PROJECT_REF` explícito, y `scripts/auth-email/published.json` + test de huella en el CI.
+- **Aviso de enlace viejo** (H-065) y mensaje honesto cuando se agota el tope de correos (H-062).
+- **CAPTCHA (Cloudflare Turnstile) integrado en la pantalla de acceso, inactivo hasta tener clave** (H-054). Si Turnstile no carga, la persona ve qué pasa, puede reintentar y, al segundo fallo, tiene el contacto info@softatumedida.com. CSP ampliada solo a `challenges.cloudflare.com`. Activación de servidor lista en `scripts/enable-auth-captcha.mjs` (con reversión `--disable`). Revisado por seguridad: aprobado; su condición (salida clara ante fallos) está cumplida.
+- **Pruebas de componente del login** (jsdom + Testing Library, H-053), incluidas las rutas de CAPTCHA y de fallo, con sabotajes que fallan donde deben.
+- **Revisión del mismo bug en otros proyectos** (solo lectura, logs de 24 h sin tráfico de acceso en ninguno): Cuadre y VoxLab expuestos (canjean el `token_hash` en el GET), TuAgendaApp (enlace puro), Triada (sin acceso por API); el Hub manda código + enlace de respaldo (el enlace anula el código); hirly ya usa código; Academia aún no está en producción.
 
 ## Qué falta
 
 | Pendiente | Depende de | Prioridad |
 |---|---|---|
-| Entrar con el código que llegó a jdmarmolejo@ingeniopichichi.com y confirmar el plan Pro Team en la app | Jefer | Alta |
-| Exigir `SUPABASE_PROJECT_REF` explícito en `--apply` y un modo `--check` que falle si hay deriva (H-056, H-058) | — | Media |
-| Aviso cuando alguien abre un enlace viejo que ya no sirve (H-065) | — | Baja |
-| CAPTCHA en el envío de códigos + subir `rate_limit_email_sent` (hoy 30/h para todo el proyecto) | Decisión de Jefer (Turnstile o hCaptcha) | Media |
-| Pruebas de UI con jsdom + testing-library para el login | — | Media |
-| Revisar el mismo bug de enlaces en Academia, TuAgendaApp y Triada (solo enlace) y cuadre, hirly, panel, VoxLab (mixtos) | Decisión de Jefer | Alta para quien tenga usuarios corporativos |
+| Crear el widget de Turnstile "Productivity-Plus login" (hostnames `productivityplus.softatumedida.com` y `w-planner.vercel.app`, modo Managed) y guardar `VITE_TURNSTILE_SITE_KEY` y `TURNSTILE_SECRET_KEY` en `.env.local` | Jefer (el token de Cloudflare disponible es solo de DNS; Academia usa un widget por dominio) | Alta |
+| Con las claves: variable en Vercel + redeploy + comprobar el widget en producción + `enable-auth-captcha --enable` (CAPTCHA on + tope 30→100/h) y vigilar `captcha_failed` 48 h | Lo anterior | Alta |
+| Prueba final: entrar con jdmarmolejo@ingeniopichichi.com (código + CAPTCHA + plan Pro Team) | Lo anterior | Alta |
+| Arreglar el bug de enlaces: Cuadre y VoxLab → TuAgendaApp → Hub (quitar el enlace de respaldo) → hirly (`email_change`) → Triada | Decisión de Jefer (repos aparte; el Hub cruza la frontera de afiliados) | Alta en los que tengan usuarios corporativos |
+| Reautorizar el conector de Gmail en claude.ai | Jefer | Baja |
+| Outlook de escritorio muestra los correos a todo el ancho (Supabase borra los comentarios MSO) | — | Baja, aceptado |
 
 Detalle de hallazgos y prioridades: `AUDIT_PLAN.md` (ronda 2026-09-14).

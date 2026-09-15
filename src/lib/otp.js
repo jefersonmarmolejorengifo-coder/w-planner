@@ -88,7 +88,12 @@ export function authErrorMessage(error, phase) {
       // vencido": no hay forma de distinguirlos desde el cliente.
       return 'El código no es válido o ya venció. Revisa que sea el del correo más reciente o pide uno nuevo.';
     case 'over_email_send_rate_limit':
-      return 'Ya te enviamos un código hace muy poco. Espera un minuto antes de pedir otro.';
+      // Supabase usa este mismo código para "espera un minuto, ya te
+      // enviamos uno" (por usuario) Y para el tope global de correos del
+      // proyecto (H-062): no hay forma de distinguirlos desde el cliente.
+      return 'Ya pediste un código hace muy poco o hay mucha demanda en este momento. Espera un minuto e intenta de nuevo.';
+    case 'captcha_failed':
+      return 'No pudimos verificar que eres una persona. Recarga la página e intenta de nuevo.';
     case 'over_request_rate_limit':
       return 'Demasiados intentos seguidos. Espera unos minutos y vuelve a intentarlo.';
     case 'email_address_invalid':

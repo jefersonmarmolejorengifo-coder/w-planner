@@ -271,18 +271,69 @@ Comandos:
 node scripts/apply-auth-email-templates.mjs --preview=./tmp-preview
 
 # Dry-run: compara lo publicado contra lo nuevo, no cambia nada (requiere
-# SUPABASE_ACCESS_TOKEN y opcionalmente SUPABASE_PROJECT_REF)
+# SUPABASE_ACCESS_TOKEN; SUPABASE_PROJECT_REF es opcional aqui, cae al
+# proyecto de Productivity-Plus por defecto)
 node scripts/apply-auth-email-templates.mjs
 
-# Publica y verifica clave por clave (usar solo en el momento del deploy)
-node scripts/apply-auth-email-templates.mjs --apply
+# --check: solo lectura, compara las 14 claves contra lo publicado y sale
+# con codigo 1 si algo difiere (imprime cuales). Util para un cron de
+# guardia o para confirmar antes de tocar nada.
+node scripts/apply-auth-email-templates.mjs --check
+
+# Publica y verifica clave por clave (usar solo en el momento del deploy).
+# SUPABASE_PROJECT_REF es OBLIGATORIO y explicito aqui — sin valor por
+# defecto — para no publicar por accidente en el proyecto equivocado.
+SUPABASE_PROJECT_REF=pkccbrzsvcipkmnllxhz node scripts/apply-auth-email-templates.mjs --apply
 ```
+
+### Orden obligatorio en cada deploy que toque estas plantillas
+
+El 2026-09-14 la app se desplego con la pantalla de codigo nueva pero las
+plantillas de correo quedaron sin publicar un rato, y nada lo avisaba
+(H-056). Por eso el orden es fijo:
+
+1. Desplegar el codigo de la app (Vercel).
+2. Publicar las plantillas: `SUPABASE_PROJECT_REF=pkccbrzsvcipkmnllxhz node scripts/apply-auth-email-templates.mjs --apply`.
+   Si el PATCH se verifica clave por clave, el script escribe
+   `scripts/auth-email/published.json` (huella sha256 + ref + fecha) —
+   **commitear ese archivo** en el mismo cambio.
+3. Confirmar con `node scripts/apply-auth-email-templates.mjs --check`
+   (exit 0 = las 14 claves coinciden).
 
 Antes de publicar: correr `npx vitest run scripts/auth-email` (guardas de
 regresion: ninguna plantilla de codigo lleva un enlace con token, ninguna
 menciona proveedores externos, ninguna deja comentarios HTML muertos —
 Supabase procesa las plantillas con `html/template` de Go y los borra al
 enviarlas).
+
+### Si falla el test de huella (`published.test.js`)
+
+Ese test compara `patchFingerprint()` (huella del codigo actual de
+`templates.js`) contra `scripts/auth-email/published.json` (lo ultimo que
+`--apply` publico de verdad). Si falla en CI significa que alguien edito una
+plantilla y no volvio a publicar:
+
+1. Correr `SUPABASE_PROJECT_REF=pkccbrzsvcipkmnllxhz node scripts/apply-auth-email-templates.mjs --apply`.
+2. Commitear el `published.json` actualizado junto con el cambio de plantilla.
+3. Confirmar con `--check` (exit 0) y con `npx vitest run scripts/auth-email`.
+
+Nunca "arreglar" el test editando `published.json` a mano con una huella que
+no viene de un `--apply` real verificado: eso deja el repo diciendo que algo
+esta publicado cuando no lo esta.
+
+### Como revertir
+
+Si una plantilla publicada resulta problematica (ej. un correo mal
+renderizado en produccion):
+
+1. Revertir el commit que cambio `scripts/auth-email/templates.js` (o editar
+   el contenido de vuelta al estado anterior).
+2. Publicar la version revertida con `--apply` (mismo comando de arriba);
+   esto sobrescribe `published.json` con la huella de la version revertida.
+3. Confirmar con `--check` que la version en produccion volvio a coincidir.
+
+No existe una operacion de "deshacer" en la Management API: revertir siempre
+es publicar de nuevo el contenido anterior con `--apply`.
 
 ## Backups Y Recuperacion
 

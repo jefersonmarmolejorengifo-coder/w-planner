@@ -12,7 +12,7 @@
 - **Plan Pro Team sin cobro** para `jdmarmolejo@ingeniopichichi.com` (cuenta de Jefer) con `admin_set_user_plan`: activo, sin suscripción ni vencimiento; verificado como lo ve la app.
 - **Detector de deriva de plantillas** (H-056, H-058): `--check` sale 1 si producción difiere, `--apply` exige `SUPABASE_PROJECT_REF` explícito, y `scripts/auth-email/published.json` + test de huella en el CI.
 - **Aviso de enlace viejo** (H-065) y mensaje honesto cuando se agota el tope de correos (H-062).
-- **CAPTCHA (Cloudflare Turnstile) integrado en la pantalla de acceso, inactivo hasta tener clave** (H-054). Si Turnstile no carga, la persona ve qué pasa, puede reintentar y, al segundo fallo, tiene el contacto info@softatumedida.com. CSP ampliada solo a `challenges.cloudflare.com`. Activación de servidor lista en `scripts/enable-auth-captcha.mjs` (con reversión `--disable`). Revisado por seguridad: aprobado; su condición (salida clara ante fallos) está cumplida.
+- **CAPTCHA (Cloudflare Turnstile) ACTIVO en producción desde 2026-09-15** (H-054): widget "Productivity-Plus login" creado por API, clave pública en Vercel, secreto en Supabase; pedir un código sin CAPTCHA se rechaza (`captcha_failed`) y el tope de correos subió de 30 a 100/h. Comprobado que el login por código y la renovación de sesión siguen funcionando. Si Turnstile no carga, la persona ve qué pasa, puede reintentar y, al segundo fallo, tiene el contacto info@softatumedida.com. Reversión: `SUPABASE_PROJECT_REF=pkccbrzsvcipkmnllxhz node scripts/enable-auth-captcha.mjs --disable`.
 - **Pruebas de componente del login** (jsdom + Testing Library, H-053), incluidas las rutas de CAPTCHA y de fallo, con sabotajes que fallan donde deben.
 - **Revisión del mismo bug en otros proyectos** (solo lectura, logs de 24 h sin tráfico de acceso en ninguno): Cuadre y VoxLab expuestos (canjean el `token_hash` en el GET), TuAgendaApp (enlace puro), Triada (sin acceso por API); el Hub manda código + enlace de respaldo (el enlace anula el código); hirly ya usa código; Academia aún no está en producción.
 
@@ -20,10 +20,9 @@
 
 | Pendiente | Depende de | Prioridad |
 |---|---|---|
-| Crear el widget de Turnstile "Productivity-Plus login" (hostnames `productivityplus.softatumedida.com` y `w-planner.vercel.app`, modo Managed) y guardar `VITE_TURNSTILE_SITE_KEY` y `TURNSTILE_SECRET_KEY` en `.env.local` | Jefer (el token de Cloudflare disponible es solo de DNS; Academia usa un widget por dominio) | Alta |
-| Con las claves: variable en Vercel + redeploy + comprobar el widget en producción + `enable-auth-captcha --enable` (CAPTCHA on + tope 30→100/h) y vigilar `captcha_failed` 48 h | Lo anterior | Alta |
-| Prueba final: entrar con jdmarmolejo@ingeniopichichi.com (código + CAPTCHA + plan Pro Team) | Lo anterior | Alta |
-| Arreglar el bug de enlaces: Cuadre y VoxLab → TuAgendaApp → Hub (quitar el enlace de respaldo) → hirly (`email_change`) → Triada | Decisión de Jefer (repos aparte; el Hub cruza la frontera de afiliados) | Alta en los que tengan usuarios corporativos |
+| Prueba final: entrar con jdmarmolejo@ingeniopichichi.com (CAPTCHA + código + plan Pro Team) | Jefer | Alta |
+| Vigilar `captcha_failed` en los logs de Auth durante 48 h (si sube, revertir con `enable-auth-captcha --disable`) | — | Media |
+| Arreglar el bug de enlaces: Cuadre y VoxLab → TuAgendaApp → Hub (quitar el enlace de respaldo) → hirly (`email_change`) → Triada | Jefer lo dejó para el final (repos aparte; el Hub cruza la frontera de afiliados) | Alta en los que tengan usuarios corporativos |
 | Reautorizar el conector de Gmail en claude.ai | Jefer | Baja |
 | Outlook de escritorio muestra los correos a todo el ancho (Supabase borra los comentarios MSO) | — | Baja, aceptado |
 

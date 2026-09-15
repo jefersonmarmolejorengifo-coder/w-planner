@@ -73,10 +73,22 @@ if (enable) {
   const { createClient } = require('@supabase/supabase-js');
   const anon = createClient(readVar('VITE_SUPABASE_URL'), readVar('VITE_SUPABASE_ANON_KEY'), { auth: { persistSession: false, autoRefreshToken: false } });
   // Correo inexistente + shouldCreateUser:false: sin CAPTCHA la respuesta sería
-  // "Signups not allowed for otp"; con CAPTCHA activo debe fallar ANTES, por él.
-  const { error } = await anon.auth.signInWithOtp({ email: 'sonda-captcha@example.invalid', options: { shouldCreateUser: false } });
-  const blocked = !!error && /captcha/i.test(`${error.code} ${error.message}`);
-  console.log(`envío sin token de CAPTCHA → ${error ? `status=${error.status} code=${error.code}` : 'SIN ERROR'} → ${blocked ? 'RECHAZADO por captcha (PASA)' : 'NO rechazado por captcha (FALLA)'}`);
+  // "Signups not allowed for otp" (otp_disabled); con CAPTCHA activo debe fallar
+  // ANTES, por él. Supabase Auth recarga la configuración unos segundos DESPUÉS
+  // de responder al PATCH, así que probar al instante da un falso negativo
+  // (pasó el 2026-09-15): se sondea cada 10 s, con pocas sondas para no gastar
+  // el límite de envíos de código.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const t0 = Date.now();
+  let blocked = false;
+  let last = null;
+  for (let i = 1; i <= 7 && !blocked; i++) {
+    await sleep(10000);
+    last = (await anon.auth.signInWithOtp({ email: 'sonda-captcha@example.invalid', options: { shouldCreateUser: false } })).error;
+    blocked = !!last && /captcha/i.test(`${last.code} ${last.message}`);
+  }
+  const secs = Math.round((Date.now() - t0) / 1000);
+  console.log(`envío sin token de CAPTCHA → ${last ? `status=${last.status} code=${last.code}` : 'SIN ERROR'} tras ${secs} s → ${blocked ? 'RECHAZADO por captcha (PASA)' : 'NO rechazado por captcha (FALLA)'}`);
   if (!blocked) fails++;
 }
 

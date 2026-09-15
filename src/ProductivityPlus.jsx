@@ -499,8 +499,9 @@ export default function App() {
     };
 
     const init = async () => {
-      // 1. Check Supabase auth session (espera la inicialización de supabase-js,
-      // incluida la detección del token del link mágico en la URL).
+      // 1. Check Supabase auth session (espera la inicialización de
+      // supabase-js: si ya hay sesión activa —del código de acceso verificado
+      // en AuthScreen o de una visita anterior— getSession() la trae sin más).
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         setLoading(false);
@@ -522,7 +523,7 @@ export default function App() {
         setLoading(false);
         routed = false;
       } else if (event === 'SIGNED_IN' && session?.user && !routed) {
-        // Retorno del link mágico: la sesión entró después de init().
+        // Código de acceso verificado en AuthScreen: la sesión entró después de init().
         routed = true;
         routeAfterAuth(session.user);
       }

@@ -244,6 +244,46 @@ Acciones:
 - Revisar dashboard de Resend.
 - Confirmar que el reporte inicia con `<!DOCTYPE html>`.
 
+## Plantillas De Correo De Supabase Auth
+
+Supabase Auth envia 6 tipos de correo (magic_link, confirmation, recovery,
+invite, reauthentication, email_change). Por defecto son las de fabrica, en
+ingles y sin diseno. Productivity-Plus publica las propias desde
+`scripts/auth-email/templates.js` (fuente unica: HTML + asunto por clave)
+usando `scripts/apply-auth-email-templates.mjs` contra la Management API de
+Supabase (`GET`/`PATCH /v1/projects/{ref}/config/auth`).
+
+Por que codigo y no enlace:
+
+Los filtros de correo corporativos (Microsoft 365 Safe Links y similares)
+abren cualquier enlace del correo ANTES que la persona destinataria, y con
+eso gastan el token de un solo uso: la persona hace clic despues y ve
+"el enlace ya no es valido". Por eso 5 de las 6 plantillas (todas menos
+`email_change`) llevan un codigo de 8 digitos (`{{ .Token }}`, ver
+`src/lib/otp.js`) que la persona escribe a mano en la app, y ningun enlace
+con token. `email_change` es la unica excepcion porque Supabase no emite un
+codigo de verificacion para ese flujo.
+
+Comandos:
+
+```bash
+# Vista previa en HTML de las 6 plantillas (sin red, no requiere token)
+node scripts/apply-auth-email-templates.mjs --preview=./tmp-preview
+
+# Dry-run: compara lo publicado contra lo nuevo, no cambia nada (requiere
+# SUPABASE_ACCESS_TOKEN y opcionalmente SUPABASE_PROJECT_REF)
+node scripts/apply-auth-email-templates.mjs
+
+# Publica y verifica clave por clave (usar solo en el momento del deploy)
+node scripts/apply-auth-email-templates.mjs --apply
+```
+
+Antes de publicar: correr `npx vitest run scripts/auth-email` (guardas de
+regresion: ninguna plantilla de codigo lleva un enlace con token, ninguna
+menciona proveedores externos, ninguna deja comentarios HTML muertos —
+Supabase procesa las plantillas con `html/template` de Go y los borra al
+enviarlas).
+
 ## Backups Y Recuperacion
 
 Recomendaciones:

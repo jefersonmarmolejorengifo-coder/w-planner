@@ -338,6 +338,100 @@ describe('AuthScreen — CAPTCHA de Turnstile (H-054)', () => {
   });
 });
 
+describe('AuthScreen — hora del envío (bug: se escribía el código de un correo anterior)', () => {
+  // 12:26 UTC = 7:26 a. m. en Bogotá (UTC-5).
+  const INSTANTE_ENVIO = Date.parse('2026-09-15T12:26:00.000Z');
+
+  it('tras enviar un código, el paso de código muestra la hora del envío en horario de Colombia', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(INSTANTE_ENVIO);
+    await montarAuthScreen();
+
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'persona@empresa.com' } });
+    fireEvent.submit(getForm());
+
+    await screen.findByLabelText('Código de acceso');
+    expect(screen.getByText('7:26 a. m.')).toBeTruthy();
+  });
+
+  it('un reenvío actualiza la hora mostrada a la del envío más reciente', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(INSTANTE_ENVIO);
+    await montarAuthScreen();
+
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'persona@empresa.com' } });
+    fireEvent.submit(getForm());
+    await screen.findByLabelText('Código de acceso');
+    expect(screen.getByText('7:26 a. m.')).toBeTruthy();
+
+    // Pasan 90s (más que el cooldown de 60s): se habilita el reenvío.
+    act(() => { vi.advanceTimersByTime(90_000); });
+    expect(screen.getByRole('button', { name: 'Reenviar código' }).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reenviar código' }));
+
+    await waitFor(() => expect(signInWithOtp).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('7:27 a. m.')).toBeTruthy(); // 7:26:00 + 90s = 7:27:30
+    expect(screen.queryByText('7:26 a. m.')).toBeNull();
+  });
+
+  it('el error de código vencido, después de haber enviado, menciona la hora de ESE envío', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(INSTANTE_ENVIO);
+    verifyOtp.mockResolvedValue({
+      error: { name: 'AuthApiError', status: 403, code: 'otp_expired', message: 'Token has expired or is invalid' },
+    });
+    await montarAuthScreen();
+
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'persona@empresa.com' } });
+    fireEvent.submit(getForm());
+    await screen.findByLabelText('Código de acceso');
+
+    fireEvent.change(screen.getByLabelText('Código de acceso'), { target: { value: '12345678'.slice(0, OTP_LENGTH) } });
+
+    const alerta = await screen.findByRole('alert');
+    expect(alerta.textContent).toContain('7:26 a. m.');
+    expect(alerta.textContent).not.toContain('Token has expired or is invalid');
+  });
+
+  it('sin haber enviado un código en esta sesión (entró por "¿Ya tienes un código?"), no se muestra ni se inventa una hora, y el error es el genérico', async () => {
+    verifyOtp.mockResolvedValue({
+      error: { name: 'AuthApiError', status: 403, code: 'otp_expired', message: 'Token has expired or is invalid' },
+    });
+    await montarAuthScreen();
+
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'persona@empresa.com' } });
+    fireEvent.click(screen.getByRole('button', { name: '¿Ya tienes un código?' }));
+    await screen.findByLabelText('Código de acceso');
+
+    // Ninguna hora en pantalla: no hubo envío que fechar.
+    expect(screen.queryByText(/\d{1,2}:\d{2}\s(a\.|p\.)\s?m\./)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Código de acceso'), { target: { value: '12345678'.slice(0, OTP_LENGTH) } });
+    const alerta = await screen.findByRole('alert');
+    expect(alerta.textContent).toBe('El código no es válido o ya venció. Revisa que sea el del correo más reciente o pide uno nuevo.');
+  });
+
+  it('"Usar otro correo" olvida la hora del envío anterior: no se filtra a la sesión del correo nuevo', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(INSTANTE_ENVIO);
+    await montarAuthScreen();
+
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'persona@empresa.com' } });
+    fireEvent.submit(getForm());
+    await screen.findByText('7:26 a. m.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Usar otro correo' }));
+    await screen.findByLabelText('Correo electrónico');
+
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'otra@empresa.com' } });
+    fireEvent.click(screen.getByRole('button', { name: '¿Ya tienes un código?' }));
+    await screen.findByLabelText('Código de acceso');
+
+    expect(screen.queryByText(/\d{1,2}:\d{2}\s(a\.|p\.)\s?m\./)).toBeNull();
+  });
+});
+
 describe('AuthScreen — aviso de enlace viejo (H-065)', () => {
   it('muestra el aviso cuando initialAuthUrlError trae un error', async () => {
     await montarAuthScreen({ authUrlError: { code: 'otp_expired', description: 'Email link is invalid or has expired' } });

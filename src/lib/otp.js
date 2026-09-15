@@ -69,7 +69,18 @@ export function remainingSeconds(endAt, now) {
 // cosas distintas según de dónde venga:
 //   'send'   → supabase.auth.signInWithOtp (pedir el código)
 //   'verify' → supabase.auth.verifyOtp (escribir el código)
-export function authErrorMessage(error, phase) {
+//
+// sentAtHora (opcional, solo se usa en phase 'verify' con code 'otp_expired'):
+// hora ya formateada (p. ej. "7:26 a. m.") del último código enviado EN ESTA
+// SESIÓN. Bug real de producción (2026-09-14): la persona escribía el código
+// de un correo ANTERIOR porque Outlook/Microsoft 365 agrupa todos los correos
+// de acceso en una sola conversación (mismo asunto) y cada código nuevo anula
+// al anterior; el mensaje genérico no bastaba para que la persona entendiera
+// qué había pasado. Se recibe ya formateada (no un timestamp crudo) para que
+// esta función siga sin depender de huso horario ni de src/lib/format.js.
+// Sin hora (llegó por "¿Ya tienes un código?" sin enviar en esta sesión) cae
+// al mensaje genérico: no hay que inventar una hora que no se conoce.
+export function authErrorMessage(error, phase, sentAtHora) {
   const code = error?.code;
   const status = error?.status;
   const name = error?.name;
@@ -85,8 +96,12 @@ export function authErrorMessage(error, phase) {
   switch (code) {
     case 'otp_expired':
       // Supabase usa el mismo código para "código incorrecto" y "código
-      // vencido": no hay forma de distinguirlos desde el cliente.
-      return 'El código no es válido o ya venció. Revisa que sea el del correo más reciente o pide uno nuevo.';
+      // vencido": no hay forma de distinguirlos desde el cliente. Con la hora
+      // del último envío señalamos el correo correcto en vez de dejar que la
+      // persona reintente con un código de un correo viejo.
+      return sentAtHora
+        ? `Ese código no es el del último correo (el de las ${sentAtHora}) o ya venció. Busca el correo de esa hora y usa su código.`
+        : 'El código no es válido o ya venció. Revisa que sea el del correo más reciente o pide uno nuevo.';
     case 'over_email_send_rate_limit':
       // Supabase usa este mismo código para "espera un minuto, ya te
       // enviamos uno" (por usuario) Y para el tope global de correos del

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from '../supabaseClient';
 import { OTP_LENGTH, OTP_TTL_MINUTES, RESEND_COOLDOWN_SECONDS, normalizeEmail, isValidEmail, normalizeOtpInput, authErrorMessage, remainingSeconds } from '../lib/otp';
+import { formatearHoraColombia } from '../lib/format';
 import { initialAuthUrlError } from '../lib/initialAuthUrlError';
 import TurnstileWidget from '../ui/TurnstileWidget';
 
@@ -29,6 +30,7 @@ export default function AuthScreen() {
   const [verified, setVerified] = useState(false); // true tras un verifyOtp exitoso: solo cambia el texto del botón mientras App desmonta la pantalla
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [sentAt, setSentAt] = useState(null); // ms epoch del último envío EXITOSO en esta sesión; null si aún no se envió nada (p. ej. entró por "¿Ya tienes un código?")
   const [cooldown, setCooldown] = useState(0);
   const [captchaToken, setCaptchaToken] = useState(null);
   const [captchaLoadError, setCaptchaLoadError] = useState(false);
@@ -126,6 +128,7 @@ export default function AuthScreen() {
       if (necesitaCaptcha) { setCaptchaToken(null); turnstileRef.current?.reset(); }
     }
     if (!ok) return false;
+    setSentAt(Date.now()); // primer envío y reenvío: cada código nuevo anula el anterior, así que la hora siempre es la del ÚLTIMO envío exitoso
     arrancarCooldown();
     setNotice(mostrarComoReenvio ? 'Te enviamos un código nuevo. Usa el más reciente.' : '');
     return true;
@@ -157,7 +160,7 @@ export default function AuthScreen() {
       const err = res?.error;
       if (err) {
         console.error('[AuthScreen] verifyOtp', err);
-        setError(authErrorMessage(err, 'verify'));
+        setError(authErrorMessage(err, 'verify', sentAt ? formatearHoraColombia(sentAt) : undefined));
         setCode('');
       } else {
         exito = true;
@@ -167,7 +170,7 @@ export default function AuthScreen() {
       // catch, verifyingRef y loading quedaban tomados para siempre
       // (hallazgo de testing).
       console.error('[AuthScreen] verifyOtp', e);
-      setError(authErrorMessage(e, 'verify'));
+      setError(authErrorMessage(e, 'verify', sentAt ? formatearHoraColombia(sentAt) : undefined));
       setCode('');
     } finally {
       verifyingRef.current = false;
@@ -215,7 +218,7 @@ export default function AuthScreen() {
   };
 
   const usarOtroCorreo = () => {
-    setStep('email'); setCode(''); setError(''); setNotice(''); setVerified(false);
+    setStep('email'); setCode(''); setError(''); setNotice(''); setVerified(false); setSentAt(null);
     if (cooldownIntervalRef.current) { clearInterval(cooldownIntervalRef.current); cooldownIntervalRef.current = null; }
     cooldownEndAtRef.current = 0;
     setCooldown(0);
@@ -241,6 +244,18 @@ export default function AuthScreen() {
                 Escribe el código de {OTP_LENGTH} dígitos que enviamos a<br />
                 <b style={{ color: "#fff" }}>{mailMostrado}</b>.<br />
                 Vence en {OTP_TTL_MINUTES} minutos.
+              </div>
+              {/* Bug de producción (2026-09-14): la persona escribía el código
+                  de un correo ANTERIOR porque Outlook/M365 agrupa todos los
+                  correos de acceso en una sola conversación (mismo asunto) y
+                  cada código nuevo anula al anterior. Mostrar la hora del
+                  último envío le da una forma concreta de identificar cuál
+                  correo es el bueno. */}
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.6, marginBottom: 14 }}>
+                {sentAt
+                  ? <>Te enviamos el código a las <b style={{ color: "#fff" }}>{formatearHoraColombia(sentAt)}</b>. Usa el código de ese correo:</>
+                  : <>Usa el código del correo más reciente:</>}
+                {' '}cada código nuevo anula los anteriores. A un correo corporativo puede tardarle 1 a 2 minutos en llegar — espera antes de pedir otro.
               </div>
               <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.6)", marginBottom: 18 }}>
                 ¿No lo ves? Revisa la carpeta de spam o correo no deseado.

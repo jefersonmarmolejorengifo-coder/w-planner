@@ -153,6 +153,30 @@ describe('authErrorMessage', () => {
     expect(resultado.toLowerCase()).toMatch(/vál|venc/);
   });
 
+  it('otp_expired SIN hora de envío (llegó por "¿Ya tienes un código?" sin enviar en esta sesión) da el mensaje genérico, sin inventar una hora', () => {
+    const error = { name: 'AuthApiError', status: 403, code: 'otp_expired', message: 'Token has expired or is invalid' };
+    expect(authErrorMessage(error, 'verify')).toBe(
+      'El código no es válido o ya venció. Revisa que sea el del correo más reciente o pide uno nuevo.'
+    );
+    expect(authErrorMessage(error, 'verify', undefined)).toBe(
+      'El código no es válido o ya venció. Revisa que sea el del correo más reciente o pide uno nuevo.'
+    );
+  });
+
+  it('otp_expired CON hora de envío señala el correo correcto: bug real de producción (código de un correo anterior)', () => {
+    const error = { name: 'AuthApiError', status: 403, code: 'otp_expired', message: 'Token has expired or is invalid' };
+    const resultado = authErrorMessage(error, 'verify', '7:26 a. m.');
+    expect(resultado).toContain('7:26 a. m.');
+    expect(resultado).not.toContain('Token has expired or is invalid');
+    // DISTINGUE del mensaje genérico: no es el mismo texto.
+    expect(resultado).not.toBe(authErrorMessage(error, 'verify'));
+  });
+
+  it('sentAtHora solo afecta a otp_expired en fase verify: otros códigos lo ignoran', () => {
+    const error = { name: 'AuthApiError', status: 429, code: 'over_email_send_rate_limit', message: 'Email rate limit exceeded' };
+    expect(authErrorMessage(error, 'send', '7:26 a. m.')).toBe(authErrorMessage(error, 'send'));
+  });
+
   it('fallo de red (AuthRetryableFetchError, status 0) da un mensaje de conexión', () => {
     const error = { name: 'AuthRetryableFetchError', status: 0, message: 'Failed to fetch' };
     const resultado = authErrorMessage(error, 'send');

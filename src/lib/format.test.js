@@ -12,7 +12,7 @@
 // escritos para valer en cualquier huso: no dependen de dónde corra la suite.
 
 import { describe, it, expect } from 'vitest';
-import { hoyColombia, fechaColombiaHoy, isoLocal, fechaDesdeISO, formatearFechaISO } from './format';
+import { hoyColombia, fechaColombiaHoy, isoLocal, fechaDesdeISO, formatearFechaISO, formatearHoraColombia } from './format';
 
 describe('hoyColombia', () => {
   it('devuelve una fecha ISO de solo día', () => {
@@ -89,5 +89,25 @@ describe('formatearFechaISO', () => {
 
   it('no revienta con una entrada vacía', () => {
     expect(formatearFechaISO(null)).toBe('');
+  });
+});
+
+describe('formatearHoraColombia — la hora del correo, no la del navegador', () => {
+  it('convierte un instante UTC a la hora de pared de Bogotá (UTC-5), con a. m./p. m.', () => {
+    // 12:26 UTC son las 7:26 a. m. en Bogotá.
+    expect(formatearHoraColombia('2026-09-15T12:26:00.000Z')).toBe('7:26 a. m.');
+    // 19:05 UTC son las 2:05 p. m. en Bogotá.
+    expect(formatearHoraColombia('2026-09-15T19:05:00.000Z')).toBe('2:05 p. m.');
+  });
+
+  it('acepta un timestamp en ms epoch, no solo una cadena ISO', () => {
+    const ms = Date.parse('2026-09-15T12:26:00.000Z');
+    expect(formatearHoraColombia(ms)).toBe('7:26 a. m.');
+  });
+
+  it('nunca queda en huso UTC (el síntoma del bug de "hoy" en otras vistas)', () => {
+    // A las 23:50 UTC en Bogotá son las 6:50 p. m.: si se colara el huso del
+    // navegador (UTC), este caso mostraría "11:50 p. m." en vez de "6:50 p. m.".
+    expect(formatearHoraColombia('2026-09-15T23:50:00.000Z')).toBe('6:50 p. m.');
   });
 });

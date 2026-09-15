@@ -22,6 +22,17 @@ export const getColombiaNow = () => {
   });
 };
 
+// Hora corta en horario de Colombia, 12h con a. m./p. m. (p. ej. "7:26 a. m.").
+// `fecha` acepta cualquier cosa que entienda `new Date(...)` (timestamp en ms,
+// Date, ISO). La usa AuthScreen para mostrar a qué hora se envió el código de
+// acceso: mostrar la hora en UTC del navegador la haría coincidir con un correo
+// distinto al que de verdad recibió la persona.
+export const formatearHoraColombia = (fecha) =>
+  new Date(fecha).toLocaleTimeString("es-CO", {
+    timeZone: "America/Bogota",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  });
+
 // ── Fechas ───────────────────────────────────────────────────────────────────
 // El producto vive en horario de Colombia (UTC-5, sin horario de verano), pero
 // varias vistas calculaban "hoy" con `new Date().toISOString()`, que da la fecha

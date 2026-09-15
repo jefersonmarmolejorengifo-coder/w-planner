@@ -410,7 +410,18 @@ const TOUR_SCRIPTS = {
 // Estado del tour (current_step, completed_at) sigue siendo global por
 // usuario en user_onboarding, switch entre proyectos con roles distintos
 // NO replaya el tour automáticamente; el usuario lo lanza con "🎓 Tour".
-export default function Onboarding({ supabase, authUser, activeTab, setActiveTab, forceOpen, forceRole = null, onForceHandled, enabled = true, projectId, isOwner = false }) {
+//
+// Excepción: crear un tablero nuevo como dueño. user_onboarding.completed_roles
+// (text[]) acumula los roles cuyo tour ya se completó o se saltó, sin importar
+// en qué tablero. justCreatedProjectId es una señal de UN SOLO USO que el
+// padre (ProductivityPlus) enciende solo en el instante de crear el tablero
+// (ProjectLandingScreen → onProjectLoaded(proj, { justCreated: true })); al
+// entrar a un tablero EXISTENTE nunca se enciende. Si projectId coincide con
+// ella y 'po' no está en completed_roles, el tour de PO arranca desde el paso
+// 0 (aunque el usuario ya haya completado el de participante antes); si 'po'
+// ya está, no se muestra nada automático. onJustCreatedHandled la apaga apenas
+// se lee, para que no se repita si el efecto se re-ejecuta.
+export default function Onboarding({ supabase, authUser, activeTab, setActiveTab, forceOpen, forceRole = null, onForceHandled, enabled = true, projectId, isOwner = false, justCreatedProjectId = null, onJustCreatedHandled }) {
   const [state, setState] = useState(null);
   const [role, setRole] = useState(null);  // de project_members
   const [shouldShowTour, setShouldShowTour] = useState(false);
@@ -424,10 +435,43 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
   const effectiveRole = role || (isOwner ? "po" : null);
   const showTour = enabled && shouldShowTour && !!viewRole && !!TOUR_SCRIPTS[viewRole];
 
+  // Declarada antes que los efectos que la usan (el de carga inicial y el de
+  // forceOpen la llaman desde dentro): moverla arriba evita la falsa alarma
+  // de "usar la variable antes de declararla" que da el linter con closures
+  // dentro de un IIFE async, aunque en tiempo de ejecución no hay problema
+  // real (los efectos corren después del render, cuando patch ya existe).
+  const patch = async (changes) => {
+    setState(prev => ({ ...(prev || {}), ...changes }));
+    if (!authUser?.id || !supabase) return;
+    // El estado ya se pintó de forma optimista arriba. Si la escritura falla, el
+    // avance del onboarding se pierde al recargar: al menos que quede la traza.
+    const { error } = await supabase.from("user_onboarding").upsert({ user_id: authUser.id, ...changes }, { onConflict: "user_id" });
+    if (error) {
+      if (error.code === "42703" && "completed_roles" in changes) {
+        // Degradación elegante: la migración que agrega completed_roles
+        // todavía no llegó a este entorno. Reintentamos sin esa columna para
+        // no perder current_step/completed_at/skipped.
+        const { completed_roles: _completed_roles, ...rest } = changes;
+        const { error: retryError } = await supabase.from("user_onboarding").upsert({ user_id: authUser.id, ...rest }, { onConflict: "user_id" });
+        if (retryError) console.error("[Onboarding] no se pudo guardar el avance (reintento sin completed_roles)", rest, retryError);
+        return;
+      }
+      console.error("[Onboarding] no se pudo guardar el avance", changes, error);
+    }
+  };
+
   // Carga estado global (current_step, completed_at) + role del proyecto actual.
+  //
+  // isJustCreated se recalcula en CADA corrida del efecto comparando projectId
+  // contra la prop justCreatedProjectId (no se lee una sola vez al montar):
+  // projectId y justCreatedProjectId pueden llegar del padre en renders
+  // distintos (batching aparte, es una prop externa), así que ambos están en
+  // el arreglo de dependencias y, si llegan desfasados, el efecto se
+  // re-ejecuta solo cuando coinciden.
   useEffect(() => {
     if (!authUser?.id || !supabase || !projectId) return;
     let cancelled = false;
+    const isJustCreated = !!justCreatedProjectId && justCreatedProjectId === projectId;
     (async () => {
       const [{ data: onboardData }, { data: roleData }] = await Promise.all([
         supabase.from("user_onboarding").select("*").eq("user_id", authUser.id).maybeSingle(),
@@ -438,6 +482,36 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
       const r = (typeof roleData === "string") ? roleData : null;
       setRole(r);
       const eff = r || (isOwner ? "po" : null);
+      // Si la migración que agrega completed_roles no llegó a este entorno,
+      // select("*") simplemente no trae la columna: se lee como [] (degradación
+      // elegante, ver patch()).
+      const completedRoles = Array.isArray(onboardData?.completed_roles) ? onboardData.completed_roles : [];
+
+      if (isJustCreated) {
+        // Señal de un solo uso: se consume apenas se evalúa, sin importar el
+        // resultado, para que un re-render no vuelva a disparar el tour en
+        // este mismo tablero.
+        onJustCreatedHandled?.();
+        if (isOwner && !completedRoles.includes("po")) {
+          // Primera vez como PO (aunque haya un tour de participante ya
+          // completado en otro tablero): arranca el de PO desde cero.
+          // Reiniciamos current_step/completed_at/skipped con el mismo patrón
+          // que "Volver a ver tour" (forceOpen, más abajo). Reflejamos primero
+          // completed_roles en el estado local: patch() solo cambia los 3
+          // campos del reset, y si no se refleja completed_roles ANTES,
+          // withRoleCompleted() (al completar/saltar) partiría de [] y
+          // pisaría en la DB los roles ya completados en otros tableros.
+          setState({ ...(onboardData || {}), completed_roles: completedRoles });
+          setViewRole("po");
+          setShouldShowTour(true);
+          await patch({ current_step: 0, completed_at: null, skipped: false });
+        } else {
+          // 'po' ya se completó o se saltó antes: tablero nuevo, sin tour
+          // automático.
+          setState(onboardData || { current_step: 0, completed_at: null, skipped: false, completed_roles: completedRoles });
+        }
+        return;
+      }
 
       if (!onboardData) {
         setState({ current_step: 0, completed_at: null, skipped: false });
@@ -450,7 +524,7 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
       }
     })();
     return () => { cancelled = true; };
-  }, [authUser?.id, projectId, isOwner]);
+  }, [authUser?.id, projectId, isOwner, justCreatedProjectId]);
 
   // Soporte para "Volver a ver tour" / "ver otro onboarding" desde el header.
   // forceRole permite ver el tour de cualquier rol; si no se pasa, usa el rol
@@ -466,22 +540,20 @@ export default function Onboarding({ supabase, authUser, activeTab, setActiveTab
     onForceHandled?.();
   }, [forceOpen]);
 
-  const patch = async (changes) => {
-    setState(prev => ({ ...(prev || {}), ...changes }));
-    if (!authUser?.id || !supabase) return;
-    // El estado ya se pintó de forma optimista arriba. Si la escritura falla, el
-    // avance del onboarding se pierde al recargar: al menos que quede la traza.
-    const { error } = await supabase.from("user_onboarding").upsert({ user_id: authUser.id, ...changes }, { onConflict: "user_id" });
-    if (error) console.error("[Onboarding] no se pudo guardar el avance", changes, error);
+  // Agrega `r` a completed_roles sin duplicar, leyendo el estado local actual
+  // (o [] si aún no existe / la columna no llegó a este entorno).
+  const withRoleCompleted = (r) => {
+    const current = Array.isArray(state?.completed_roles) ? state.completed_roles : [];
+    return current.includes(r) ? current : [...current, r];
   };
 
   const skipOnboarding = async () => {
-    await patch({ skipped: true });
+    await patch({ skipped: true, completed_roles: withRoleCompleted(viewRole) });
     setShouldShowTour(false);
   };
 
   const finishTour = async () => {
-    await patch({ completed_at: new Date().toISOString(), skipped: false });
+    await patch({ completed_at: new Date().toISOString(), skipped: false, completed_roles: withRoleCompleted(viewRole) });
     setShouldShowTour(false);
   };
 

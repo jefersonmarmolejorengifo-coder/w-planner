@@ -269,7 +269,7 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null,
       return;
     }
     localStorage.setItem('pp_project_id', String(data.id));
-    onProjectLoaded(data);
+    onProjectLoaded(data, { justCreated: true });
   };
 
   const createFromTemplate = async () => {
@@ -338,7 +338,7 @@ export default function ProjectLandingScreen({ onProjectLoaded, authUser = null,
     }
     if (avisos.length) setErr(`El tablero se creó, pero no se pudieron añadir ${avisos.join(' ni ')}.`);
     localStorage.setItem('pp_project_id', String(proj.id));
-    onProjectLoaded(proj);
+    onProjectLoaded(proj, { justCreated: true });
   };
 
   const joinProject = async () => {

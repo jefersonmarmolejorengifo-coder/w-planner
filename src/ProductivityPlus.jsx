@@ -368,6 +368,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("board");
   const [forceTour, setForceTour] = useState(false);
   const [forceTourRole, setForceTourRole] = useState(null); // rol elegido en el selector de tours (null = mi rol)
+  // Señal de un solo uso hacia Onboarding: el id del tablero recién creado
+  // (no uno existente al que se entra/une). Onboarding la apaga apenas la lee.
+  const [justCreatedProjectId, setJustCreatedProjectId] = useState(null);
   // myRole: rol del usuario en el proyecto actual (po / scrum_master / participant).
   // null mientras carga o si no es miembro. Usado para gating de tabs en Fase B.
   const [myRole, setMyRole] = useState(null);
@@ -674,11 +677,15 @@ export default function App() {
           authUser={authUser}
           initialJoinCode={pendingJoin?.code || ""}
           initialJoinError={pendingJoin?.error || ""}
-          onProjectLoaded={(proj) => {
+          onProjectLoaded={(proj, opts) => {
             setProject(proj);
             setProjectId(proj.id);
             setShowProjectLanding(false);
             setPendingJoin(null);
+            // Señal de un solo uso para Onboarding: solo los dos caminos de
+            // CREAR tablero (ProjectLandingScreen) la encienden; unirse a uno
+            // existente o abrir uno de "Mis proyectos" no la toca.
+            if (opts?.justCreated) setJustCreatedProjectId(proj.id);
             loadAllForProject(proj.id, proj, authUser);
           }} />
       )}
@@ -1281,6 +1288,8 @@ export default function App() {
         enabled={!showProjectLanding && !loading && !!projectId}
         projectId={projectId}
         isOwner={isOwnerOfProject}
+        justCreatedProjectId={justCreatedProjectId}
+        onJustCreatedHandled={() => setJustCreatedProjectId(null)}
       />
     </>
   );

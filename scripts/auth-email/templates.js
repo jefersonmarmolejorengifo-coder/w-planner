@@ -177,9 +177,19 @@ function emailChangeContent() {
 // `usesCode` documenta si la plantilla es de las 5 que llevan {{ .Token }}
 // (true) o la única de enlace, email_change (false); lo usa el CLI de
 // --preview solo para el mensaje en consola, no cambia el HTML.
+//
+// Asunto con el código al inicio (decisión del dueño, 2026-09-15). Todos los
+// correos de acceso llevaban el mismo asunto: Outlook/Microsoft 365 los
+// agrupaba en una sola conversación y la persona escribía el código de un
+// correo anterior, que ya estaba anulado porque cada pedido nuevo anula los
+// anteriores. En los logs del 2026-09-15 se ven verificaciones a los 9-16 s
+// del envío, con el token vigente sin usar. Con el código en el asunto, cada
+// correo queda separado, el último arriba, y el código se lee sin abrirlo.
+// Costo aceptado por el dueño: el código se ve en la notificación del
+// teléfono bloqueado.
 export const AUTH_EMAIL_TEMPLATES = {
   magic_link: {
-    subject: 'Tu código de acceso a Productivity-Plus',
+    subject: '{{ .Token }} es tu código de acceso a Productivity-Plus',
     usesCode: true,
     html: layout({
       title: 'Tu código de acceso a Productivity-Plus',
@@ -189,7 +199,7 @@ export const AUTH_EMAIL_TEMPLATES = {
     }),
   },
   confirmation: {
-    subject: 'Bienvenido a Productivity-Plus: tu código de acceso',
+    subject: '{{ .Token }} es tu código para empezar en Productivity-Plus',
     usesCode: true,
     html: layout({
       title: 'Bienvenido a Productivity-Plus',
@@ -199,7 +209,7 @@ export const AUTH_EMAIL_TEMPLATES = {
     }),
   },
   recovery: {
-    subject: 'Tu código de acceso a Productivity-Plus',
+    subject: '{{ .Token }} es tu código de acceso a Productivity-Plus',
     usesCode: true,
     html: layout({
       title: 'Tu código de acceso a Productivity-Plus',
@@ -209,7 +219,7 @@ export const AUTH_EMAIL_TEMPLATES = {
     }),
   },
   invite: {
-    subject: 'Te invitaron a Productivity-Plus',
+    subject: '{{ .Token }} es tu código: te invitaron a Productivity-Plus',
     usesCode: true,
     html: layout({
       title: 'Te invitaron a Productivity-Plus',
@@ -219,7 +229,7 @@ export const AUTH_EMAIL_TEMPLATES = {
     }),
   },
   reauthentication: {
-    subject: 'Confirma que eres tú en Productivity-Plus',
+    subject: '{{ .Token }} es tu código para confirmar que eres tú en Productivity-Plus',
     usesCode: true,
     html: layout({
       title: 'Confirma que eres tú en Productivity-Plus',
@@ -275,6 +285,9 @@ export function patchFingerprint() {
 // ni desbloquear el teléfono. Devuelve null si el HTML no trae ese div (para
 // que la prueba falle alto y claro en vez de comparar contra una cadena
 // vacía).
+// Nota 2026-09-15: el código SÍ va al inicio del ASUNTO por decisión del
+// dueño (ver AUTH_EMAIL_TEMPLATES). El preheader se mantiene sin él para no
+// repetirlo.
 export function extractPreheader(html) {
   const match = html.match(/<div style="[^"]*mso-hide:all[^"]*">([\s\S]*?)<\/div>/);
   return match ? match[1] : null;

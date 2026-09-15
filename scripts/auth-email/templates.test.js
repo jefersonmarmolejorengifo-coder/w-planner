@@ -67,6 +67,13 @@ describe.each(CODE_KEYS)('plantilla de código: %s', (key) => {
     expect(tpl.subject.trim().length).toBeGreaterThan(0);
   });
 
+  // Decisión del dueño (2026-09-15): con el mismo asunto en todos los correos,
+  // Outlook los agrupaba y la persona escribía el código de un correo viejo,
+  // que ya estaba anulado. Con el código al inicio, cada correo queda separado.
+  it('el asunto empieza con el código ({{ .Token }}): cada correo queda separado y el último arriba', () => {
+    expect(tpl.subject.startsWith('{{ .Token }}')).toBe(true);
+  });
+
   it('contiene {{ .Token }}', () => {
     expect(tpl.html).toContain('{{ .Token }}');
   });
@@ -88,6 +95,7 @@ it('email_change usa el enlace de confirmación (no tiene código propio: Supaba
   const tpl = AUTH_EMAIL_TEMPLATES.email_change;
   expect(tpl.html).toContain('{{ .ConfirmationURL }}');
   expect(tpl.html).not.toContain('{{ .Token }}');
+  expect(tpl.subject).not.toContain('{{ .Token }}');
 });
 
 describe.each(ALL_KEYS)('reglas generales: %s', (key) => {

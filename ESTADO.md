@@ -12,13 +12,14 @@
 - Verificación en producción: código equivocado se rechaza, el correcto da sesión, reutilizarlo se rechaza.
 - **Correos propios de la app con la misma identidad** (invitación a proyecto y apertura de retro) sobre una capa compartida `api/_email-brand.js`; el patch de Supabase quedó idéntico byte a byte.
 - Cierre de 5 hallazgos de la auditoría triple: cuenta regresiva robusta a pestaña en segundo plano, scroll del login en pantallas bajas, anillo de foco en los botones principales, `supabase/config.toml` alineado (8 dígitos / 15 min) y correos de la app.
+- **Plantillas publicadas en Supabase** con autorización de Jefer (14/14 claves verificadas) y correo real con código enviado a la cuenta corporativa: en los logs no hubo ningún acceso del escáner de Microsoft.
+- **Plan Pro Team sin cobro** para `jdmarmolejo@ingeniopichichi.com` (cuenta de Jefer) con la función oficial `admin_set_user_plan`: activo, sin suscripción de Mercado Pago ni vencimiento. Verificado como lo ve la app (`user_ia_capacity`: Pro Team, 5 proyectos IA / 9 en total).
 
 ## Qué falta
 
 | Pendiente | Depende de | Prioridad |
 |---|---|---|
-| Publicar las plantillas en Supabase: `node scripts/apply-auth-email-templates.mjs --apply` | Autorización de Jefer (el clasificador de permisos bloquea el cambio de config de producción) | **Urgente**: hasta entonces el correo sigue trayendo el enlace viejo |
-| Correo de prueba real + revisar cómo se ve en Gmail/Outlook | Lo anterior | Alta |
+| Entrar con el código que llegó a jdmarmolejo@ingeniopichichi.com y confirmar el plan Pro Team en la app | Jefer | Alta |
 | Exigir `SUPABASE_PROJECT_REF` explícito en `--apply` y un modo `--check` que falle si hay deriva (H-056, H-058) | — | Media |
 | Aviso cuando alguien abre un enlace viejo que ya no sirve (H-065) | — | Baja |
 | CAPTCHA en el envío de códigos + subir `rate_limit_email_sent` (hoy 30/h para todo el proyecto) | Decisión de Jefer (Turnstile o hCaptcha) | Media |

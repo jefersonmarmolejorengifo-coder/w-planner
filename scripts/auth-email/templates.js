@@ -49,50 +49,25 @@
 // templates.test.js lo verifica clave por clave.
 
 import { OTP_LENGTH, OTP_TTL_MINUTES } from '../../src/lib/otp.js';
+import { COLOR, FONT_STACK, MONO_STACK, SITE_URL, heading, paragraph, ctaButton, layout } from '../../api/_email-brand.js';
 
-// URL de la app (pantalla de acceso) y del sitio de marketing. Son
-// constantes propias de Productivity-Plus, no el `{{ .SiteURL }}` de
-// Supabase (que depende de una config externa que no controlamos desde
-// aquí): así el botón de "invite" y el pie de página siempre apuntan a
+// Reexportada tal cual: la consumen apply-auth-email-templates.mjs y
+// templates.test.js. Colores, stacks de fuente y layout ahora viven en
+// api/_email-brand.js (compartidos con los correos que envía la propia app
+// por Resend — ver api/invite.js y api/open-retro.js); esta plantilla ya no
+// define su propia identidad visual, la importa.
+export { SITE_URL };
+
+// URL de la app (pantalla de acceso). Constante propia de Productivity-Plus,
+// no el `{{ .SiteURL }}` de Supabase (que depende de una config externa que
+// no controlamos desde aquí): así el botón de "invite" siempre apunta a
 // donde queremos, sin depender de esa config.
 export const APP_URL = 'https://productivityplus.softatumedida.com/app';
-export const SITE_URL = 'https://productivityplus.softatumedida.com';
 
-// ─── Identidad visual (ver imagen OG de referencia) ────────────────────────
-// orange y turquoise son los acentos de marca (logo "P+", franja tricolor):
-// decorativos, no llevan texto encima y no están sujetos a AA de texto.
-// buttonBg y linkTeal son variantes MÁS OSCURAS para texto/UI, calculadas y
-// verificadas con la fórmula de contraste relativo de WCAG 2.x en Node
-// (ver notas de ctaButton y footerBlock/emailChangeContent):
-//   #ec6c04 (orange) sobre blanco   → 3.13:1  ← falla AA (mínimo 4.5:1)
-//   #bf5803 (buttonBg) sobre blanco → 4.55:1  ← pasa
-//   #149cac (turquoise) como enlace sobre lavanda → 2.94:1 ← falla
-//   #0d6d78 (linkTeal) sobre lavanda               → 5.39:1 ← pasa
-const COLOR = {
-  navyDeep: '#0d0d1a',
-  navy: '#1a1a2e',
-  navyMid: '#2d1b4e',
-  orange: '#ec6c04',
-  turquoise: '#149cac',
-  buttonBg: '#bf5803',
-  linkTeal: '#0d6d78',
-  violet: '#542c9c',
-  ink: '#1a1a2e',
-  inkSoft: '#4a4560',
-  lavender: '#f3f1f8',
-  codeBg: '#fff7ef',
-  codeBorder: '#f3c896',
-  noteBg: '#faf9fd',
-  noteBorder: '#ede8f8',
-};
-
-const FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-const MONO_STACK = "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace";
-
-// Relleno invisible para que, tras el preheader real, los clientes de correo
-// (Gmail, Outlook web) no completen la vista previa con el primer texto
-// visible del cuerpo. Es el truco estándar de &zwnj; + &nbsp; repetido.
-const PREHEADER_PADDING = '&zwnj;&nbsp;'.repeat(120);
+// Única línea del pie que varía por plantilla de Auth (las 6 comparten el
+// mismo texto): quién solicitó el correo. El resto del pie (marca + enlace
+// al sitio) lo pone api/_email-brand.js.
+const AUTH_FOOTER_NOTE = 'Recibes este correo porque se solicitó acceso con {{ .Email }}.';
 
 // ─── Piezas reutilizables del contenido (dentro de la tarjeta blanca) ──────
 
@@ -129,30 +104,8 @@ function securityNote() {
       </table>`;
 }
 
-// Botón "bulletproof": celda de color sólido + <a> con padding, sin
-// background-image ni nada que Outlook ignore de forma visible.
-// bgcolor usa buttonBg (#bf5803), no el orange de marca (#ec6c04): texto
-// blanco de 15px sobre #ec6c04 da 3.13:1 y falla AA (mínimo 4.5:1 para
-// texto que no es "grande"; 15px/700 no llega al umbral de texto grande).
-// rel="noopener noreferrer" evita que la pestaña abierta controle esta.
-function ctaButton(url, label) {
-  return `
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:28px auto 4px;">
-        <tr>
-          <td align="center" bgcolor="${COLOR.buttonBg}" style="border-radius:10px;">
-            <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:15px 34px;font-family:${FONT_STACK};font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">${label}</a>
-          </td>
-        </tr>
-      </table>`;
-}
-
-function heading(text) {
-  return `<h1 style="margin:0 0 14px;font-family:${FONT_STACK};font-size:22px;font-weight:800;color:${COLOR.ink};">${text}</h1>`;
-}
-
-function paragraph(html) {
-  return `<p style="margin:0 0 6px;font-family:${FONT_STACK};font-size:14.5px;line-height:1.7;color:${COLOR.inkSoft};">${html}</p>`;
-}
+// ctaButton, heading y paragraph ahora viven en api/_email-brand.js
+// (compartidos con api/invite.js y api/open-retro.js) — importados arriba.
 
 // ─── Contenido propio de cada plantilla ────────────────────────────────────
 
@@ -214,114 +167,10 @@ function emailChangeContent() {
       </p>`;
 }
 
-// ─── Pie de página (tabla propia, sobre el fondo lavanda, sin sombra) ──────
-// Todos los tamaños de texto de aquí son "pequeños" para WCAG (por debajo
-// del umbral de texto grande), así que exigen 4.5:1 sobre el fondo lavanda
-// (#f3f1f8). Antes la última línea usaba un gris (#9490a8) que daba 2.75:1
-// y fallaba; ahora usa inkSoft (8.11:1). El enlace usa linkTeal, no el
-// turquoise decorativo (ese da 2.94:1 sobre lavanda, linkTeal da 5.39:1).
-function footerBlock() {
-  const siteLabel = SITE_URL.replace(/^https?:\/\//, '');
-  return `
-      <p style="margin:0 0 6px;font-family:${FONT_STACK};font-size:12px;font-weight:700;color:${COLOR.violet};letter-spacing:0.02em;">Productivity-Plus · Gestión estratégica para equipos</p>
-      <p style="margin:0 0 6px;font-family:${FONT_STACK};font-size:11.5px;color:${COLOR.inkSoft};">Un producto de Soft a Tu Medida</p>
-      <p style="margin:0 0 14px;font-family:${FONT_STACK};font-size:11.5px;"><a href="${SITE_URL}" style="color:${COLOR.linkTeal};text-decoration:none;">${siteLabel}</a></p>
-      <p style="margin:0;font-family:${FONT_STACK};font-size:10.5px;color:${COLOR.inkSoft};line-height:1.5;">Recibes este correo porque se solicitó acceso con {{ .Email }}.</p>`;
-}
-
-// Cabecera oscura: logotipo en texto (visible aunque el cliente de correo
-// bloquee imágenes, porque no es una imagen). La barra tricolor NO va aquí:
-// es su propia fila entre esta cabecera y el cuerpo blanco (ver tricolorRow),
-// para no chocar con las esquinas redondeadas de ninguna de las dos.
-function headerBlock() {
-  return `
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-            <tr>
-              <td align="center" style="padding:34px 32px 28px;">
-                <span style="font-family:${FONT_STACK};font-size:34px;font-weight:800;line-height:1;">
-                  <span style="color:${COLOR.orange};">P</span><span style="color:${COLOR.turquoise};">+</span>
-                </span>
-                <div style="margin-top:10px;font-family:${FONT_STACK};font-size:12px;font-weight:700;letter-spacing:4px;color:#ffffff;text-transform:uppercase;">PRODUCTIVITY-PLUS</div>
-              </td>
-            </tr>
-          </table>`;
-}
-
-// Franja tricolor como fila propia de la tabla de la tarjeta, entre la
-// cabecera oscura (radio arriba) y el cuerpo blanco (radio abajo): al ser
-// un rectángulo recto intercalado, no se superpone a ninguna esquina.
-function tricolorRow() {
-  return `
-        <tr>
-          <td style="padding:0;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <td width="33.34%" height="4" style="background-color:${COLOR.orange};font-size:0;line-height:0;">&nbsp;</td>
-                <td width="33.33%" height="4" style="background-color:${COLOR.turquoise};font-size:0;line-height:0;">&nbsp;</td>
-                <td width="33.33%" height="4" style="background-color:${COLOR.violet};font-size:0;line-height:0;">&nbsp;</td>
-              </tr>
-            </table>
-          </td>
-        </tr>`;
-}
-
-// ─── Layout compartido: documento completo, email-safe ────────────────────
-//
-// Maquetación con tablas (Gmail, Outlook escritorio/web, Apple Mail, móvil),
-// sin un solo comentario HTML (ver nota de cabecera del archivo):
-// - Ancho con la técnica híbrida en las dos tablas de contenido: atributo
-//   `width="100%"` + `style="max-width:560px"` (nunca `width` fijo en el
-//   estilo, ver la nota de cabecera del archivo — con ancho fijo el móvil
-//   se desborda).
-// - Dos tablas separadas dentro del mismo `<td>` centrado: la TARJETA
-//   (cabecera + franja + cuerpo, con sombra y esquinas redondeadas) y el
-//   PIE (sin sombra, sobre el mismo fondo lavanda de la página, para que se
-//   lea como que está fuera de la tarjeta en vez de como una segunda caja).
-// - Cero JS, cero <link>, cero fuentes web: todo inline y con stack de
-//   fuentes del sistema, para que sobreviva a cualquier sanitizador.
-function layout({ title, preheader, contentHtml }) {
-  return `<!DOCTYPE html>
-<html lang="es" xmlns="http://www.w3.org/1999/xhtml">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="color-scheme" content="light">
-<meta name="supported-color-schemes" content="light">
-<title>${title}</title>
-</head>
-<body style="margin:0;padding:0;background-color:${COLOR.lavender};">
-<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;color:${COLOR.lavender};">${preheader}${PREHEADER_PADDING}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${COLOR.lavender};">
-  <tr>
-    <td align="center" style="padding:32px 16px;">
-      <table role="presentation" width="100%" align="center" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;margin:0 auto;box-shadow:0 18px 40px rgba(13,13,26,0.12);">
-        <tr>
-          <td style="background-color:${COLOR.navy};background-image:linear-gradient(135deg, ${COLOR.navyDeep} 0%, ${COLOR.navy} 45%, ${COLOR.navyMid} 100%);border-radius:16px 16px 0 0;padding:0;">
-${headerBlock()}
-          </td>
-        </tr>
-${tricolorRow()}
-        <tr>
-          <td style="background-color:#ffffff;border-radius:0 0 16px 16px;padding:40px 36px 34px;">
-${contentHtml}
-          </td>
-        </tr>
-      </table>
-      <div style="height:24px;line-height:24px;font-size:0;">&nbsp;</div>
-      <table role="presentation" width="100%" align="center" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;margin:0 auto;">
-        <tr>
-          <td align="center" style="padding:0 24px 8px;">
-${footerBlock()}
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-</body>
-</html>`;
-}
+// footerBlock, headerBlock, tricolorRow y layout ahora viven en
+// api/_email-brand.js. El footer de las 6 plantillas comparte la misma
+// última línea (AUTH_FOOTER_NOTE, definida arriba), pasada como `footerNote`
+// en cada llamada a layout() de abajo.
 
 // ─── Ensamblaje: una entrada por clave de Supabase Auth ────────────────────
 // `usesCode` documenta si la plantilla es de las 5 que llevan {{ .Token }}
@@ -335,6 +184,7 @@ export const AUTH_EMAIL_TEMPLATES = {
       title: 'Tu código de acceso a Productivity-Plus',
       preheader: `Tu código de acceso a Productivity-Plus · vence en ${OTP_TTL_MINUTES} minutos`,
       contentHtml: magicLinkContent(),
+      footerNote: AUTH_FOOTER_NOTE,
     }),
   },
   confirmation: {
@@ -344,6 +194,7 @@ export const AUTH_EMAIL_TEMPLATES = {
       title: 'Bienvenido a Productivity-Plus',
       preheader: `Bienvenido a Productivity-Plus: tu código de acceso · vence en ${OTP_TTL_MINUTES} minutos`,
       contentHtml: confirmationContent(),
+      footerNote: AUTH_FOOTER_NOTE,
     }),
   },
   recovery: {
@@ -353,6 +204,7 @@ export const AUTH_EMAIL_TEMPLATES = {
       title: 'Tu código de acceso a Productivity-Plus',
       preheader: `Tu código de acceso a Productivity-Plus · vence en ${OTP_TTL_MINUTES} minutos`,
       contentHtml: recoveryContent(),
+      footerNote: AUTH_FOOTER_NOTE,
     }),
   },
   invite: {
@@ -362,6 +214,7 @@ export const AUTH_EMAIL_TEMPLATES = {
       title: 'Te invitaron a Productivity-Plus',
       preheader: 'Te invitaron a Productivity-Plus · entra con tu código de acceso',
       contentHtml: inviteContent(),
+      footerNote: AUTH_FOOTER_NOTE,
     }),
   },
   reauthentication: {
@@ -371,6 +224,7 @@ export const AUTH_EMAIL_TEMPLATES = {
       title: 'Confirma que eres tú en Productivity-Plus',
       preheader: `Confirma que eres tú en Productivity-Plus · vence en ${OTP_TTL_MINUTES} minutos`,
       contentHtml: reauthenticationContent(),
+      footerNote: AUTH_FOOTER_NOTE,
     }),
   },
   email_change: {
@@ -380,6 +234,7 @@ export const AUTH_EMAIL_TEMPLATES = {
       title: 'Confirma tu nuevo correo en Productivity-Plus',
       preheader: 'Confirma tu nuevo correo para seguir usando Productivity-Plus',
       contentHtml: emailChangeContent(),
+      footerNote: AUTH_FOOTER_NOTE,
     }),
   },
 };

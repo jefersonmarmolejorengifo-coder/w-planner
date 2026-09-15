@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from '../supabaseClient';
-import { OTP_LENGTH, OTP_TTL_MINUTES, RESEND_COOLDOWN_SECONDS, normalizeEmail, isValidEmail, normalizeOtpInput, authErrorMessage } from '../lib/otp';
+import { OTP_LENGTH, OTP_TTL_MINUTES, RESEND_COOLDOWN_SECONDS, normalizeEmail, isValidEmail, normalizeOtpInput, authErrorMessage, remainingSeconds } from '../lib/otp';
 
 // ─── AuthScreen ───────────────────────────────────────────
 // Inicio de sesión por CÓDIGO DE ACCESO (passwordless). El usuario escribe su
@@ -25,9 +25,25 @@ export default function AuthScreen() {
   const sendingRef = useRef(false);
   const codeInputRef = useRef(null);
   const cooldownIntervalRef = useRef(null);
+  const cooldownEndAtRef = useRef(0); // timestamp (ms) al que se habilita el reenvío; 0 = sin cooldown activo
 
   useEffect(() => () => {
     if (cooldownIntervalRef.current) clearInterval(cooldownIntervalRef.current);
+  }, []);
+
+  // La pestaña puede quedar en segundo plano mientras la persona va a buscar
+  // el código a su correo: los navegadores congelan los timers ahí, así que
+  // el setInterval del cooldown se atrasa. Al volver a primer plano
+  // recalculamos de una vez contra la hora de fin absoluta, en vez de
+  // esperar a que el intervalo "se ponga al día" tick a tick.
+  useEffect(() => {
+    const recalcular = () => {
+      if (document.visibilityState === 'visible' && cooldownEndAtRef.current) {
+        setCooldown(remainingSeconds(cooldownEndAtRef.current, Date.now()));
+      }
+    };
+    document.addEventListener('visibilitychange', recalcular);
+    return () => document.removeEventListener('visibilitychange', recalcular);
   }, []);
 
   // Devuelve el foco al input del código cuando termina un intento fallido.
@@ -43,12 +59,13 @@ export default function AuthScreen() {
 
   const arrancarCooldown = () => {
     if (cooldownIntervalRef.current) clearInterval(cooldownIntervalRef.current);
-    setCooldown(RESEND_COOLDOWN_SECONDS);
+    const finDeEspera = Date.now() + RESEND_COOLDOWN_SECONDS * 1000;
+    cooldownEndAtRef.current = finDeEspera;
+    setCooldown(remainingSeconds(finDeEspera, Date.now()));
     cooldownIntervalRef.current = setInterval(() => {
-      setCooldown(c => {
-        if (c <= 1) { clearInterval(cooldownIntervalRef.current); cooldownIntervalRef.current = null; return 0; }
-        return c - 1;
-      });
+      const restante = remainingSeconds(cooldownEndAtRef.current, Date.now());
+      setCooldown(restante);
+      if (restante <= 0) { clearInterval(cooldownIntervalRef.current); cooldownIntervalRef.current = null; cooldownEndAtRef.current = 0; }
     }, 1000);
   };
 
@@ -134,14 +151,15 @@ export default function AuthScreen() {
   const usarOtroCorreo = () => {
     setStep('email'); setCode(''); setError(''); setNotice(''); setVerified(false);
     if (cooldownIntervalRef.current) { clearInterval(cooldownIntervalRef.current); cooldownIntervalRef.current = null; }
+    cooldownEndAtRef.current = 0;
     setCooldown(0);
   };
 
   const mailMostrado = normalizeEmail(email);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "linear-gradient(160deg,#0d0d1a 0%,#1a1a2e 50%,#2d1b4e 100%)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9998, padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 420 }}>
+    <div style={{ position: "fixed", inset: 0, background: "linear-gradient(160deg,#0d0d1a 0%,#1a1a2e 50%,#2d1b4e 100%)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 9998, padding: 20, overflowY: "auto" }}>
+      <div style={{ width: "100%", maxWidth: 420, margin: "auto" }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <div style={{ fontSize: 72, fontWeight: 900, background: "linear-gradient(135deg,#ec6c04,#f5a623,#149cac)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", lineHeight: 1, letterSpacing: -3 }}>P+</div>
@@ -181,7 +199,7 @@ export default function AuthScreen() {
               {error && <div role="alert" style={{ fontSize: 12, color: "#f87171", fontWeight: 500, marginTop: 10 }}>{error}</div>}
               {!error && notice && <div aria-live="polite" style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: 500, marginTop: 10 }}>{notice}</div>}
 
-              <button type="submit" disabled={loading || code.length !== OTP_LENGTH}
+              <button type="submit" className="pp-auth-primary" disabled={loading || code.length !== OTP_LENGTH}
                 style={{ background: (loading || code.length !== OTP_LENGTH) ? "#555" : "linear-gradient(135deg,#bf5803,#a94d02)", color: "#fff", border: "none", borderRadius: 10, padding: "13px", cursor: (loading || code.length !== OTP_LENGTH) ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: (loading || code.length !== OTP_LENGTH) ? "none" : "0 4px 20px rgba(191,88,3,0.4)", marginTop: 16, fontFamily: "inherit" }}>
                 {verified ? "Entrando…" : loading ? "Verificando…" : "Entrar →"}
               </button>
@@ -210,7 +228,7 @@ export default function AuthScreen() {
                 <input id="auth-email" style={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@correo.com" autoFocus disabled={loading} />
               </div>
               {error && <div role="alert" style={{ fontSize: 12, color: "#f87171", fontWeight: 500 }}>{error}</div>}
-              <button type="submit" disabled={loading}
+              <button type="submit" className="pp-auth-primary" disabled={loading}
                 style={{ background: loading ? "#555" : "linear-gradient(135deg,#bf5803,#a94d02)", color: "#fff", border: "none", borderRadius: 10, padding: "13px", cursor: loading ? "default" : "pointer", fontWeight: 700, fontSize: 14, width: "100%", boxShadow: loading ? "none" : "0 4px 20px rgba(191,88,3,0.4)", marginTop: 4, fontFamily: "inherit" }}>
                 {loading ? "Enviando código…" : "Enviarme el código →"}
               </button>

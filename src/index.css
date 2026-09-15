@@ -92,6 +92,17 @@ body {
   border-radius: 4px;
 }
 
+/* Botones primarios de AuthScreen (H-009 puntual): llevan un boxShadow
+   INLINE decorativo (halo de color a juego con el degradado del botón), y un
+   estilo inline siempre gana a una regla de :focus-visible normal, así que
+   tapaba el anillo de foco de arriba. !important es la única forma de
+   recuperar el foco por teclado (WCAG 2.4.7) sin tocar el estilo inline ni
+   el resto de botones de la app. */
+.pp-auth-primary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #149cac !important;
+}
+
 /* Indicator Chips Component */
 .indicator-chip {
   display: inline-flex;

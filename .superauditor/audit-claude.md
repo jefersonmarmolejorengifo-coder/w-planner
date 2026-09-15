@@ -1,44 +1,77 @@
-# Auditoría Claude — 87cb0d0..HEAD
+# Auditoría Claude — 761daf9..f81fac9
 
 ## Metadatos
-- Auditor: Claude (Anthropic), Auditor A (orquestador)
-- Fecha: 2026-06-26
-- Modelo: claude-opus-4-8 (el mejor de la línea CLAUDE — sin nota de degradado)
-- Proyecto: f:/proyectos/w-planner
-- Alcance: los 9 commits de hoy. Esta ronda audita los FIXES de hoy (qué quedó frágil), no re-audita lo ya cerrado.
+- Auditor: Claude (Anthropic) — Auditor A, orquestador
+- Fecha: 2026-09-14
+- Modelo: claude-opus-5 (superior a la primera opción de `models.conf`)
+- Proyecto: F:/proyectos/w-planner
+- Alcance: commit f81fac9 (login por código OTP + plantillas de Supabase Auth). Evidencia adicional: logs de Auth/gateway de producción, dry-run real de la config y prueba de punta a punta en producción.
 
 ## Resumen
-Los cambios de hoy cierran la mayoría de los hallazgos abiertos de la ronda 2026-06-24: race de cuota de chat (era A32/CRÍTICO), tier en pago recurrente (A36), retro atómico (A37), validación de periodos (A33), responsive header/Gantt (A40/A41/A42), alert/confirm→Toast (A43), lazy + chunks (A26/A27), y durabilidad de comisión al hub (H-048). El criterio de seguridad fue bueno: los RPC nuevos de cuota/outbox se conceden SOLO a `service_role`, y el RPC de retro usa SECURITY INVOKER apoyándose en las RLS existentes en vez de re-implementar autorización. **No hay críticos nuevos.** Quedan hallazgos MEDIO/BAJO: validación de fecha que acepta fechas con formato válido pero inexistentes, gap residual de fail-open en el enqueue del outbox, y un par de cambios de comportamiento sutiles. El único CRÍTICO vigente es el heredado A29/S-001 (secretos en `.env.local`, rotación diferida por decisión del dueño).
+El cambio ataca la causa raíz correcta, demostrada con logs: Microsoft 365 Safe Links abre el enlace del correo ~20 s después de que llega y gasta el token de un solo uso. El flujo de código (`signInWithOtp` → `verifyOtp({ type: 'email' })`) funciona en producción (probado: código equivocado 403, correcto da sesión, reutilizado 403). El riesgo principal ya no está en el código sino en la operación: la configuración de Auth (plantillas y vigencia) se publica con un paso manual separado del deploy, y hoy está desincronizada de la app desplegada.
 
 ## Hallazgos
 
 ### Eje 1 — Arquitectura
-- **A1 · OK · `vite.config.js`** — `advancedChunks` (vendor-react / vendor-supabase) es la API correcta de Rolldown para Vite 8; el index baja 334→163 kB (gz 100→45.5). Cierra A27. Verificado en build.
-- **A2 · OK · `src/features/team/TeamPulseTab.jsx` + lazy** — TeamPulseTab extraído a feature + React.lazy (cierra A26 parcial). IntroScreen se dejó eager con justificación correcta (se muestra en cada carga; lazy agregaría delay en la pantalla inicial).
-- **A3 · MEDIO · `api/cron.js:285+`** — el drain del outbox se agrega ANTES de los jobs de reportes en el MISMO handler (`maxDuration=60s`). Con `HUB_DRAIN_LIMIT=5` × timeout hub 8s ≈ 40s peor caso, deja poco margen para un reporte IA (~55s). Si coinciden backlog de outbox + ventana de reporte, el reporte podría cortarse por maxDuration. Recomendación: drain en su propio cron, o límite 3.
-- **A4 · BAJO · `src/hooks/useTasks.js:15`** — `useToast()` dentro de un hook de datos acopla la capa de datos a `<ToastProvider>`. Aceptable, pero complica testear `useTasks` aislado.
+**[ALTO] Config de Supabase Auth desincronizada de la app desplegada, sin detector de deriva**
+- Evidencia: `scripts/apply-auth-email-templates.mjs:133-148` (el dry-run siempre termina con código 0 aunque haya diferencias); dry-run del 2026-09-14 tras el deploy de f81fac9: 13 claves en "CAMBIA".
+- Descripción: la pantalla nueva (pide un código) está viva, pero las plantillas publicadas siguen siendo las de fábrica con enlace. La publicación depende de que alguien corra `--apply` después del deploy y nada avisa si no ocurre.
+- Impacto: el arreglo no surte efecto hasta publicar; mientras tanto la UI pide un código que el correo no trae y los usuarios corporativos siguen bloqueados.
+- Recomendación: publicar ya; añadir `--check` (sale ≠0 si hay deriva) y correrlo en CI o en el cron diario; documentar el orden deploy → apply.
+- Esfuerzo: BAJO.
+
+**[MEDIO] Sin pruebas de comportamiento de AuthScreen**
+- Evidencia: `src/lib/otp.test.js` (helpers + guarda estática del texto fuente); `package.json` sin jsdom ni testing-library.
+- Descripción: autoenvío, candados contra doble envío, enfriamiento y foco tras error se verificaron por lectura y capturas, no con pruebas.
+- Recomendación: vitest + jsdom + @testing-library/react para el flujo de 2 pasos.
+- Esfuerzo: MEDIO.
+
+**[BAJO] URLs de la app fijas en las plantillas**
+- Evidencia: `scripts/auth-email/templates.js:58-59`.
+- Descripción: decisión deliberada (no depender de `{{ .SiteURL }}`, que llegó a ser localhost), pero impide publicar las plantillas en un proyecto de staging apuntando a otro dominio.
+- Recomendación: override opcional por variable de entorno con el valor actual como predeterminado.
+- Esfuerzo: BAJO.
 
 ### Eje 2 — Seguridad
-- **S1 · OK · `migrations/036,038,039`** — grants correctos: `project_chat_consume_quota`/`release_quota` y `hub_outbox_claim` revocados de PUBLIC/anon/authenticated, concedidos solo a `service_role`; `submit_sprint_retro` a `authenticated` pero SECURITY INVOKER (RLS de 020 hace el enforcement). `chat_monthly_usage` y `hub_outbox` con RLS on + REVOKE total. Sin escalada de privilegios nueva.
-- **S2 · MEDIO · `api/_auth.js:132` (`isDateOnly`)** — el regex `^\d{4}-\d{2}-\d{2}$` acepta fechas con formato válido pero **inexistentes** (`2026-13-45`, `2026-02-30`). `requireDateRange` (B-3) las deja pasar al query/LLM. Impacto bajo (la BD/LLM las rechaza luego) pero contradice el objetivo de B-3 de cortar ANTES de gastar. Fix: validar con `new Date(...)` y verificar que los componentes coincidan.
-- **S3 · BAJO (heredado A29/S-001) · `.env.local`** — se agregó `GEMINI_API_KEY` (ya existían service-role, MP, Resend, OpenAI, OpenRouter, Google, DeepSeek). Sigue en `.gitignore` (no entra a git). Riesgo aceptado por el dueño; rotación pendiente. Sin cambio de postura.
+**[MEDIO] Sin CAPTCHA en el envío de códigos con alta abierta y presupuesto global de correos**
+- Evidencia: `src/screens/AuthScreen.jsx:64-66` (`shouldCreateUser: true`); config de Auth: `security_captcha_enabled=false`, `rate_limit_email_sent=30` por hora a nivel de proyecto.
+- Descripción: cualquiera puede pedir códigos para direcciones inventadas, crear cuentas basura y agotar el presupuesto de 30 correos/hora, bloqueando el login de TODOS durante esa hora. Preexistente con el link mágico, pero ahora el código es la única puerta.
+- Recomendación: Turnstile/hCaptcha en Supabase Auth + `captchaToken` en `signInWithOtp`; subir `rate_limit_email_sent` según el plan de Resend.
+- Esfuerzo: MEDIO.
 
-### Eje 3 — Pentesting interno (defensivo)
-- **P1 · OK · cuota de chat (H-030)** — la reserva atómica (`INSERT .. ON CONFLICT DO UPDATE WHERE used < quota`) cierra el doble-gasto. Un usuario NO puede refundir su cuota (`release_quota` es service_role-only) ni inflar la de un proyecto ajeno (consume se llama con service_role tras validar `ownerOnly`). Bien defendido.
-- **P2 · BAJO · `migrations/039` (`submit_sprint_retro`)** — `p_respondent_name` viene del cliente, pero `respondent_user_id = auth.uid()` server-side: lo peor es un display-name arbitrario en el PROPIO retro. No es spoofing de autoría. Cosmético.
-- **P3 · BAJO · `api/chat-stream.js` (fallback no atómico)** — si falta `service_role` o la migración 036 (`42883`), el endpoint cae al check NO atómico, reabriendo la race original. En prod (036 aplicada) no aplica; documentarlo como modo degradado para que nadie despliegue el código sin la migración.
+**[OK] Fuerza bruta, filtraciones e inyección**
+- 10⁸ combinaciones, vigencia 15 min, `/verify` limitado a 30 peticiones cada 5 min POR IP (documentación oficial de rate limits) → ~9×10⁻⁷ de acierto por IP y por código.
+- Ninguna plantilla de código lleva enlace con token (guarda `findTokenLinks` que distingue contra la plantilla real que falló); `{{ .Email }}` lo escapa `html/template`; la UI nunca muestra el mensaje crudo de auth-js; el script no imprime el token; el código no va en el preheader.
+
+### Eje 3 — Pentesting interno
+**[OK] Verificación probada en producción**
+- Código generado con la llave de servicio (sin enviar correo) y verificado con el mismo `verifyOtp({ type: 'email' })` de la app: equivocado → 403 `otp_expired`; correcto → sesión; reutilizado → 403. Sesión de prueba cerrada con `scope: 'local'`.
+- Sin open redirect: se eliminó `emailRedirectTo`; Supabase usa el Site URL de la lista permitida.
 
 ### Eje 4 — Conexiones
-- **C1 · MEDIO · `api/mp-webhook.js:311+` (outbox enqueue, H-048)** — la durabilidad protege SOLO si el `INSERT` en `hub_outbox` entró. Si Supabase está caído justo al llegar el pago aprobado, el enqueue falla (`enqueued=false`), el envío inmediato se omite, y la comisión se pierde igual (no hay fila que drenar). Mejora real vs antes (cubre "hub caído / Supabase arriba", el caso común), pero el caso "Supabase caído en el cobro" sigue sin red. Fail-open consciente; un reconciliador periódico contra la API de MP cerraría también ese hueco.
-- **C2 · BAJO · `migrations/038` (`hub_outbox_claim` FOR UPDATE SKIP LOCKED vía RPC)** — el lock se libera al retornar la RPC, así que el `SKIP LOCKED` aporta poco; el guard real es el `UPDATE ... WHERE status IN ('pending','failed')` por fila + la dedup del hub por `mp_payment_id`. OK para el volumen; el `SKIP LOCKED` da falsa sensación de exclusión fuerte. Sin acción.
-- **C3 · BAJO · `api/chat-stream.js` (reserva temprana)** — la cuota se reserva antes de resolver/crear la sesión; si la creación de sesión falla (raro), la reserva queda consumida sin turno (`releaseQuota` no cubre ese path). No peor que antes. Bajo impacto.
+**[MEDIO] El login depende de un presupuesto de correo global y el mensaje de error lo oculta**
+- Evidencia: config `rate_limit_email_sent=30`; `src/lib/otp.js` (`authErrorMessage`, caso `over_email_send_rate_limit`).
+- Descripción: Supabase devuelve el mismo `over_email_send_rate_limit` por la espera de 60 s por usuario y por el tope global; la UI dice "espera un minuto", engañoso si el tope global se agotó. Con crecimiento (más de 30 accesos en una hora pico) el login falla para los siguientes.
+- Recomendación: subir el tope acorde al plan de Resend, monitorear los 429 en los logs de Auth y matizar el mensaje.
+- Esfuerzo: BAJO.
 
 ### Eje 5 — UX/UI
-- **U1 · OK · RESP-01/RESP-02** — validado EN VIVO (smoke test en producción con cuenta hotmail, 375/600/1200 px): header colapsa sin solapamiento (logo→P+, presencia→badge, overflow "⋯"); Gantt fluido con scroll horizontal en móvil y columna fija ~140px. Cumple el objetivo del eje responsive (era 4.5/10). Cierra A40/A41/A42.
-- **U2 · OK · `src/ui/Toast.jsx` + `ConfirmDialog.jsx`** — reemplazo de los 18 `alert`/`confirm` por componentes accesibles (reusa `useDialog`: foco/Esc/trampa, `aria-live`, botón danger). Cierra A43. El `eslint-disable react-refresh/only-export-components` en los providers es el patrón aceptado del repo.
-- **U3 · BAJO · `IntroScreen`** — se mostrará en CADA visita (`showIntro` arranca `true`, sin flag de "ya visto"). Fuera del alcance de hoy, pero candidato a persistir un flag en localStorage para no fatigar a usuarios recurrentes.
+**[BAJO] Outlook de escritorio muestra el correo a todo el ancho**
+- Evidencia: `scripts/auth-email/templates.js:282` (`layout`); `html/template` de Go borra los comentarios condicionales MSO.
+- Recomendación: aceptar la limitación o validar una alternativa sin comentarios en un Outlook real.
+- Esfuerzo: BAJO.
+
+**[BAJO] Correos propios de la app con la identidad anterior**
+- Evidencia: `api/invite.js:49-86`, `api/open-retro.js` (`buildEmailHtml`).
+- Descripción: invitaciones y retros llegan con otro look el mismo día que los correos de acceso nuevos.
+- Recomendación: layout compartido (en curso en el siguiente commit).
+- Esfuerzo: BAJO.
+
+**[BAJO] Un enlace viejo que ya no sirve vuelve al login sin explicación**
+- Evidencia: `src/ProductivityPlus.jsx:501-512` (`init` no mira el `#error_code` que deja Supabase en la URL).
+- Descripción: quien abra un correo antiguo con enlace verá la pantalla de acceso sin saber por qué.
+- Recomendación: si la URL trae `error_code=otp_expired`, mostrar "Ese enlace ya no sirve: ahora entras con un código".
+- Esfuerzo: BAJO.
 
 ## Notas para el orquestador
-- Auditor A corrió en Opus 4.8 (mejor modelo, sin degradado).
-- **Gemini (C) corre por API directa**, NO por agy (la TUI no autentica en este host). El modelo tope `gemini-3.1-pro-preview` NO está en el free-tier de la API key (limit 0); se cae al mejor modelo free disponible (gemini-2.5-pro/flash). El contraste de tercera familia se mantiene, con la salvedad de modelo de menor capacidad que el ideal.
-- Sin críticos nuevos. Los más accionables: S2 (validación de fecha real) y C1 (gap de enqueue del outbox).
+Validado además por tres revisores especializados antes del merge (seguridad: aprobado con condiciones, resueltas; testing: apto con 3 sabotajes que fallaron donde debían; UI/UX: ajustes de contraste AA aplicados).

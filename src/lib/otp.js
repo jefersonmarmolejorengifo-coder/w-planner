@@ -48,6 +48,19 @@ export function normalizeOtpInput(raw) {
   return String(raw ?? '').replace(/\D/g, '').slice(0, OTP_LENGTH);
 }
 
+// Segundos que faltan hasta `endAt` (ambos timestamps en ms epoch), nunca
+// negativos. `endAt - now` en vez de un decremento por tick: un decremento
+// (`c => c - 1` en cada setInterval) asume que el intervalo corrió cada
+// segundo exacto, pero un navegador congela los timers de una pestaña en
+// segundo plano (típico: la persona se va a su correo a buscar el código) y
+// el contador se atrasa, dejando el botón de reenvío bloqueado más de los
+// RESEND_COOLDOWN_SECONDS reales. Anclado a una hora de fin absoluta, un
+// solo recálculo (al volver a primer plano o en el siguiente tick) siempre
+// da el valor correcto sin importar cuánto se congeló el timer.
+export function remainingSeconds(endAt, now) {
+  return Math.max(0, Math.ceil((endAt - now) / 1000));
+}
+
 // Traduce cualquier error de supabase-js a un mensaje en español, apto para
 // mostrar en pantalla. NUNCA devuelve error.message crudo (viene en inglés y
 // a veces expone detalle interno de la petición).

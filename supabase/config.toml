@@ -229,9 +229,12 @@ secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 max_frequency = "1s"
 # Number of characters used in the email OTP.
-otp_length = 6
+# Debe coincidir con OTP_LENGTH y OTP_TTL_MINUTES de src/lib/otp.js (el login
+# pide un código de 8 dígitos que vence en 15 min; producción se publica con
+# scripts/apply-auth-email-templates.mjs).
+otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+otp_expiry = 900
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]

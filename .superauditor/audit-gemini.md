@@ -1,102 +1,38 @@
-# Auditoría Gemini — 87cb0d0..HEAD
+# Auditoría Gemini — 761daf9..f81fac9
 
 ## Metadatos
 - Auditor: Gemini (Google)
-- Fecha: 2026-06-27T01:25:47-05:00
+- Fecha: 2026-09-14T20:58:50-05:00
 - Modelo: Gemini 3.1 Pro (High)
 - Proyecto: F:/proyectos/w-planner
 
 ## Resumen
-El proyecto presenta una base de código funcional utilizando Vite + React en el frontend y funciones serverless de Vercel en el backend. En general, hay una sólida implementación defensiva en cuanto a timeouts (Outbox pattern, fetch timeouts controlados) y validaciones de entrada, pero existen áreas de mejora arquitectónica por la excesiva centralización de responsabilidades en `_auth.js` y componentes UI masivos. A nivel de seguridad y accesibilidad, existen oportunidades para prevenir manipulaciones de URIs y hacer la interfaz compatible con lectores de pantalla.
+La refactorización del sistema de autenticación reemplaza de manera efectiva los enlaces mágicos por códigos de un solo uso (OTP) de 8 dígitos, solucionando de raíz el problema del consumo prematuro de tokens por filtros de seguridad corporativos. La implementación demuestra robustez, con una excelente separación de responsabilidades para la publicación de plantillas de correo y buenas prácticas de usabilidad en el ingreso de códigos en el frontend. La delegación de la validación y protección contra fuerza bruta a Supabase es correcta. Solo se identifican áreas de mejora en la configuración estática de URLs por entorno y en la precisión de los temporizadores de la interfaz bajo condiciones de inactividad de pestaña en navegadores modernos.
 
 ## Hallazgos
 
 ### Eje 1 — Arquitectura
-
-### H-001 | [ALTO] | Arquitectura | Archivo `_auth.js` como cajón de sastre monolítico
-
-**Evidencia:** `api/_auth.js:1-361`
-
-**Descripción:** El archivo `api/_auth.js` contiene no sólo la lógica de autenticación (JWT verify), sino también configuración CORS, clientes de base de datos Supabase, asserts de reglas de negocio, checks de billing (Premium y cuotas IA), validación de parámetros y wrappers de `fetch`. Esto viola el principio de responsabilidad única (SRP).
-
-**Impacto:** Disminuye la mantenibilidad. Cualquier cambio en las utilidades de negocio o de base de datos requiere modificar el archivo principal de autenticación, incrementando el riesgo de introducir bugs de seguridad accidentalmente y generando dependencias cruzadas en todas las funciones serverless.
-
-**Recomendación:** Refactorizar extrayendo las funciones a submódulos dedicados como `lib/db.js`, `lib/billing.js`, `lib/cors.js` y `lib/validation.js`.
-
-**Esfuerzo estimado:** MEDIO
-
-### H-002 | [MEDIO] | Arquitectura | UI monolítica con alta carga de lógica
-
-**Evidencia:** `src/ProductivityPlus.jsx:112-2447`
-
-**Descripción:** Aunque se ha implementado lazy loading y code-splitting para varios paneles, el archivo principal `src/ProductivityPlus.jsx` aún contiene la definición de grandes pantallas (como `AuthScreen`, `UserSelectScreen`, `IntroScreen` y `ProjectLandingScreen`) dentro del mismo archivo.
-
-**Impacto:** Dificulta el onboarding de nuevos desarrolladores, propicia cuellos de botella al hacer merge y disminuye la legibilidad del árbol de componentes en el punto de entrada principal.
-
-**Recomendación:** Extraer `AuthScreen`, `UserSelectScreen`, e `IntroScreen` a sus propios archivos dentro de una carpeta `src/features/auth/` o `src/screens/`.
-
-**Esfuerzo estimado:** BAJO
-
+**Evidencia:** `scripts/auth-email/templates.js` (constantes `APP_URL` y `SITE_URL`)
+**Severidad:** MEDIO
+**Descripción:** Las constantes de las URLs están hardcodeadas apuntando estáticamente a los dominios de producción (`productivityplus.softatumedida.com`). Si el script `apply-auth-email-templates.mjs` se utiliza para desplegar la configuración en un proyecto de Supabase destinado a pruebas o staging, los correos transaccionales seguirán llevando al entorno productivo.
+**Impacto:** Esto acopla todos los entornos de backend al frontend de producción, interrumpiendo los flujos de validación de QA y limitando la capacidad del equipo para realizar pruebas aisladas de la autenticación.
+**Recomendación:** Permitir la sobrescritura de estas URLs mediante variables de entorno (ej. `process.env.APP_URL`), conservando los valores actuales exclusivamente como comportamiento de fallback predeterminado para mantener la compatibilidad hacia atrás.
 
 ### Eje 2 — Seguridad
-
-### H-003 | [MEDIO] | Seguridad | Exceso en la permisividad de tamaño de inputs en chat
-
-**Evidencia:** `api/chat-stream.js:122`
-
-**Descripción:** El mensaje del usuario en el endpoint del chat es validado usando `requireString` con un límite máximo constante de `MAX_USER_MESSAGE_CHARS` (8000 caracteres), que es considerablemente alto para mensajes individuales, aunque mitigue DoS directos.
-
-**Impacto:** Un usuario puede inyectar grandes cantidades de texto que aumentan excesivamente el tamaño del prompt, impactando de forma perjudicial en la cuota de tokens y aumentando costos no previstos si la tasa de mensajes por minuto no se bloquea lo suficientemente rápido.
-
-**Recomendación:** Reducir el límite de `MAX_USER_MESSAGE_CHARS` a un valor más lógico para inputs de chat estándar (ej. 1000 - 2000 caracteres) a menos que se requiera adjuntar documentos extensos.
-
-**Esfuerzo estimado:** BAJO
-
+Sin hallazgos relevantes en esta ronda. El manejo de los códigos y la prevención de fuerza bruta se delegan de manera segura a Supabase Auth. El código frontend (en `AuthScreen.jsx`) implementa correctamente un bloqueo síncrono (`sendingRef.current`) para evitar que dobles clics rápidos o presiones de Enter consecutivas despachen solicitudes duplicadas o agoten los límites de tasa accidentalmente. La lectura de credenciales desde las variables de entorno es segura.
 
 ### Eje 3 — Pentesting interno
-
-### H-004 | [MEDIO] | Seguridad/Pentesting | Riesgo de Path Traversal / SSRF manipulado por webhook
-
-**Tipo de vulnerabilidad:** SSRF mitigado / Path Traversal en URL interna
-**Superficie:** `api/mp-webhook.js`
-**Evidencia:** `api/mp-webhook.js:125` y `api/mp-webhook.js:52`
-**Vector intentado (resumido):** El parámetro `data.id` extraído del body/query se concatena directamente a la URL de Mercado Pago en `fetchPreapproval` (`https://api.mercadopago.com/preapproval/${id}`). Un atacante (aunque el request requiere firma HMAC) podría intentar inyectar saltos de directorio como `../v1/payments/xyz` si el secreto HMAC fuera comprometido o en entornos donde no hay secreto.
-**Resultado:** REQUIERE INVESTIGACIÓN MANUAL
-**Fix recomendado:** Validar y sanear estrictamente que `dataId` sea sólo un número entero positivo o cadena alfanumérica sin barras o caracteres de escape de URL, antes de pasarlo al método fetch.
-**Esfuerzo estimado:** BAJO
-
+Sin hallazgos relevantes en esta ronda. Las funciones de validación de entrada provistas (`normalizeOtpInput`, `normalizeEmail`) descartan adecuadamente valores inesperados y previenen la inyección de caracteres malformados antes del envío al servidor. El patrón de expresión regular utilizado no presenta riesgos significativos de ReDoS en el entorno en el que se ejecuta.
 
 ### Eje 4 — Conexiones
-
-### H-005 | [BAJO] | Conexiones | Ausencia de reintentos automatizados en Supabase
-
-**Conexión afectada:** C-001 Supabase Postgres
-**Evidencia:** `api/_auth.js:160-174`
-**Síntoma:** El cliente de base de datos se crea con un timeout explícito de 10s (lo cual es muy bueno), pero no se implementa una lógica de `retry` con backoff exponencial.
-**Impacto:** Fallos temporales en la resolución DNS del API de Supabase o latencia puntual causarán que la petición serverless lance un HTTP 500 de inmediato, perdiendo llamadas críticas como confirmaciones y validaciones.
-**Recomendación:** Envolver las consultas principales de BD, o configurar la política de fetch en `global: { fetch }` para que incorpore al menos 1 o 2 reintentos si el fallo es de red (ej: timeout o error 5xx).
-**Esfuerzo estimado:** MEDIO
-
+Sin hallazgos relevantes en esta ronda. Las peticiones dirigidas a la API administrativa de Supabase en los scripts de gestión utilizan robustamente `AbortSignal.timeout` para prevenir bloqueos indefinidos por congestión de red, y gestionan los fallos capturando el texto de error de las respuestas HTTP sin exponer detalles críticos que puedan causar cuelgues del proceso principal.
 
 ### Eje 5 — UX/UI
-
-### H-006 | [ALTO] | UX | Modales de reportes bloqueantes y no accesibles por teclado
-
-**Pantalla / componente afectado:** `BoardSummaryPill` (Modal de visualización de reporte)
-**Evidencia:** `src/ProductivityPlus.jsx:665-677`
-**Descripción:** El componente modal que se abre para previsualizar reportes de IA (`openReport`) se renderiza como una capa superpuesta con `position: fixed` pero no gestiona el foco del teclado, no atrapa la navegación por tabulador dentro del modal ni usa la semántica `<dialog>` o `role="dialog"`.
-**Criterio violado:** WCAG 2.1 - 2.1.1 Keyboard (Operable por teclado) y Modal Dialog Pattern.
-**Recomendación:** Refactorizar el renderizado a la etiqueta HTML nativa `<dialog>` o implementar enfoque (`focus trap`) de forma explícita al abrir el visor de reporte.
-**Esfuerzo estimado:** BAJO
-
-### H-007 | [ALTO] | UX | Formularios sin vinculación semántica (accesibilidad)
-
-**Pantalla / componente afectado:** `AuthScreen`
-**Evidencia:** `src/ProductivityPlus.jsx:171-172`
-**Descripción:** Los inputs (como el campo de correo electrónico) utilizan una etiqueta visual (`<label>`) pero no implementan el atributo `htmlFor` ni definen un `id` en el campo, rompiendo la vinculación semántica requerida por tecnologías de asistencia.
-**Criterio violado:** WCAG 1.3.1 (Info and Relationships) y 3.3.2 (Labels or Instructions).
-**Recomendación:** Asignar un identificador único al input `id="email-input"` y ligar la etiqueta como `<label htmlFor="email-input">Correo electrónico</label>`.
-**Esfuerzo estimado:** BAJO
+**Evidencia:** `src/screens/AuthScreen.jsx` (función `arrancarCooldown`)
+**Severidad:** BAJO
+**Descripción:** La lógica del temporizador de reenvío de correos disminuye un contador relativo en memoria usando `setInterval` cada 1000ms. Los navegadores modernos aplican un estrangulamiento (throttling) agresivo a los temporizadores cuando la pestaña en la que operan pasa a segundo plano (reduciendo la frecuencia, por ejemplo, a un tick por minuto), lo que sucederá frecuentemente dado que el usuario dejará la pestaña inactiva temporalmente para abrir su aplicación de correo y revisar el código.
+**Impacto:** El contador en el botón de reenvío se desincronizará del tiempo real avanzando mucho más lento. El usuario percibirá que está bloqueado durante más tiempo del requerido por la validación real (los 60 segundos del backend), creando fricción en la experiencia de usuario.
+**Recomendación:** Modificar la lógica para calcular el tiempo restante de forma dinámica comparando contra una marca de tiempo absoluta generada en la inicialización (ej. `const endTime = Date.now() + RESEND_COOLDOWN_SECONDS * 1000;`) y hacer que cada iteración del intervalo actualice el contador calculando la diferencia, en lugar de solo decrementar `c - 1`.
 
 ## Notas para el orquestador
-La revisión se hizo bajo la condición de que el secreto `MP_WEBHOOK_SECRET` sea guardado de forma robusta; el hallazgo SSRF requiere que el atacante firme la petición para escalar. Las APIs son serverless y aprovechan bien las utilidades de streaming y resiliencia para el Outbox pattern, sin problemas críticos de exposición directa detectados.
+La evaluación se completó analizando íntegramente las diferencias correspondientes al rango de commits indicado, abarcando las modificaciones tanto en la interfaz React como en el utillaje de plantillas Node.js. No se requirió acceso directo a la infraestructura externa, dado el alcance interno estipulado de la auditoría.

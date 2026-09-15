@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   OTP_LENGTH, OTP_TTL_MINUTES, RESEND_COOLDOWN_SECONDS,
-  normalizeEmail, isValidEmail, normalizeOtpInput, authErrorMessage,
+  normalizeEmail, isValidEmail, normalizeOtpInput, authErrorMessage, remainingSeconds,
 } from './otp';
 
 describe('constantes del código de acceso', () => {
@@ -72,6 +72,32 @@ describe('normalizeOtpInput', () => {
   it('null/undefined no revientan, se tratan como cadena vacía', () => {
     expect(normalizeOtpInput(null)).toBe('');
     expect(normalizeOtpInput(undefined)).toBe('');
+  });
+});
+
+describe('remainingSeconds', () => {
+  it('tiempo ya pasado da 0, nunca negativo', () => {
+    expect(remainingSeconds(1000, 5000)).toBe(0);
+  });
+
+  it('en el instante exacto de fin da 0', () => {
+    expect(remainingSeconds(5000, 5000)).toBe(0);
+  });
+
+  it('redondea fracciones de segundo hacia arriba (falta menos de 1s → cuenta como 1s)', () => {
+    expect(remainingSeconds(5900, 5000)).toBe(1); // faltan 0.9s
+    expect(remainingSeconds(5001, 5000)).toBe(1); // falta 1ms
+    expect(remainingSeconds(7000, 5000)).toBe(2); // faltan exactos 2s
+  });
+
+  it('DISTINGUE de un decremento por tick: un salto grande de `now` (pestaña en segundo plano) recalcula de una vez, no resta de a uno', () => {
+    // Cooldown de 60s que arrancó en t=0; la pestaña se congela y `now`
+    // salta directo a los 45s reales transcurridos. Un contador que solo
+    // supiera restar 1 por tick seguiría cerca de 59 (le faltó ponerse al
+    // día); remainingSeconds, anclado a endAt, da el valor real: 15.
+    const endAt = 60_000;
+    expect(remainingSeconds(endAt, 45_000)).toBe(15);
+    expect(remainingSeconds(endAt, 45_000)).not.toBe(59);
   });
 });
 

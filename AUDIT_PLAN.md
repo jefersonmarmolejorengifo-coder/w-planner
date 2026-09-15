@@ -7,6 +7,45 @@
 
 ---
 
+## 🆕 Ronda 2026-09-14 — triple audit sobre el login por código (`761daf9..f81fac9`) 🤖
+
+**Los TRES auditores corrieron** ✅: **A = Claude `claude-opus-5`** (orquestador) · **B = Codex `gpt-5.5`** (xhigh) · **C = Gemini 3.1 Pro (High)** vía `agy`. Modo: **TRIPLE**, cada uno en su mejor modelo. Alcance acotado al commit `f81fac9` (login OTP + plantillas de Supabase Auth): los hallazgos abiertos de rondas previas NO se re-verificaron en esta ronda.
+
+> ⚠️ **Divergencia alta (3 de 13 hallazgos con consenso, 23 %), explicable por alcance:** A trabajó además con logs, config y pruebas contra producción; B y C auditaron solo el diff. Verificar a mano los hallazgos de un solo auditor antes de actuar (ya se hizo con los de esta ronda: ver notas).
+
+### Contexto
+Causa raíz del incidente, demostrada con logs de producción: Microsoft 365 Safe Links abría el link mágico ~20 s después de que llegaba el correo y gastaba el token de un solo uso; el clic real recibía `403 One-time token not found`. El commit reemplaza el enlace por un código de 8 dígitos. Antes del merge pasó por security (aprobado con condiciones, resueltas), testing (apto, 3 sabotajes que fallaron donde debían) y ui-ux (contraste AA aplicado). Prueba en producción: código equivocado 403, correcto da sesión, reutilizado 403.
+
+### Veredicto de la ronda
+Sin críticos. **Ningún auditor encontró un problema de seguridad en el código del cambio** (B y C: "sin hallazgos" en el eje de Seguridad). El riesgo principal es operativo: la config de Auth se publica en un paso aparte del deploy (H-056).
+
+### Hallazgos (IDs nuevos desde H-053)
+
+**🤝 Consenso de pares**
+- **H-053 `[A+B]` MEDIO · Testing — sin pruebas de componente de `AuthScreen`.** Hoy solo helpers + guarda estática (`src/lib/otp.test.js`); autoenvío, candados, enfriamiento y foco se verificaron por lectura y capturas. Añadir jsdom + testing-library. Esfuerzo MEDIO. *Abierto.*
+- **H-054 `[A+B]` MEDIO · Seguridad — controles anti-abuso del código sin reforzar ni declarar.** Sin CAPTCHA en `/otp` con alta abierta (`src/screens/AuthScreen.jsx:64-66`) y tope global de 30 correos/h: cualquiera puede agotarlo y bloquear el login de todos; los límites de `/verify` (30 cada 5 min por IP, documentación oficial) no están declarados en el repo. Turnstile/hCaptcha + declararlos en el script de publicación. Esfuerzo MEDIO. *Abierto.*
+- **H-055 `[A+C]` MEDIO · Arquitectura — URLs de la app fijas en las plantillas** (`scripts/auth-email/templates.js:58-59`; A: BAJO, C: MEDIO — adyacentes, se toma la mayor). Override opcional por variable de entorno para staging. Esfuerzo BAJO. *Abierto.*
+
+**🅰️ Solo Claude (A)**
+- **H-056 `[A]` ALTO · Operación — config de Auth de producción desincronizada de la app desplegada, sin detector de deriva.** Dry-run tras el deploy: 13 claves en "CAMBIA". El `--apply` quedó bloqueado por el clasificador de permisos de Claude Code a la espera de autorización de Jefer. Publicar y añadir `--check` (sale ≠0 si hay deriva) en CI o en el cron diario. Esfuerzo BAJO. *Abierto — se cierra al publicar.*
+- **H-062 `[A]` MEDIO · Conexión — el login depende de un tope global de 30 correos/h y el mensaje lo oculta:** `over_email_send_rate_limit` es el mismo código para la espera de 60 s por usuario y para el tope del proyecto, y la UI dice "espera un minuto". Subir el tope según el plan de Resend y matizar el mensaje. Esfuerzo BAJO. *Abierto.*
+- **H-063 `[A]` BAJO · UX — Outlook de escritorio muestra el correo a todo el ancho** (`html/template` de Go borra los comentarios condicionales MSO). *Aceptado como limitación conocida.*
+- **H-064 `[A]` BAJO · UX — correos propios de la app con la identidad anterior** (`api/invite.js`, `api/open-retro.js`). *Cerrado en el commit de cierre de esta ronda* (layout compartido `api/_email-brand.js`; el patch de Supabase quedó idéntico byte a byte).
+- **H-065 `[A]` BAJO · UX — un enlace viejo que ya no sirve devuelve al login sin explicación** (`src/ProductivityPlus.jsx:501-512` no lee el `error_code` de la URL). *Abierto.*
+
+**🅱️ Solo Codex (B)**
+- **H-057 `[B]` MEDIO (B lo calificó ALTO; solo afecta a Supabase local) · Conexión — `supabase/config.toml` con `otp_length = 6` y `otp_expiry = 3600`.** *Cerrado:* sincronizado a 8 / 900 con un comentario que apunta a `src/lib/otp.js`.
+- **H-058 `[B]` MEDIO · Conexión — el script de publicación usa el ref de producción por defecto.** Mitigado: imprime el nombre del proyecto y aborta si el ref no responde. Exigir ref explícito en `--apply`. *Abierto.*
+- **H-059 `[B]` MEDIO · UX — el overlay del login no hace scroll en pantallas bajas** (con el teclado del móvil abierto puede tapar "Entrar"). *Cerrado en el commit de cierre:* `overflowY: auto` + centrado que no recorta.
+- **H-060 `[B]` MEDIO · UX — foco visible.** Para los inputs es **falso positivo**: el anillo global de `src/index.css:89` usa `box-shadow` y se ve en las capturas. Al verificarlo apareció el problema real: los dos botones primarios llevan un `boxShadow` inline que anula el anillo. *Cerrado en el commit de cierre* con la clase `.pp-auth-primary:focus-visible`.
+
+**🅲️ Solo Gemini (C)**
+- **H-061 `[C]` BAJO · UX — la cuenta regresiva de "Reenviar" se atrasa con la pestaña en segundo plano.** *Cerrado:* hora de fin absoluta + recálculo en `visibilitychange` (helper `remainingSeconds`, con una prueba que distingue del decremento viejo).
+
+> Reportes completos: `.superauditor/audit-claude.md`, `.superauditor/audit-codex.md`, `.superauditor/audit-gemini.md`.
+
+---
+
 ## 🆕 Ronda 2026-06-27 — triple audit sobre los cambios de hoy (`87cb0d0..HEAD`) 🤖
 
 **Los TRES auditores corrieron** ✅: **A = Claude Opus 4.8** (orquestador) · **B = Codex GPT-5** (vía API key de OpenAI; el login ChatGPT estaba revocado, se reactivó con `codex login --with-api-key`) · **C = Gemini 3.1 Pro (High)** vía Antigravity `agy` (suscripción Ultra, corrido sin `--sandbox` que bloqueaba el acceso a `F:\`). Modo: **TRIPLE completo**, cada auditor en su mejor modelo.
@@ -227,6 +266,7 @@ Se agregó `.env.example` documentado (sin valores reales) y la excepción en `.
 | 2026-06-19 | DEGRADADO (sin C) | — | 5 (A+B) | 3 | 3 | — | 1 | 0 | 96 (repo) |
 | 2026-06-22 | COMPLETO (A+B+C) | 2 | 2 | 6 | 7 | 2 | 3 | 3 | 1a90dc1..52ca539 |
 | 2026-06-24 | DUAL (sin C) | — | 1 (A+B) | 18 | 8 | — | 0 | 0 | 7681794..HEAD |
+| 2026-09-14 | TRIPLE (A+B+C) | 0 | 3 (2 A+B, 1 A+C) | 5 | 4 | 1 | 0 | 5 | 761daf9..f81fac9 |
 
 ---
 

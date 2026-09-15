@@ -1,191 +1,117 @@
-# Auditoría Codex — 87cb0d0..HEAD
+```markdown
+# Auditoría Codex — 761daf9..f81fac9
 
 ## Metadatos
 - Auditor: Codex (OpenAI)
-- Fecha: 2026-06-27
+- Fecha: 2026-09-14T21:02:14-05:00
 - Modelo: GPT-5 Codex
 - Proyecto: F:/proyectos/w-planner
 
 ## Resumen
-El proyecto es una app Vite/React con funciones serverless, Supabase, Mercado Pago, Resend, Anthropic/Gemini y un nuevo outbox hacia un hub financiero. No detecté secretos reales versionados, solo placeholders en `.env.example`. El mayor riesgo está en integridad de pagos/webhooks: varias escrituras críticas no verifican `error` de Supabase o deduplican eventos antes de completar el procesamiento. En frontend hay avances de lazy loading y diálogos, pero persisten inconsistencias de permisos visibles y accesibilidad básica en flujos de entrada.
+El rango auditado introduce el cambio de magic link a OTP por correo, plantillas de Supabase Auth y un script para publicarlas por Management API. La intención está bien acotada, pero la configuración de Auth queda dividida entre código, script remoto y `supabase/config.toml`, con valores incompatibles. No encontré secretos reales versionados ni exposición directa de los tokens OTP en las plantillas de código. El mayor riesgo operativo es aplicar configuración al proyecto Supabase equivocado o tener entornos donde el login local/staging no coincide con la UI.
 
 ## Hallazgos
 
 ### Eje 1 — Arquitectura
 
-### H-001 | MEDIO | Arquitectura | `ProductivityPlus.jsx` sigue concentrando demasiadas responsabilidades
+### H-001 | [MEDIO] | Arquitectura | Flujo OTP sin pruebas de componente
 
-**Evidencia:** `src/ProductivityPlus.jsx:1`, `src/ProductivityPlus.jsx:1731`, `src/ProductivityPlus.jsx:1752`, `src/ProductivityPlus.jsx:2303`, `src/ProductivityPlus.jsx:2446`
+**Evidencia:** `src/screens/AuthScreen.jsx:55`, `src/screens/AuthScreen.jsx:92`, `src/screens/AuthScreen.jsx:129`, `src/lib/otp.test.js:143`
 
-**Descripción:** Aunque varios tabs ya fueron extraídos con `React.lazy`, el componente principal aún concentra imports globales, autenticación, selección de proyecto, definición de tabs por rol, composición de todos los módulos y layout general en un archivo de 2446 líneas.
+**Descripción:** El commit agrega lógica asíncrona de UI para enviar código, verificarlo, reenviarlo, bloquear dobles envíos y cambiar de paso, pero las pruebas nuevas cubren helpers puros y una guarda textual sobre `verifyOtp`. No hay prueba de componente que valide estados reales de `AuthScreen`.
 
-**Impacto:** Mantener permisos, navegación y estado global en el mismo componente aumenta el riesgo de regresiones cruzadas; por ejemplo, un cambio en roles o tabs puede afectar vistas no relacionadas.
+**Impacto:** Regresiones en el flujo principal de login pueden pasar aunque los tests sigan verdes: doble submit, cooldown, foco tras error, autoverificación al pegar y mensajes por fase.
 
-**Recomendación:** Separar un shell de aplicación, un módulo de navegación/permisos y componentes de estado de proyecto/auth. Mantener `ProductivityPlus.jsx` como composición del shell, no como dueño de todos los flujos.
-
-**Esfuerzo estimado:** ALTO
-
-### H-002 | MEDIO | Arquitectura | No hay pruebas del handler real de Mercado Pago
-
-**Evidencia:** `api/mp-webhook.test.js:13`, `api/mp-webhook.test.js:55`, `api/mp-webhook.test.js:74`, `api/mp-webhook.js:201`, `api/mp-webhook.js:260`
-
-**Descripción:** Las pruebas cubren helpers (`verifyMpSignature`, `mapStatus`, `parseExternalReference`), pero no ejercitan el handler completo ni los efectos críticos: dedupe, fetch a MP, upsert de `users_premium`, encolado en `hub_outbox` y respuestas ante errores de Supabase.
-
-**Impacto:** Los bugs de integridad detectados en pagos no quedarían atrapados por CI aunque rompan el flujo de cobro.
-
-**Recomendación:** Agregar tests del handler con mocks de `createAdminClient`, MP API y hub para cubrir éxito, error de upsert, evento duplicado, fallo después de dedupe y webhook sin secreto.
+**Recomendación:** Agregar tests de componente con Supabase mockeado para: envío feliz, error de envío, código incompleto, verificación feliz, verificación fallida, doble clic/doble Enter y reenviar con cooldown.
 
 **Esfuerzo estimado:** MEDIO
 
 ### Eje 2 — Seguridad
 
-### H-003 | ALTO | Seguridad | La cuota mensual del chat IA degrada a modo no atómico si falta `service_role`
-
-**Evidencia:** `api/_auth.js:183`, `api/_auth.js:188`, `api/chat-stream.js:153`, `api/chat-stream.js:162`, `api/chat-stream.js:181`, `api/chat-stream.js:184`, `api/chat-stream.js:239`, `migrations/036_chat_quota_atomic.sql:120`
-
-**Descripción:** `createAdminClient()` puede devolver `null`; si ocurre, `chat-stream` no llama `project_chat_consume_quota` y cae a `project_chat_quota_remaining`, que solo lee el contador. Además, la persistencia de mensajes también se omite si `admin` es `null`.
-
-**Impacto:** Una mala configuración de `SUPABASE_SERVICE_ROLE_KEY` deja el chat Enterprise con control mensual incompleto: el usuario puede consumir proveedor LLM sujeto solo al rate limit de ráfaga.
-
-**Recomendación:** Para chat, hacer fail-closed si no existe cliente admin o si falta la RPC atómica, salvo un flag explícito de desarrollo. El fallback de lectura no debe permitir llamadas al LLM en producción.
-
-**Esfuerzo estimado:** BAJO
-
-### H-004 | MEDIO | Seguridad | Errores internos se devuelven al cliente en endpoints sensibles
-
-**Evidencia:** `api/submit-retro.js:82`, `api/generate-evolution.js:412`, `api/generate-evolution.js:470`, `api/generate-monthly-report.js:362`, `api/generate-monthly-report.js:431`, `api/chat-stream.js:295`
-
-**Descripción:** Varios endpoints devuelven `error.message` de Postgres/Supabase o del proveedor IA directamente al cliente.
-
-**Impacto:** Puede revelar nombres de tablas, constraints, detalles de proveedor o comportamiento interno útil para enumeración y diagnóstico ofensivo.
-
-**Recomendación:** Loguear el detalle server-side y devolver mensajes genéricos por clase de fallo. Mantener códigos HTTP específicos, pero no propagar `message` sin allowlist.
-
-**Esfuerzo estimado:** BAJO
+Sin hallazgos relevantes en esta ronda.
 
 ### Eje 3 — Pentesting interno
 
-### H-005 | ALTO | Seguridad/Pentesting | La deduplicación del webhook MP puede bloquear reintentos legítimos
+### H-002 | [MEDIO] | Seguridad/Pentesting | Límite de intentos OTP no queda verificable para producción
 
-**Tipo de vulnerabilidad:** Webhook idempotency poisoning / pérdida de evento
+**Tipo de vulnerabilidad:** Brute force de OTP / rate limiting de autenticación
 
-**Superficie:** `/api/mp-webhook`
+**Superficie:** Flujo público de login por código en Supabase Auth, invocado desde `AuthScreen`
 
-**Evidencia:** `api/mp-webhook.js:157`, `api/mp-webhook.js:164`, `api/mp-webhook.js:175`, `api/mp-webhook.js:388`, `api/mp-webhook.js:394`
+**Evidencia:** `src/screens/AuthScreen.jsx:96`, `src/screens/AuthScreen.jsx:101`, `src/lib/otp.js:77`, `scripts/auth-email/templates.js:399`
 
-**Vector intentado (resumido):** El endpoint registra el evento como procesado antes de consultar MP y antes de escribir el estado premium. Si ocurre un fallo transitorio después del insert de dedupe, el endpoint devuelve 500, pero el siguiente reintento con el mismo id se responde como duplicado y ya no procesa el pago.
+**Vector intentado (resumido):** El cliente permite intentar verificaciones de códigos de 8 dígitos y, tras error, limpia el campo y permite otro intento. El repo versiona longitud y expiración del OTP, pero no deja una garantía equivalente de límite de intentos de verificación en la configuración que se publica a Supabase.
 
-**Resultado:** VULNERABLE
+**Resultado:** REQUIERE INVESTIGACIÓN MANUAL
 
-**Fix recomendado:** Persistir el evento con estado `processing/failed/processed`, no tratarlo como duplicado si no llegó a `processed`, o mover el marcado definitivo después de completar todas las escrituras críticas.
-
-**Esfuerzo estimado:** MEDIO
-
-### H-006 | ALTO | Seguridad/Pentesting | Fallos de escritura en plan premium no alteran la respuesta exitosa
-
-**Tipo de vulnerabilidad:** Business logic integrity / fallo silencioso de autorización de pago
-
-**Superficie:** `/api/mp-subscribe` y `/api/mp-webhook`
-
-**Evidencia:** `api/mp-subscribe.js:156`, `api/mp-subscribe.js:165`, `api/mp-webhook.js:201`, `api/mp-webhook.js:210`, `api/mp-webhook.js:260`, `api/mp-webhook.js:384`
-
-**Vector intentado (resumido):** Las llamadas `upsert` a `users_premium` no inspeccionan `{ error }`. Si Supabase rechaza la escritura o hay un error de constraint/conexión, el flujo continúa y devuelve éxito al cliente o a Mercado Pago.
-
-**Resultado:** VULNERABLE
-
-**Fix recomendado:** Desestructurar `{ error }` en cada escritura crítica y fallar/reintentar según el caso. En webhook, no devolver 200 a MP si el estado premium no quedó persistido.
+**Fix recomendado:** Declarar y verificar explícitamente los límites de Supabase Auth para verificación OTP en el runbook/script de despliegue, y considerar CAPTCHA o endurecimiento adicional si el endpoint público recibe abuso.
 
 **Esfuerzo estimado:** BAJO
 
 ### Eje 4 — Conexiones
 
-### H-007 | ALTO | Conexión | Variables del hub financiero no están declaradas en `.env.example`
+### H-003 | [ALTO] | Conexión | Configuración local de Supabase Auth contradice el OTP de la app
 
-**Conexión afectada:** C-004 Hub financiero Soft a tu Medida
+**Conexión afectada:** C-001 Supabase Auth
 
-**Evidencia:** `api/_hub-client.js:29`, `api/_hub-client.js:33`, `.env.example:53`
+**Evidencia:** `src/lib/otp.js:15`, `src/lib/otp.js:18`, `scripts/auth-email/templates.js:399`, `scripts/auth-email/templates.js:400`, `supabase/config.toml:232`, `supabase/config.toml:234`
 
-**Síntoma:** El cliente requiere `HUB_WEBHOOK_URL`, `HUB_WEBHOOK_SECRET` y `HUB_APP_SLUG`, pero `.env.example` termina sin documentarlas.
+**Síntoma:** La app exige OTP de 8 dígitos y las plantillas publican expiración de 15 minutos, pero `supabase/config.toml` conserva `otp_length = 6` y `otp_expiry = 3600`.
 
-**Impacto:** Un deploy siguiendo el ejemplo queda con outbox acumulando fallos; las comisiones al hub no se notifican aunque los pagos entren.
+**Impacto:** En Supabase local o cualquier entorno derivado de `config.toml`, el usuario recibe un código/configuración que no coincide con la pantalla de login; el login puede quedar bloqueado o validar con tiempos distintos a los que informa la UI.
 
-**Recomendación:** Agregar las tres variables a `.env.example`, README/deployment docs y validación operativa. Considerar un healthcheck que alerte si el hub está desconfigurado.
-
-**Esfuerzo estimado:** BAJO
-
-### H-008 | ALTO | Conexión | Escrituras críticas de Mercado Pago no verifican error de Supabase
-
-**Conexión afectada:** C-002 Mercado Pago + C-001 Supabase
-
-**Evidencia:** `api/mp-subscribe.js:156`, `api/mp-webhook.js:201`, `api/mp-webhook.js:260`
-
-**Síntoma:** `admin.from("users_premium").upsert(...)` se espera con `await`, pero no se revisa el objeto `{ error }` que devuelve Supabase.
-
-**Impacto:** El usuario puede pagar y quedar sin plan activo, o MP puede dejar de reintentar porque recibió 200 aunque la actualización local falló.
-
-**Recomendación:** Validar `error` en todos los upserts de `users_premium`; en webhook, retornar 500 para reintento cuando la persistencia falle.
+**Recomendación:** Sincronizar `supabase/config.toml` con `OTP_LENGTH` y `OTP_TTL_MINUTES`, o documentar que el flujo OTP solo es válido contra la config publicada por Management API y agregar una verificación pre-release que compare ambos.
 
 **Esfuerzo estimado:** BAJO
 
-### H-009 | MEDIO | Conexión | `hub_outbox_claim` no marca filas como reclamadas
+### H-004 | [MEDIO] | Conexión | Script de publicación apunta a producción por defecto
 
-**Conexión afectada:** C-004 Hub financiero / outbox
+**Conexión afectada:** C-002 Supabase Management API
 
-**Evidencia:** `migrations/038_hub_outbox.sql:45`, `migrations/038_hub_outbox.sql:54`, `api/cron.js:297`, `api/cron.js:308`
+**Evidencia:** `scripts/apply-auth-email-templates.mjs:15`, `scripts/apply-auth-email-templates.mjs:24`, `scripts/apply-auth-email-templates.mjs:180`, `scripts/apply-auth-email-templates.mjs:193`, `docs/operations.md:273`
 
-**Síntoma:** La función usa `FOR UPDATE SKIP LOCKED`, pero solo hace `SELECT`. Al volver al caller, la transacción de la RPC terminó y el lock ya no protege el envío externo posterior.
+**Síntoma:** `SUPABASE_PROJECT_REF` es opcional y, si falta, el script usa un project ref hardcodeado. El mismo script ejecuta `PATCH /config/auth` cuando se invoca con `--apply`.
 
-**Impacto:** Cron jobs solapados pueden reclamar y enviar la misma fila antes de que una la marque como `sent/failed`. El hub deduplica por `mp_payment_id`, pero se generan llamadas duplicadas y métricas de intentos engañosas.
+**Impacto:** Un operador con token válido puede modificar la configuración Auth de producción por accidente al omitir una variable. En sentido inverso, un entorno staging puede terminar usando plantillas/URLs productivas.
 
-**Recomendación:** Cambiar `hub_outbox_claim` a `UPDATE ... SET status='processing', attempts=attempts+1 ... RETURNING` y luego transicionar desde `processing`.
+**Recomendación:** Exigir `SUPABASE_PROJECT_REF` siempre para `--apply`, eliminar el default productivo o requerir confirmación explícita del nombre/ref antes del PATCH.
 
-**Esfuerzo estimado:** MEDIO
+**Esfuerzo estimado:** BAJO
 
 ### Eje 5 — UX/UI
 
-### H-010 | MEDIO | UX | El tab “Pulso del equipo” se muestra a Scrum Master pero la vista lo bloquea
+### H-005 | [MEDIO] | UX | Pantalla OTP puede recortarse en móviles bajos
 
-**Pantalla / componente afectado:** Navegación principal / TeamPulseTab
+**Pantalla / componente afectado:** Login por código, `AuthScreen`
 
-**Evidencia:** `src/ProductivityPlus.jsx:1744`, `src/ProductivityPlus.jsx:1752`, `src/features/team/TeamPulseTab.jsx:114`, `src/features/team/TeamPulseTab.jsx:115`, `migrations/020_sprint_retros.sql:15`, `migrations/020_sprint_retros.sql:251`
+**Evidencia:** `src/screens/AuthScreen.jsx:143`, `src/screens/AuthScreen.jsx:151`, `src/screens/AuthScreen.jsx:153`, `src/screens/AuthScreen.jsx:189`
 
-**Descripción:** La navegación permite `pulse` para `po` y `scrum_master`, pero `TeamPulseTab` muestra “solo owner” a cualquier no-owner, y la RPC también filtra por owner.
+**Descripción:** El contenedor es `position: fixed` con centrado vertical y no declara `overflowY: auto`. El paso de código agrega más contenido que el flujo anterior: logo, tarjeta, texto, input, error/notice, submit y dos acciones secundarias.
 
-**Criterio violado:** Consistencia de navegación y prevención de callejones sin salida.
+**Criterio violado:** Responsividad / tarea principal accesible en móvil pequeño.
 
-**Recomendación:** Decidir el contrato: si Scrum Master debe verlo, ajustar RPC y prop `isOwner` a permisos por rol; si no, quitar `scrum_master` de `allowedRoles`.
-
-**Esfuerzo estimado:** BAJO
-
-### H-011 | MEDIO | UX | Tarjetas de selección de perfil no son operables por teclado
-
-**Pantalla / componente afectado:** `UserSelectScreen`
-
-**Evidencia:** `src/ProductivityPlus.jsx:261`, `src/ProductivityPlus.jsx:265`
-
-**Descripción:** Cada perfil es un `<div>` con `onClick`, sin `role="button"`, `tabIndex` ni manejo de Enter/Espacio.
-
-**Criterio violado:** WCAG 2.1.1 — teclado.
-
-**Recomendación:** Usar `<button>` estilizado para cada tarjeta o agregar semántica completa con `role`, `tabIndex`, `onKeyDown` y foco visible.
+**Recomendación:** Permitir scroll vertical en el overlay (`overflowY: auto`), alinear arriba en pantallas bajas o reducir espaciados con media query por altura.
 
 **Esfuerzo estimado:** BAJO
 
-### H-012 | MEDIO | UX | Menús con `role="menu"` no implementan comportamiento de menú accesible
+### H-006 | [MEDIO] | UX | El input elimina el indicador visible de foco
 
-**Pantalla / componente afectado:** Menú overflow del header
+**Pantalla / componente afectado:** Login por correo y código, `AuthScreen`
 
-**Evidencia:** `src/ProductivityPlus.jsx:2163`, `src/ProductivityPlus.jsx:2167`, `src/ProductivityPlus.jsx:2172`, `src/ProductivityPlus.jsx:2183`
+**Evidencia:** `src/screens/AuthScreen.jsx:41`, `src/screens/AuthScreen.jsx:166`, `src/screens/AuthScreen.jsx:210`
 
-**Descripción:** El menú usa roles ARIA de menú, pero no se observa manejo de flechas, Escape, foco inicial ni retorno de foco. Con roles `menu/menuitem`, los lectores esperan ese patrón completo.
+**Descripción:** El estilo compartido de inputs define `outline: "none"` y los inputs nuevos lo heredan sin un reemplazo `:focus`/`boxShadow` accesible.
 
-**Criterio violado:** Patrón ARIA menu button / navegación por teclado.
+**Criterio violado:** WCAG 2.4.7 — foco visible.
 
-**Recomendación:** Implementar el patrón completo o retirar `role="menu"` y usar una lista de botones normal dentro de un popover.
+**Recomendación:** Reemplazar `outline: none` por un foco visible consistente, por ejemplo borde/acento y halo con suficiente contraste.
 
 **Esfuerzo estimado:** BAJO
 
 ## Notas para el orquestador
-- No modifiqué archivos.
-- `npm test` no pudo ejecutarse: el entorno rechazó el comando por política de shell.
-- El worktree ya tenía `.superauditor/audit-codex.md` modificado antes de mi revisión; lo ignoré por estar fuera del código auditado.
+- Leí las guías solicitadas en `C:/Users/jefer/.claude/skills/superauditor/references/*`.
+- El worktree cambió durante la auditoría; las líneas del reporte están ancladas al árbol de `f81fac9`, no a cambios no commiteados posteriores.
+- `git diff --check 761daf9..f81fac9` terminó sin errores.
+- Intenté correr Vitest: `npm` fue bloqueado por ExecutionPolicy; con `npm.cmd` Vitest falló por sandbox de solo lectura al crear temporales. No hubo ejecución verde de tests.
+- No llamé a Supabase ni a APIs externas; el eje de pentesting se mantuvo estático/defensivo sobre el código del proyecto.
+```

@@ -17,39 +17,43 @@ import {
   handleApiError,
 } from "./_auth.js";
 import { getResendConfig } from "./_email.js";
+import { escapeHtml, layout, heading, paragraph, ctaButton, COLOR, FONT_STACK } from "./_email-brand.js";
 
 export const config = { runtime: "nodejs", maxDuration: 30 };
 
-function buildEmailHtml({ sprintName, projectName, closesAtLocal, appUrl }) {
-  return `<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;">
-    <tr><td style="background:linear-gradient(135deg,#542c9c,#f5a623);padding:28px;text-align:center;color:#fff;">
-      <div style="font-size:22px;font-weight:700;">Retro del Sprint pendiente</div>
-      <div style="font-size:13px;margin-top:6px;">${sprintName} · ${projectName}</div>
-    </td></tr>
-    <tr><td style="padding:24px;color:#333;font-size:14px;line-height:1.6;">
-      <p>Hola,</p>
-      <p>El sprint <b>${sprintName}</b> cerró. Tu opinión es importante para entender cómo se está sintiendo el equipo y qué patrones repetir o ajustar el próximo ciclo.</p>
-      <p>Tienes hasta <b>${closesAtLocal}</b> para responder. Toma menos de 5 minutos:</p>
-      <ul style="padding-left:20px;color:#555;">
+// Constructor puro: mismo layout de marca que api/invite.js y las
+// plantillas de Supabase Auth. `sprintName` es el único dato con nombre
+// libre elegido por una persona (el nombre del sprint) y antes NO se
+// escapaba — un nombre de sprint con `<script>` se habría ejecutado en la
+// bandeja de entrada de todo el equipo. Se escapa aquí, junto con el resto
+// de valores por defensa en profundidad, aunque `projectName`, `appUrl` y
+// `closesAtLocal` los construye el propio backend.
+export function buildRetroEmailHtml({ sprintName, projectName, closesAtLocal, appUrl }) {
+  const safeSprintName = escapeHtml(sprintName || "Sprint");
+  const safeProjectName = escapeHtml(projectName);
+  const safeClosesAtLocal = escapeHtml(closesAtLocal);
+  const safeAppUrl = escapeHtml(appUrl);
+
+  const contentHtml = `
+      ${heading("Retro del Sprint pendiente")}
+      ${paragraph(`<strong style="color:${COLOR.ink};">${safeSprintName}</strong> · ${safeProjectName}`)}
+      ${paragraph("Hola,")}
+      ${paragraph(`El sprint <strong style="color:${COLOR.ink};">${safeSprintName}</strong> cerró. Tu opinión es importante para entender cómo se está sintiendo el equipo y qué patrones repetir o ajustar el próximo ciclo.`)}
+      ${paragraph(`Tienes hasta <strong style="color:${COLOR.ink};">${safeClosesAtLocal}</strong> para responder. Toma menos de 5 minutos:`)}
+      <ul style="margin:0 0 20px;padding-left:20px;font-family:${FONT_STACK};font-size:14.5px;line-height:1.7;color:${COLOR.inkSoft};">
         <li>Emoji de cómo te sentiste al cerrar el sprint</li>
         <li>Un párrafo de lo que te gustó</li>
         <li>Un párrafo de lo que no te gustó</li>
         <li>Tres señalizaciones sobre tus compañeros del sprint</li>
       </ul>
-      <p style="text-align:center;margin-top:24px;">
-        <a href="${appUrl}" style="background:linear-gradient(135deg,#542c9c,#6e3ebf);color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Responder ahora</a>
-      </p>
-      <p style="font-size:11px;color:#888;margin-top:24px;">Las señalizaciones son anónimas en la vista del PO. Solo se ven los conteos agregados.</p>
-    </td></tr>
-    <tr><td style="background:#0aa0ab;color:#fff;text-align:center;padding:14px;font-size:11px;">
-      Productivity-Plus
-    </td></tr>
-  </table>
-</td></tr></table>
-</body></html>`;
+      ${ctaButton(safeAppUrl, "Responder ahora")}
+      ${paragraph("Las señalizaciones son anónimas en la vista del PO. Solo se ven los conteos agregados.")}`;
+
+  return layout({
+    title: `Retro pendiente · ${safeSprintName}`,
+    preheader: `Retro pendiente del sprint ${safeSprintName} · responde en menos de 5 minutos`,
+    contentHtml,
+  });
 }
 
 const getAppBaseUrl = () =>
@@ -126,7 +130,7 @@ export default async function handler(req, res) {
         const closesAtLocal = new Date(closesAt).toLocaleDateString("es-CO", {
           day: "numeric", month: "long", year: "numeric",
         });
-        const html = buildEmailHtml({
+        const html = buildRetroEmailHtml({
           sprintName: sprint.name,
           projectName: `Proyecto #${sprint.project_id}`,
           closesAtLocal, appUrl,

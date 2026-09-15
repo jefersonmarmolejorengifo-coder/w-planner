@@ -14,6 +14,10 @@
 - **Aviso de enlace viejo** (H-065) y mensaje honesto cuando se agota el tope de correos (H-062).
 - **CAPTCHA (Cloudflare Turnstile) ACTIVO en producción desde 2026-09-15** (H-054): widget "Productivity-Plus login" creado por API, clave pública en Vercel, secreto en Supabase; pedir un código sin CAPTCHA se rechaza (`captcha_failed`) y el tope de correos subió de 30 a 100/h. Comprobado que el login por código y la renovación de sesión siguen funcionando. Si Turnstile no carga, la persona ve qué pasa, puede reintentar y, al segundo fallo, tiene el contacto info@softatumedida.com. Reversión: `SUPABASE_PROJECT_REF=pkccbrzsvcipkmnllxhz node scripts/enable-auth-captcha.mjs --disable`.
 - **Pruebas de componente del login** (jsdom + Testing Library, H-053), incluidas las rutas de CAPTCHA y de fallo, con sabotajes que fallan donde deben.
+- **"El código llega pero siempre dice vencido" (2026-09-15) → ARREGLADO.**
+  - Causa, con logs de Auth: la persona escribía el código de un correo anterior, ya anulado porque cada pedido anula los previos. Los correos tenían el mismo asunto y Outlook los agrupaba en una conversación. Verificaciones `otp_expired` a los 9-16 s de cada envío, con el token vigente sin usar. El servidor está sano (`--check` limpio).
+  - Arreglo 1: **el código va al inicio del asunto**, por decisión del dueño (`3eae64e` + `add69eb`, publicado con `--apply`, 14/14 OK, security 9.6). Cada correo queda separado y el último arriba. Costo aceptado: el código se ve en la notificación bloqueada y en paneles que solo muestran el asunto.
+  - Arreglo 2: **la pantalla muestra la hora del código vigente** y la usa en el mensaje de error (`0fd8510`, 385 tests, desplegado en Vercel).
 - **Revisión del mismo bug en otros proyectos** (solo lectura, logs de 24 h sin tráfico de acceso en ninguno): Cuadre y VoxLab expuestos (canjean el `token_hash` en el GET), TuAgendaApp (enlace puro), Triada (sin acceso por API); el Hub manda código + enlace de respaldo (el enlace anula el código); hirly ya usa código; Academia aún no está en producción.
 
 ## Qué falta

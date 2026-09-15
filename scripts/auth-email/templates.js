@@ -185,8 +185,12 @@ function emailChangeContent() {
 // anteriores. En los logs del 2026-09-15 se ven verificaciones a los 9-16 s
 // del envío, con el token vigente sin usar. Con el código en el asunto, cada
 // correo queda separado, el último arriba, y el código se lee sin abrirlo.
-// Costo aceptado por el dueño: el código se ve en la notificación del
-// teléfono bloqueado.
+// Costo aceptado por el dueño: el código se ve sin abrir el correo, en la
+// notificación del teléfono bloqueado y también donde solo se muestra el
+// asunto: el panel del proveedor SMTP, el DLP o journaling corporativo, los
+// resúmenes de no leídos y el "Re:" de un reenvío (revisión de security,
+// 9.6/10). Lo acotan el uso único, los 15 minutos de vigencia y el CAPTCHA
+// para pedirlo.
 export const AUTH_EMAIL_TEMPLATES = {
   magic_link: {
     subject: '{{ .Token }} es tu código de acceso a Productivity-Plus',

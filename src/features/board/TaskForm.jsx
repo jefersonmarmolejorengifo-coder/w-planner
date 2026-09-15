@@ -5,6 +5,7 @@ import { calcAporte, calcProgressFromSubtasks, DEFAULT_DIMENSIONS } from "../../
 import { parseDeps } from "../../lib/deps";
 import { CustomFieldsRenderer } from "../../lib/CustomFieldsRenderer";
 import { inp, readonlyInp } from "../../lib/formStyles";
+import { getHistoryFieldLabel } from "../../lib/taskHistoryLabels";
 import { useConfirm } from "../../ui/ConfirmDialog";
 
 // Estados que cuentan como "cierre" de una tarjeta. Privado de TaskForm.
@@ -890,7 +891,7 @@ export default function TaskForm({ task, setTask, participants, indicators, task
                   <div key={h.id} style={{ display: "flex", gap: 8, fontSize: 11, padding: "5px 8px", background: "#fafafe", borderRadius: 6, border: "1px solid #e8e0f4" }}>
                     <span style={{ color: "#969696", flexShrink: 0 }}>{new Date(h.changed_at).toLocaleString('es-CO', { timeZone: 'America/Bogota', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                     <span style={{ color: "#542c9c", fontWeight: 600, flexShrink: 0 }}>{h.changed_by}</span>
-                    <span style={{ color: "#888" }}>{h.field_name}:</span>
+                    <span style={{ color: "#888" }}>{getHistoryFieldLabel(h.field_name)}:</span>
                     <span style={{ color: "#c0392b", textDecoration: "line-through" }}>{h.old_value || "—"}</span>
                     <span style={{ color: "#888" }}>→</span>
                     <span style={{ color: "#27ae60", fontWeight: 600 }}>{h.new_value || "—"}</span>

@@ -8,6 +8,7 @@ import { readCustomFieldValue } from "../../lib/customFields";
 import TaskForm from "./TaskForm";
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
+import { useTaskHistory } from "../../hooks/useTaskHistory";
 
 const emptyTask = (id) => ({
   id,
@@ -221,7 +222,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   const confirm = useConfirm();
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
-  const [taskHistory, setTaskHistory] = useState([]);
+  const { history: taskHistory, load: loadTaskHistory, clear: clearTaskHistory } = useTaskHistory();
   const [fStatus, setFStatus] = useState("");
   const [fType, setFType] = useState("");
   const [fIndicator, setFIndicator] = useState("");
@@ -235,16 +236,16 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     // de la secuencia ni disparar trabajo en el servidor por cada formulario que
     // el usuario abre y descarta (H-014). El número definitivo aparece tras guardar.
     setForm(emptyTask(null));
+    // Sin esto, la tarea nueva heredaba el historial de la última tarjeta
+    // abierta: nadie lo limpiaba (bug reportado por el dueño). `clear()`
+    // también invalida cualquier consulta de historial que siga en vuelo.
+    clearTaskHistory();
     setModal("new");
   };
-  const openEdit = async (t) => {
+  const openEdit = (t) => {
     setForm({ ...t });
-    setTaskHistory([]);
     setModal(t.id);
-    if (projectId) {
-      const { data } = await supabase.from('task_history').select('*').eq('task_id', t.id).eq('project_id', projectId).order('changed_at', { ascending: false }).limit(20);
-      if (data) setTaskHistory(data);
-    }
+    loadTaskHistory(t.id, projectId);
   };
 
   // Open edit modal when triggered from DependenciesTab
@@ -253,17 +254,13 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     let active = true;
     const openFromDependencyGraph = async () => {
       setForm({ ...editTaskFromDep });
-      setTaskHistory([]);
       setModal(editTaskFromDep.id);
-      if (projectId) {
-        const { data } = await supabase.from('task_history').select('*').eq('task_id', editTaskFromDep.id).eq('project_id', projectId).order('changed_at', { ascending: false }).limit(20);
-        if (active && data) setTaskHistory(data);
-      }
+      await loadTaskHistory(editTaskFromDep.id, projectId);
       if (active && onDepEditDone) onDepEditDone();
     };
     openFromDependencyGraph();
     return () => { active = false; };
-  }, [editTaskFromDep, onDepEditDone, projectId]);
+  }, [editTaskFromDep, onDepEditDone, projectId, loadTaskHistory]);
 
   const save = async () => {
     if (!form.title.trim()) { toast("El título es obligatorio", { type: 'error' }); return; }

@@ -18,6 +18,13 @@
   - Causa, con logs de Auth: la persona escribía el código de un correo anterior, ya anulado porque cada pedido anula los previos. Los correos tenían el mismo asunto y Outlook los agrupaba en una conversación. Verificaciones `otp_expired` a los 9-16 s de cada envío, con el token vigente sin usar. El servidor está sano (`--check` limpio).
   - Arreglo 1: **el código va al inicio del asunto**, por decisión del dueño (`3eae64e` + `add69eb`, publicado con `--apply`, 14/14 OK, security 9.6). Cada correo queda separado y el último arriba. Costo aceptado: el código se ve en la notificación bloqueada y en paneles que solo muestran el asunto.
   - Arreglo 2: **la pantalla muestra la hora del código vigente** y la usa en el mensaje de error (`0fd8510`, 385 tests, desplegado en Vercel).
+- **El dueño que crea un tablero arranca con el tour de PO (2026-09-15) → ARREGLADO.**
+  - Causa: `create_project_secure` insertaba al creador sin rol, así que tomaba el DEFAULT `'participant'` y le arrancaba el tour de participante.
+  - Base: migración `20260915120000_duenio_nace_po_y_tours_por_rol.sql` (`324b8a9`), ensayada con ROLLBACK, aplicada y verificada. El creador entra como `'po'`, un trigger lo garantiza en cualquier INSERT del dueño y `user_onboarding.completed_roles` guarda qué tours se completaron.
+  - App (`896dc1c`): al crear un tablero por cualquiera de los dos caminos arranca el tour de PO, solo la primera vez como dueño (decisión de Jefer).
+- **El historial de cambios ya no se cruza entre tarjetas (2026-09-15) → ARREGLADO** (`bf4395b`, 400 tests, desplegado).
+  - Causa: el historial vivía en un estado compartido del tablero. Abrir "Nueva tarea" no lo limpiaba, así que mostraba el de la última tarjeta abierta, y una respuesta lenta de una tarjeta anterior podía pisar la actual.
+  - Arreglo: hook `src/hooks/useTaskHistory.js`. Limpia al abrir una tarea nueva, descarta respuestas viejas y filtra por tarea **y** tablero. Los campos se muestran en español (`src/lib/taskHistoryLabels.js`).
 - **Revisión del mismo bug en otros proyectos** (solo lectura, logs de 24 h sin tráfico de acceso en ninguno): Cuadre y VoxLab expuestos (canjean el `token_hash` en el GET), TuAgendaApp (enlace puro), Triada (sin acceso por API); el Hub manda código + enlace de respaldo (el enlace anula el código); hirly ya usa código; Academia aún no está en producción.
 
 ## Qué falta
@@ -27,6 +34,9 @@
 | Prueba final: entrar con jdmarmolejo@ingeniopichichi.com (CAPTCHA + código + plan Pro Team) | Jefer | Alta |
 | Vigilar `captcha_failed` en los logs de Auth durante 48 h (si sube, revertir con `enable-auth-captcha --disable`) | — | Media |
 | Arreglar el bug de enlaces: Cuadre y VoxLab → TuAgendaApp → Hub (quitar el enlace de respaldo) → hirly (`email_change`) → Triada | Jefer lo dejó para el final (repos aparte; el Hub cruza la frontera de afiliados) | Alta en los que tengan usuarios corporativos |
+| Vista global de actividad del tablero (quién cambió qué y en qué tarea), además del historial por tarjeta | Decisión de Jefer | Media |
+| Cerrar `user_onboarding` a `anon` (`REVOKE ALL ... FROM anon`); hoy no es explotable porque la RLS lo impide | OK de Jefer (migración con ensayo) | Media |
+| La prueba de cooldown de `AuthScreen` falla a veces bajo carga (pasa al repetir) | — | Baja |
 | Reautorizar el conector de Gmail en claude.ai | Jefer | Baja |
 | Outlook de escritorio muestra los correos a todo el ancho (Supabase borra los comentarios MSO) | — | Baja, aceptado |
 

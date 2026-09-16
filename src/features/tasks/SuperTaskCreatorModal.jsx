@@ -1,6 +1,7 @@
 import { useState, useId } from "react";
 import { supabase } from "../../supabaseClient";
 import { useDialog } from "../../useDialog";
+import WeightInput from "../../ui/WeightInput";
 
 // Modal de creación de super-tareas (objetivos que agrupan tareas con pesos).
 // Extraído del monolito (H-002) y cargado con React.lazy: solo se descarga cuando
@@ -129,9 +130,12 @@ export default function SuperTaskCreatorModal({ projectId, tasks, onClose, onCre
                   {selected && (
                     <>
                       <span style={{ fontSize: 10, color: "#888" }}>peso</span>
-                      <input type="number" step="0.1" min="0.1" max="5" value={weight}
-                        onChange={(e) => setSelectedTasks(prev => ({ ...prev, [t.id]: Number(e.target.value) }))}
-                        style={{ width: 60, padding: "2px 6px", border: "1px solid #ddd", borderRadius: 4, fontSize: 11 }} />
+                      <WeightInput
+                        value={weight}
+                        onCommit={(n) => setSelectedTasks(prev => ({ ...prev, [t.id]: n }))}
+                        ariaLabel={`peso de ${t.title}`}
+                        style={{ width: 60 }}
+                      />
                     </>
                   )}
                 </div>

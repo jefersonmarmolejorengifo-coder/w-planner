@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { supabase } from "../../supabaseClient";
 import { STATUS_COLORS } from "../../constants";
 import { PresentationCard } from "../presentation/PresentationCard";
+import { formatWeight } from "../../lib/superTaskWeight";
 
 // Super-tareas: objetivos grandes (jarrón que se llena con el aporte de tareas
 // vinculadas, agrupadas por sprint). Extraído del monolito (H-002), cargado con
@@ -287,7 +288,7 @@ function SuperTaskExpanded({ superTask, tasks, links, sprintsMap, sprintColorOf,
                         >
                           <span style={{ opacity: 0.7, fontSize: 10 }}>#{t.id}</span>
                           <span>{t.title.length > 32 ? t.title.slice(0, 32) + "…" : t.title}</span>
-                          <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>×{t.weight.toFixed(1)}</span>
+                          <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>×{formatWeight(t.weight)}</span>
                           {isHover && (
                             <div style={{
                               position: "absolute", left: 0, top: "100%", marginTop: 8,

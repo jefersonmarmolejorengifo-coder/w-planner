@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { STATUS_COLORS, ESTADOS, DEFAULT_TASK_TYPES } from "../../constants";
 import { calcAporte, calcProgressFromSubtasks, DEFAULT_DIMENSIONS } from "../../lib/aporte";
@@ -7,6 +7,7 @@ import { CustomFieldsRenderer } from "../../lib/CustomFieldsRenderer";
 import { inp, readonlyInp } from "../../lib/formStyles";
 import { getHistoryFieldLabel } from "../../lib/taskHistoryLabels";
 import { useConfirm } from "../../ui/ConfirmDialog";
+import WeightInput from "../../ui/WeightInput";
 
 // Estados que cuentan como "cierre" de una tarjeta. Privado de TaskForm.
 const CLOSE_STATES = ["Finalizada", "Cancelada"];
@@ -130,16 +131,20 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
     }
   };
 
-  const updateWeight = async (superId, w) => {
-    const next = Math.max(0.1, Math.min(5, Number(w) || 1));
+  // Un timer por super-tarea, en un ref (no en una propiedad de la función:
+  // esta se recreaba en cada render y el "debounce" viejo nunca frenaba
+  // nada — cada tecla disparaba su propio UPDATE y podían llegar
+  // desordenados). No se cancelan los timers pendientes al desmontar: esa
+  // escritura debe llegar a la base aunque el formulario se cierre rápido.
+  const weightTimersRef = useRef({});
+
+  // Recibe un número ya validado (WeightInput solo llama onCommit con un
+  // valor en (0, 1] parseado); acá solo queda actualizar el estado local y
+  // persistir con un debounce real de 400ms por super-tarea.
+  const updateWeight = (superId, next) => {
     setLinks(prev => ({ ...prev, [superId]: next }));
-    // Debounce simple: actualiza el server tras 400ms sin más cambios.
-    if (updateWeight._timers) {
-      clearTimeout(updateWeight._timers[superId]);
-    } else {
-      updateWeight._timers = {};
-    }
-    updateWeight._timers[superId] = setTimeout(async () => {
+    clearTimeout(weightTimersRef.current[superId]);
+    weightTimersRef.current[superId] = setTimeout(async () => {
       const { error: err } = await supabase
         .from("task_super_links")
         .update({ weight: next })
@@ -166,7 +171,7 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ fontSize: 11, color: "#666", marginBottom: 2 }}>
-        Marca las super-tareas a las que esta tarea aporta. El peso multiplica el aporte cuando se cierre (1.0 = aporte completo, 0.5 = mitad, etc.).
+        Marca las super-tareas a las que esta tarea aporta. El peso va de 0 a 1 (se escribe con punto o coma) y multiplica el aporte cuando se cierre: 1 = aporte completo, 0.5 = la mitad.
       </div>
       {superTasks.map(st => {
         const selected = links[st.id] !== undefined;
@@ -197,21 +202,11 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
             {selected && (
               <>
                 <label style={{ fontSize: 10, color: "#666" }}>peso</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  max="5"
+                <WeightInput
                   value={weight}
-                  onChange={(e) => updateWeight(st.id, e.target.value)}
-                  style={{
-                    width: 64,
-                    padding: "4px 6px",
-                    border: `1px solid ${st.color}55`,
-                    borderRadius: 5,
-                    fontSize: 12,
-                    textAlign: "center",
-                  }}
+                  onCommit={(n) => updateWeight(st.id, n)}
+                  ariaLabel={`peso de ${st.title}`}
+                  style={{ borderColor: `${st.color}55` }}
                 />
               </>
             )}

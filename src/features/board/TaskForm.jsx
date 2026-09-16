@@ -7,11 +7,9 @@ import { moveItem } from "../../lib/reorder";
 import { CustomFieldsRenderer } from "../../lib/CustomFieldsRenderer";
 import { inp, readonlyInp } from "../../lib/formStyles";
 import { getHistoryFieldLabel } from "../../lib/taskHistoryLabels";
+import { CLOSE_STATES, applyStatusChange } from "../../lib/closeValidation";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import WeightInput from "../../ui/WeightInput";
-
-// Estados que cuentan como "cierre" de una tarjeta. Privado de TaskForm.
-const CLOSE_STATES = ["Finalizada", "Cancelada"];
 
 // ─── StarRating ────────────────────────────────────────────
 function StarRating({ value, onChange, readonly }) {
@@ -469,9 +467,11 @@ export default function TaskForm({ task, setTask, participants, indicators, task
 
   const upd = (key, val) =>
     setTask((prev) => {
-      const next = { ...prev, [key]: val };
-      if (key === "status" && CLOSE_STATES.includes(val)) next.validationClose = val;
-      return next;
+      // La regla de "cerrar rellena validationClose" vive en closeValidation.js
+      // (compartida con el arrastre del tablero, ver BoardTab/boardDrag.js) para
+      // que una tarjeta cerrada arrastrando quede igual que una cerrada aquí.
+      if (key === "status") return applyStatusChange(prev, val);
+      return { ...prev, [key]: val };
     });
 
   const addSubtask = () => {

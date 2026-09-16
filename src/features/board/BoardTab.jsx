@@ -8,6 +8,7 @@ import { getColombiaNow } from "../../lib/format";
 import { readCustomFieldValue } from "../../lib/customFields";
 import { buildKrTitleMap, resolveKrTitle } from "../../lib/krTitle";
 import { hasUnsavedChanges } from "../../lib/hasUnsavedChanges";
+import { resolveTaskDrop } from "../../lib/boardDrag";
 import TaskForm from "./TaskForm";
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
@@ -257,6 +258,13 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   // después de que createTask() confirme el id.
   const [pendingSuperLinks, setPendingSuperLinks] = useState({});
   const handlePendingSuperLinksChange = useCallback((links) => setPendingSuperLinks(links), []);
+  // Arrastre nativo de tarjetas entre columnas (draggable/onDrag*, sin
+  // librería — mismo patrón que las subtareas de TaskForm.jsx). Límite
+  // conocido y aceptado: el arrastre nativo del navegador no responde al
+  // dedo en móvil ni al teclado; ahí (y para accesibilidad) el camino sigue
+  // siendo abrir la tarjeta (clic) y cambiar el Estado desde el formulario.
+  const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [dragOverStatus, setDragOverStatus] = useState(null);
 
   const openNew = () => {
     // El id se reserva al GUARDAR (ver save()), no al abrir, para no quemar ids
@@ -429,6 +437,55 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   // arreglo completo rompería esa memoización en cada render de BoardTab.
   const krTitleById = useMemo(() => buildKrTitleMap(keyResults), [keyResults]);
 
+  // ── Arrastre nativo entre columnas ──────────────────────────
+  // Handlers estables (useCallback): TaskCard y TaskCardWithClick están
+  // memoizados (evitan repintar cientos de tarjetas por cambios ajenos, ver
+  // comentarios arriba); el arrastre en sí NO se cablea dentro de esos
+  // componentes, sino en el <div> plano que envuelve cada tarjeta más abajo,
+  // así que su firma de props no cambia y su memoización sigue intacta pase
+  // lo que pase con draggedTaskId/dragOverStatus.
+  const handleCardDragStart = useCallback((e, taskId) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(taskId)); // Firefox exige setData para iniciar el arrastre
+    setDraggedTaskId(taskId);
+  }, []);
+
+  const handleCardDragEnd = useCallback(() => {
+    setDraggedTaskId(null);
+    setDragOverStatus(null);
+  }, []);
+
+  const handleColumnDragOver = useCallback((e, status) => {
+    if (draggedTaskId === null) return;
+    e.preventDefault(); // requerido por el navegador para permitir soltar aquí
+    e.dataTransfer.dropEffect = "move";
+    setDragOverStatus((prev) => (prev === status ? prev : status));
+  }, [draggedTaskId]);
+
+  const handleColumnDragLeave = useCallback((e, status) => {
+    // Solo apaga el resalte si el puntero salió de la columna de verdad (no
+    // al pasar de una tarjeta a otra dentro de ella, que también dispara
+    // dragleave del contenedor).
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setDragOverStatus((prev) => (prev === status ? null : prev));
+  }, []);
+
+  const handleColumnDrop = useCallback((e, status) => {
+    e.preventDefault();
+    const draggedId = draggedTaskId;
+    setDraggedTaskId(null);
+    setDragOverStatus(null);
+    if (draggedId == null) return;
+    const draggedTask = tasks.find((t) => t.id === draggedId);
+    // resolveTaskDrop ya filtra el no-op (misma columna) y cualquier estado
+    // que no sea una de las 7 columnas del tablero; updateTask con
+    // skipAporteRecalc:true deja intacto el aporte histórico (H-0XX, ver
+    // doctrina en src/lib/aporte.js) — arrastrar solo cambia el estado, nunca
+    // recalcula el jarrón de las super-tareas.
+    const next = resolveTaskDrop(draggedTask, status);
+    if (next) updateTask(next, { skipAporteRecalc: true });
+  }, [draggedTaskId, tasks, updateTask]);
+
   const ss = { background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-secondary)", borderRadius: 6, padding: "6px 8px", fontSize: 12, cursor: "pointer", outline: "none", fontFamily: "inherit" };
   const si = { ...ss, color: "var(--color-text-primary)" };
 
@@ -467,19 +524,48 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
       </div>
 
       <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 12, minHeight: 200 }}>
-        {ESTADOS.map((status) => (
-          <div key={status} style={{ flexShrink: 0, width: 210, background: "#ffffff", borderRadius: 14, boxShadow: "0 2px 16px rgba(84,44,156,0.06)", padding: "12px 10px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 8, borderBottom: `2px solid ${STATUS_COLORS[status]}` }}>
-              <span style={{ fontSize: 11, fontWeight: 500, color: STATUS_COLORS[status], textTransform: "uppercase", letterSpacing: "0.06em" }}>{status}</span>
-              <span style={{ fontSize: 11, background: STATUS_LIGHT[status], color: STATUS_COLORS[status], borderRadius: 10, padding: "1px 7px", fontWeight: 500 }}>
-                {grouped[status]?.length || 0}
-              </span>
+        {ESTADOS.map((status) => {
+          // Columna resaltada mientras se arrastra una tarjeta por encima.
+          const isDropTarget = dragOverStatus === status && draggedTaskId !== null;
+          return (
+            <div
+              key={status}
+              onDragOver={(e) => handleColumnDragOver(e, status)}
+              onDragLeave={(e) => handleColumnDragLeave(e, status)}
+              onDrop={(e) => handleColumnDrop(e, status)}
+              style={{
+                flexShrink: 0, width: 210, background: "#ffffff", borderRadius: 14,
+                boxShadow: isDropTarget ? "0 0 0 2px #542c9c, 0 4px 20px rgba(84,44,156,0.22)" : "0 2px 16px rgba(84,44,156,0.06)",
+                padding: "12px 10px", transition: "box-shadow 0.15s ease",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 8, borderBottom: `2px solid ${STATUS_COLORS[status]}` }}>
+                <span style={{ fontSize: 11, fontWeight: 500, color: STATUS_COLORS[status], textTransform: "uppercase", letterSpacing: "0.06em" }}>{status}</span>
+                <span style={{ fontSize: 11, background: STATUS_LIGHT[status], color: STATUS_COLORS[status], borderRadius: 10, padding: "1px 7px", fontWeight: 500 }}>
+                  {grouped[status]?.length || 0}
+                </span>
+              </div>
+              {(grouped[status] || []).map((task) => (
+                // Envoltorio plano (no memoizado) que carga el arrastre: deja a
+                // TaskCardWithClick/TaskCard —memoizados— sin props nuevas, así
+                // que arrastrar por el tablero no repinta el resto de tarjetas.
+                // Límite conocido y aceptado: `draggable` es un API de mouse del
+                // navegador y no responde al dedo en móvil ni al teclado; ahí (y
+                // como camino accesible) se sigue abriendo la tarjeta con clic y
+                // cambiando el Estado desde el formulario.
+                <div
+                  key={task.id}
+                  draggable
+                  onDragStart={(e) => handleCardDragStart(e, task.id)}
+                  onDragEnd={handleCardDragEnd}
+                  style={{ opacity: draggedTaskId === task.id ? 0.5 : 1 }}
+                >
+                  <TaskCardWithClick task={task} openEdit={openEdit} customFieldDefs={shownTaskFieldDefs} krTitle={resolveKrTitle(task.krId, krTitleById)} />
+                </div>
+              ))}
             </div>
-            {(grouped[status] || []).map((task) => (
-              <TaskCardWithClick key={task.id} task={task} openEdit={openEdit} customFieldDefs={shownTaskFieldDefs} krTitle={resolveKrTitle(task.krId, krTitleById)} />
-            ))}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {modal && form && (

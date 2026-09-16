@@ -45,7 +45,14 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
     }
   };
 
-  const updateTask = async (task) => {
+  // `skipAporteRecalc`: lo usa EXCLUSIVAMENTE el arrastre del tablero (ver
+  // BoardTab.jsx). El aporte es un snapshot histórico (doctrina en
+  // src/lib/aporte.js): cambiar solo el estado de una tarjeta arrastrando NO
+  // debe recalcularlo con los pesos vigentes, o el jarrón de las super-tareas
+  // (que multiplica este valor por su peso) se movería sin que nadie haya
+  // tocado tiempo/dificultad/valor estratégico. El guardado desde el
+  // formulario sigue recalculando como siempre (no pasa esta opción).
+  const updateTask = async (task, { skipAporteRecalc = false } = {}) => {
     if (task.status === 'Finalizada' && !task.finalizedAt) {
       task = { ...task, finalizedAt: getColombiaNow() };
     }
@@ -55,7 +62,7 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
       task = { ...task, lastModifiedBy: activeUser.name };
     }
     const dbTask = { ...taskToDb(task) };
-    if (Array.isArray(dimensions) && dimensions.length) {
+    if (!skipAporteRecalc && Array.isArray(dimensions) && dimensions.length) {
       dbTask.aporte_snapshot = calcAporte(task, dimensions);
     }
     if (!hasCustomFieldsSchema) {

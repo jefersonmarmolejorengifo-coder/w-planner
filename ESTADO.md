@@ -30,6 +30,15 @@
   - Arreglo: `src/lib/superTaskWeight.js` (parseo y formato puros) + `src/ui/WeightInput.jsx` (campo de texto compartido: acepta punto o coma, selecciona todo al enfocar, ignora teclas inválidas, avisa de forma accesible y revierte al último valor bueno al salir). Lo usan `TaskForm` (TaskSuperLinksEditor) y `SuperTaskCreatorModal`.
   - Rango decidido con el dueño: mayor que 0 y hasta 1, máximo 2 decimales. El `CHECK` de la base sigue en `> 0 AND <= 5`; los 4 enlaces > 1 del tablero demo se ven pero no se pueden reescribir por encima de 1.
   - De paso: el guardado tenía un debounce falso (los timers vivían en una propiedad de una función que se recreaba en cada render, así que cada tecla disparaba su UPDATE); ahora es un `useRef` por super-tarea. Y `SuperTasksTab` mostraba el peso con 1 decimal (0.25 se veía "×0.3").
+- **Seis mejoras del tablero pedidas por el dueño (2026-09-15) → EN PRODUCCIÓN** (`f803805`, 513 tests, un solo despliegue).
+  - **Super-tareas al crear la tarjeta**: la sección exigía `task.id` y `task_super_links` tiene FK a `tasks`. Ahora la selección y los pesos viven en memoria y `BoardTab.save()` los inserta tras confirmar el id; `createTask` devuelve la tarea creada o `null` (`src/lib/superTaskLinks.js`).
+  - **Salir de la tarjeta guarda**: X, clic fuera y Escape guardan; "Cancelar" pasó a "Descartar" con confirmación. El modal ya NO se cierra antes de escribir: si la validación o la escritura fallan, sigue abierto con los datos (`src/lib/hasUnsavedChanges.js`).
+  - **Candado anti doble guardado**: cerrar dos veces con el guardado en vuelo reservaba dos ids y creaba DOS tareas (o mostraba un conflicto falso). `savingRef` síncrono + `try/finally` + pie deshabilitado + "Guardando…" y toast "Tarjeta guardada".
+  - **OKR en la tarjeta**: el título del resultado clave se ve en el tablero (`src/lib/krTitle.js`), pasado ya resuelto como string para no romper el `memo` de `TaskCard`.
+  - **Avance del OKR sin depender de subtareas**: era todo-o-nada (% de tareas Finalizada); ahora es el promedio del avance real, Finalizada cuenta 100 y Cancelada se excluye (`src/lib/okrProgress.js`).
+  - **Subtareas reordenables**: asa de arrastre nativo + flechas ▲▼ (24×24 px, el único camino en móvil y el accesible por teclado); cada subtarea gana `uid` estable (`src/lib/reorder.js`).
+  - **Arrastrar tarjetas entre columnas**: arrastre nativo sin librería; la regla de `validationClose` al cerrar se extrajo a `src/lib/closeValidation.js` y la comparten formulario y arrastre; `updateTask(..., { skipAporteRecalc: true })` evita que arrastrar reescriba el `aporte_snapshot` histórico y mueva los jarrones de super-tareas. Límite aceptado: el arrastre nativo no responde al dedo ni al teclado.
+  - **Dos defectos preexistentes cerrados de paso**: la bitácora de comentarios no guardaba nada (recibía un `projectId` inexistente, botón muerto) y, con dos diálogos abiertos, Escape cerraba los dos de golpe (`useDialog` ahora lleva pila de diálogos, cubierta por `src/useDialog.test.jsx`).
 - **Revisión del mismo bug en otros proyectos** (solo lectura, logs de 24 h sin tráfico de acceso en ninguno): Cuadre y VoxLab expuestos (canjean el `token_hash` en el GET), TuAgendaApp (enlace puro), Triada (sin acceso por API); el Hub manda código + enlace de respaldo (el enlace anula el código); hirly ya usa código; Academia aún no está en producción.
 
 ## Qué falta
@@ -45,6 +54,11 @@
 | Un fallo al guardar un peso reemplaza TODA la lista de super-tareas por un banner rojo (`TaskForm.jsx`, mismo estado `error` que un fallo de carga); separarlo en aviso junto al campo | — | Media |
 | Verificar con un lector de pantalla real que el aviso de peso inválido se anuncia (`role="alert"` sobre texto que no cambia) | — | Baja |
 | Unificar el color de borde de `WeightInput` (#ccc) con el del resto de campos (#ddd) | — | Baja |
+| El texto del peso no aclara que cada super-tarea tiene el suyo (no se reparte un total entre varias) | — | Media |
+| El formulario de creación quedó largo; plegar "Super-tareas que alimenta" en un acordeón solo al crear | — | Baja |
+| Título del OKR en la tarjeta: recorte a una línea + `title=` nativo, que en móvil no existe (evaluar 2 líneas) | — | Baja |
+| 🎯 se usa a la vez para super-tareas y para OKR; diferenciar íconos | — | Baja |
+| Errores crudos de Supabase visibles en la bitácora y en el enlace a super-tareas (preexistente) | — | Baja |
 | Reautorizar el conector de Gmail en claude.ai | Jefer | Baja |
 | Outlook de escritorio muestra los correos a todo el ancho (Supabase borra los comentarios MSO) | — | Baja, aceptado |
 

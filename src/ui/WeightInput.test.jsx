@@ -101,4 +101,57 @@ describe('WeightInput', () => {
     expect(input.value).toBe('1.5');
     expect(input.getAttribute('aria-invalid')).toBe('false');
   });
+
+  it('escribir un valor inválido no vacío ("0") y salir revierte al último valor bueno, no se queda mostrando "0"', () => {
+    const onCommit = vi.fn();
+    render(<Controlled initial={1} onCommit={onCommit} />);
+    const input = screen.getByLabelText('peso de Tarea X');
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '0' } });
+    expect(input.value).toBe('0'); // se deja ver mientras se edita, marcado inválido
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+
+    fireEvent.blur(input);
+    expect(input.value).toBe('1'); // vuelve al último valor confirmado, no se queda en "0"
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('un tercer decimal se ignora al teclear (o al pegar): no llega a mostrarse ni a confirmarse', () => {
+    const onCommit = vi.fn();
+    render(<Controlled initial={0.25} onCommit={onCommit} />);
+    const input = screen.getByLabelText('peso de Tarea X');
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '0.25' } });
+    fireEvent.change(input, { target: { value: '0.255' } }); // pegado con 3 decimales
+    expect(input.value).toBe('0.25');
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('si "value" cambia desde afuera mientras el campo tiene foco, no pisa lo que la persona está escribiendo', () => {
+    const onCommit = vi.fn();
+    // A diferencia de <Controlled>, acá `value` lo maneja el test directamente
+    // (no el propio onCommit): simula que llega un valor nuevo desde el padre
+    // -otra pestaña guardó 1.5, o el padre recargó- mientras la persona edita.
+    const { rerender } = render(<WeightInput value={1} ariaLabel="peso de Tarea X" onCommit={onCommit} />);
+    const input = screen.getByLabelText('peso de Tarea X');
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '0.' } }); // intermedio, aún no confirma nada
+    expect(input.value).toBe('0.');
+
+    rerender(<WeightInput value={1.5} ariaLabel="peso de Tarea X" onCommit={onCommit} />);
+
+    expect(input.value).toBe('0.'); // no se pisa lo que se está tecleando
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('con disabled=true, el campo no deja escribir', () => {
+    const onCommit = vi.fn();
+    render(<WeightInput value={1} ariaLabel="peso de Tarea X" onCommit={onCommit} disabled />);
+    const input = screen.getByLabelText('peso de Tarea X');
+
+    expect(input.disabled).toBe(true);
+  });
 });

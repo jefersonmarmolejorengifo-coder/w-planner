@@ -49,6 +49,44 @@ describe('parseWeight', () => {
   it('rechaza más de 2 decimales', () => {
     expect(parseWeight('0.255')).toBeNull();
   });
+
+  it('rechaza números negativos', () => {
+    expect(parseWeight('-0.5')).toBeNull();
+  });
+
+  it('acepta coma con un cero final ("1,0")', () => {
+    expect(parseWeight('1,0')).toBe(1);
+  });
+
+  it('acepta ceros a la izquierda ("00.5")', () => {
+    expect(parseWeight('00.5')).toBe(0.5);
+  });
+
+  it('acepta dos decimales exactos que redondean a un entero ("1.00")', () => {
+    expect(parseWeight('1.00')).toBe(1);
+  });
+});
+
+// Contrato con la base: task_super_links.weight tiene
+// CHECK (weight > 0 AND weight <= 5). parseWeight es el ÚNICO portón por el
+// que un valor tecleado llega a un `onCommit` (y de ahí a un UPDATE/INSERT);
+// estas pruebas fijan que ninguna entrada límite puede colarse fuera de
+// (0, 1] — un rango más estricto que el CHECK, así que cumplirlo también
+// cumple el CHECK. Si esto se rompe, un `insert`/`update` real chocaría con
+// el CHECK de Postgres (o peor, lo violaría si algún día se relaja).
+describe('parseWeight — contrato con el CHECK de la base', () => {
+  it.each([
+    ['0', 'cero exacto, excluido'],
+    ['-1', 'negativo'],
+    ['5', 'dentro del CHECK de la base pero fuera del rango de la app'],
+    ['6', 'fuera del CHECK de la base'],
+    ['', 'vacío'],
+    ['   ', 'solo espacios'],
+    ['NaN', 'texto que parece número pero no lo es'],
+    ['Infinity', 'no finito'],
+  ])('rechaza "%s" (%s)', (raw) => {
+    expect(parseWeight(raw)).toBeNull();
+  });
 });
 
 describe('formatWeight', () => {

@@ -7,6 +7,7 @@ import { buildSuperLinkRows } from "../../lib/superTaskLinks";
 import { getColombiaNow } from "../../lib/format";
 import { readCustomFieldValue } from "../../lib/customFields";
 import { buildKrTitleMap, resolveKrTitle } from "../../lib/krTitle";
+import { hasUnsavedChanges } from "../../lib/hasUnsavedChanges";
 import TaskForm from "./TaskForm";
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
@@ -168,7 +169,11 @@ const TaskCard = memo(function TaskCard({ task, onClick, customFieldDefs = [], k
 });
 
 // ─── Modal ─────────────────────────────────────────────────
-function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guardar" }) {
+// `onClose` (X, clic fuera, Escape) intenta GUARDAR la tarjeta antes de
+// cerrar — decisión del dueño: salir nunca debe descartar trabajo por
+// accidente. `onDiscard` es la única vía que descarta a propósito (botón
+// "Descartar" del pie), y ya trae su propia confirmación si hace falta.
+function Modal({ title, onClose, onSave, onDiscard, onDelete, children, saveLabel = "Guardar" }) {
   const titleId = useId();
   const dialogRef = useDialog(onClose);
   return (
@@ -205,10 +210,10 @@ function Modal({ title, onClose, onSave, onDelete, children, saveLabel = "Guarda
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onClose} style={{
+            <button onClick={onDiscard} style={{
               background: "#f4f4f4", border: "1px solid #e0e0e0",
               color: "#666666", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13,
-            }}>Cancelar</button>
+            }}>Descartar</button>
             <button onClick={onSave} style={{
               background: "linear-gradient(135deg, #ec6c04, #f07d1e)", border: "none", color: "#ffffff",
               borderRadius: 8, padding: "9px 22px", cursor: "pointer", fontSize: 13, fontWeight: 700,
@@ -230,6 +235,13 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   const confirm = useConfirm();
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(null);
+  // Snapshot de la tarjeta al abrir el modal (vacía si es "Nueva tarea",
+  // copia de la tarea si es edición). hasUnsavedChanges lo compara contra
+  // `form` para saber si cerrar debe guardar/confirmar o si no hay nada que
+  // perder. Referencia propia (no la de `form`): TaskForm nunca muta arreglos
+  // u objetos anidados en el sitio, así que este snapshot queda intacto
+  // aunque comparta contenido inicial con `form`.
+  const [originalForm, setOriginalForm] = useState(null);
   const { history: taskHistory, load: loadTaskHistory, clear: clearTaskHistory } = useTaskHistory();
   const [fStatus, setFStatus] = useState("");
   const [fType, setFType] = useState("");
@@ -250,7 +262,9 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     // El id se reserva al GUARDAR (ver save()), no al abrir, para no quemar ids
     // de la secuencia ni disparar trabajo en el servidor por cada formulario que
     // el usuario abre y descarta (H-014). El número definitivo aparece tras guardar.
-    setForm(emptyTask(null));
+    const empty = emptyTask(null);
+    setForm(empty);
+    setOriginalForm(empty);
     // Sin esto, la tarea nueva heredaba el historial de la última tarjeta
     // abierta: nadie lo limpiaba (bug reportado por el dueño). `clear()`
     // también invalida cualquier consulta de historial que siga en vuelo.
@@ -260,6 +274,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   };
   const openEdit = (t) => {
     setForm({ ...t });
+    setOriginalForm({ ...t });
     setModal(t.id);
     loadTaskHistory(t.id, projectId);
   };
@@ -270,6 +285,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     let active = true;
     const openFromDependencyGraph = async () => {
       setForm({ ...editTaskFromDep });
+      setOriginalForm({ ...editTaskFromDep });
       setModal(editTaskFromDep.id);
       await loadTaskHistory(editTaskFromDep.id, projectId);
       if (active && onDepEditDone) onDepEditDone();
@@ -277,6 +293,14 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     openFromDependencyGraph();
     return () => { active = false; };
   }, [editTaskFromDep, onDepEditDone, projectId, loadTaskHistory]);
+
+  // Nueva tarjeta sin nada escrito (ni siquiera pendingSuperLinks, que vive
+  // fuera de `form` porque task_super_links no admite un task_id nulo): no
+  // hay nada que perder, así que cerrar no debe crear basura ni mostrar
+  // errores de validación (H-0XX, decisión del dueño).
+  const hasAnythingToLose = () =>
+    hasUnsavedChanges(form, originalForm) ||
+    (modal === "new" && Object.keys(pendingSuperLinks).length > 0);
 
   const save = async () => {
     if (!form.title.trim()) { toast("El título es obligatorio", { type: 'error' }); return; }
@@ -294,7 +318,11 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
       toast(`Falta completar: ${faltantes.join(', ')}`, { type: 'error' });
       return;
     }
-    setModal(null);
+    // El modal se cerraba ANTES de escribir en la base: si el guardado
+    // fallaba, la persona veía un toast de error pero la tarjeta ya se había
+    // ido con todo lo escrito. Ahora el cierre es el ÚLTIMO paso, y solo
+    // ocurre si la escritura confirmó éxito — si falla, el modal sigue
+    // abierto con los datos intactos para reintentar.
     if (modal === "new") {
       // Reservar el id atómicamente recién ahora (lock-free vía SEQUENCE, H-014).
       let id = form.id;
@@ -320,7 +348,8 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
       const activeDimensions = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;
       const newTask = { ...form, id, aporteSnapshot: parseFloat(calcAporte(form, activeDimensions).toFixed(1)) };
       const created = await createTask(newTask);
-      if (!created) return; // createTask ya avisó el error con un toast; no perdemos nada porque nunca llegó a existir.
+      if (!created) return; // createTask ya avisó el error con un toast; el modal sigue abierto, nada se perdió.
+      setModal(null); // la tarea ya existe en la base: recién ahora es seguro cerrar.
       // La tarea ya existe: recién ahora se puede insertar en task_super_links
       // (FK a tasks) lo que la persona marcó mientras el formulario era nuevo.
       const rows = buildSuperLinkRows(id, pendingSuperLinks);
@@ -334,8 +363,34 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
       }
       setPendingSuperLinks({});
     } else {
-      await updateTask(form);
+      const ok = await updateTask(form);
+      if (!ok) return; // updateTask ya avisó el error (o el conflicto) con un toast; el modal sigue abierto.
+      setModal(null);
     }
+  };
+
+  // Cierre por X, clic fuera o Escape: la decisión del dueño es que salir
+  // de la tarjeta GUARDA, nunca descarta por accidente. Si no hay nada
+  // escrito (tarjeta nueva sin tocar) no tiene sentido validar ni crear
+  // basura: se cierra directo. Si hay algo, se intenta guardar con las
+  // mismas reglas que el botón "Guardar" — save() ya deja el modal abierto
+  // si la validación falla o si la escritura no se pudo confirmar.
+  const closeAttempt = async () => {
+    if (!hasAnythingToLose()) { setModal(null); return; }
+    await save();
+  };
+
+  // Botón "Descartar" (antes "Cancelar"): esta es la única vía que tira el
+  // trabajo a propósito. Sin cambios, cierra directo; con cambios, confirma
+  // antes de perderlos (useConfirm ya está en el árbol, reutilizado tal cual).
+  const discard = async () => {
+    if (!hasAnythingToLose()) { setModal(null); return; }
+    const ok = await confirm('¿Descartar los cambios de esta tarjeta?', {
+      title: 'Descartar cambios',
+      confirmText: 'Descartar',
+      danger: true,
+    });
+    if (ok) setModal(null);
   };
 
   const del = async () => {
@@ -430,8 +485,9 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
       {modal && form && (
         <Modal
           title={modal === "new" ? `Nueva tarea${form.id != null ? ` #${form.id}` : ""}` : `Tarea #${form.id} — ${form.title || "Sin título"}`}
-          onClose={() => setModal(null)}
+          onClose={closeAttempt}
           onSave={save}
+          onDiscard={discard}
           onDelete={modal !== "new" ? del : undefined}
         >
           <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} customFieldDefs={taskFieldDefs} projectId={projectId} onPendingSuperLinksChange={handlePendingSuperLinksChange} />

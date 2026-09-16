@@ -87,7 +87,10 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
         setTasks(prev => prev.filter(t => t.id !== task.id));
         toast('Esta tarjeta fue eliminada por otra persona mientras la editabas.', { type: 'error' });
       }
-      return;
+      // false: tus cambios NO se guardaron (el conflicto ganó). Quien llama
+      // (BoardTab.save) usa este valor para decidir si puede cerrar el modal
+      // sin perder lo que la persona escribió.
+      return false;
     }
 
     if (!error) {
@@ -146,9 +149,14 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
       const newUpdatedAt = updatedRows?.[0]?.updated_at || task.updatedAt;
       const merged = { ...task, updatedAt: newUpdatedAt };
       setTasks(prev => prev.map(t => t.id === task.id ? merged : t));
+      // true: el UPDATE llegó a la base. BoardTab.save() solo cierra el
+      // modal cuando esto es cierto — si algo falla, la tarjeta debe seguir
+      // abierta con los datos en vez de perderlos en silencio.
+      return true;
     } else {
       console.error('Error actualizando tarea:', error);
       toast('Error al actualizar la tarea: ' + error.message, { type: 'error' });
+      return false;
     }
   };
 

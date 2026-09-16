@@ -50,10 +50,15 @@ const F = ({ label, children, half }) => (
 );
 
 // ─── TaskSuperLinksEditor ──────────────────────────────────
-// Permite linkear una tarea a una o varias super-tareas con peso. Persiste
-// inmediatamente en task_super_links (toggle = insert/delete; cambio de
-// peso = update). Pensado para vivir dentro del modal de TaskForm.
-function TaskSuperLinksEditor({ taskId, projectId }) {
+// Permite linkear una tarea a una o varias super-tareas con peso. Con una
+// tarea ya existente (taskId numérico) persiste inmediatamente en
+// task_super_links (toggle = insert/delete; cambio de peso = update). Con una
+// tarjeta NUEVA (taskId nulo) es imposible escribir ahí todavía —
+// task_super_links.task_id tiene FK a tasks—, así que toda la selección queda
+// en memoria y se avisa al padre vía onPendingLinksChange para que BoardTab la
+// inserte en lote justo después de crear la tarea. Pensado para vivir dentro
+// del modal de TaskForm.
+function TaskSuperLinksEditor({ taskId, projectId, onPendingLinksChange }) {
   const [superTasks, setSuperTasks] = useState([]);
   const [links, setLinks] = useState({}); // super_task_id -> weight
   const [loading, setLoading] = useState(true);
@@ -63,16 +68,22 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      if (!projectId || !taskId) return;
+      if (!projectId) return;
+      // Tarjeta nueva (taskId nulo): no existe fila en task_super_links
+      // todavía, así que solo se trae el catálogo de super-tareas del
+      // proyecto y se arranca sin enlaces (o con los que ya haya marcado la
+      // persona, si este efecto se repite por un cambio de projectId).
       const [stRes, lkRes] = await Promise.all([
         supabase.from("super_tasks")
           .select("id, title, color, icon, target_aporte")
           .eq("project_id", projectId)
           .is("deleted_at", null)
           .order("position", { ascending: true }),
-        supabase.from("task_super_links")
-          .select("super_task_id, weight")
-          .eq("task_id", taskId),
+        taskId
+          ? supabase.from("task_super_links")
+              .select("super_task_id, weight")
+              .eq("task_id", taskId)
+          : Promise.resolve({ data: [], error: null }),
       ]);
       if (cancelled) return;
       if (stRes.error) {
@@ -104,7 +115,20 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
   }, [taskId, projectId]);
 
   const toggleLink = async (superId) => {
-    if (links[superId] !== undefined) {
+    const isSelected = links[superId] !== undefined;
+    if (!taskId) {
+      // Tarjeta nueva: nada que insertar/borrar en la base todavía. Se arma
+      // el mapa siguiente a mano (no con el patrón `setLinks(prev => ...)`)
+      // porque también hay que mandárselo a onPendingLinksChange, y llamar a
+      // un callback del padre dentro de un updater de estado sería un efecto
+      // secundario impuro en el render.
+      const next = { ...links };
+      if (isSelected) delete next[superId]; else next[superId] = 1.0;
+      setLinks(next);
+      onPendingLinksChange?.(next);
+      return;
+    }
+    if (isSelected) {
       // Quitar
       setBusy(true);
       const { error: err } = await supabase
@@ -143,6 +167,11 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
   // persistir con un debounce real de 400ms por super-tarea.
   const updateWeight = (superId, next) => {
     setLinks(prev => ({ ...prev, [superId]: next }));
+    if (!taskId) {
+      // Tarjeta nueva: nada que debouncear ni persistir todavía.
+      onPendingLinksChange?.({ ...links, [superId]: next });
+      return;
+    }
     clearTimeout(weightTimersRef.current[superId]);
     weightTimersRef.current[superId] = setTimeout(async () => {
       const { error: err } = await supabase
@@ -426,7 +455,7 @@ function TaskCommentsThread({ taskId, projectId }) {
 // ─── TaskForm ──────────────────────────────────────────────
 // Formulario de creación/edición de una tarjeta. Dirigido 100% por props
 // (task + setTask + catálogos). Extraído del monolito (H-002, núcleo fase A/B).
-export default function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [], customFieldDefs = [], projectId }) {
+export default function TaskForm({ task, setTask, participants, indicators, taskTypes, currentUser, weights, dimensions, keyResults = [], sprints = [], taskHistory = [], tasks = [], customFieldDefs = [], projectId, onPendingSuperLinksChange }) {
   const isOtra = task.type === "Otra";
   const isClose = CLOSE_STATES.includes(task.status);
   const isSuperUser = currentUser?.isSuperUser;
@@ -812,10 +841,12 @@ export default function TaskForm({ task, setTask, participants, indicators, task
           })()}
 
           {/* Enlace a super-tareas: una tarea puede alimentar varias super-tareas
-              con pesos distintos. Se persiste inmediatamente en task_super_links. */}
-          {task.id && projectId && (
+              con pesos distintos. Con la tarea ya creada se persiste de una en
+              task_super_links; con una tarjeta nueva (task.id nulo) la
+              selección queda en memoria y BoardTab la inserta al guardar. */}
+          {projectId && (
             <F label="Super-tareas que alimenta">
-              <TaskSuperLinksEditor taskId={task.id} projectId={projectId} />
+              <TaskSuperLinksEditor taskId={task.id} projectId={projectId} onPendingLinksChange={onPendingSuperLinksChange} />
             </F>
           )}
 

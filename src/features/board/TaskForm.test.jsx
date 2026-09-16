@@ -13,7 +13,7 @@
 // No hay @testing-library/user-event instalado: se usa fireEvent, igual que
 // WeightInput.test.jsx y AuthScreen.test.jsx.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { ConfirmProvider } from '../../ui/ConfirmDialog';
 import TaskForm from './TaskForm.jsx';
 
@@ -109,11 +109,14 @@ const BASE_TASK = {
   dependentTask: '',
 };
 
-function renderTaskForm() {
+// `taskOverrides` reemplaza claves de BASE_TASK (p. ej. { id: null } para una
+// tarjeta nueva); `extraProps` se pasa tal cual a TaskForm (p. ej.
+// onPendingSuperLinksChange).
+function renderTaskForm(taskOverrides = {}, extraProps = {}) {
   return render(
     <ConfirmProvider>
       <TaskForm
-        task={BASE_TASK}
+        task={{ ...BASE_TASK, ...taskOverrides }}
         setTask={() => {}}
         participants={[]}
         indicators={[]}
@@ -122,6 +125,7 @@ function renderTaskForm() {
         weights={[]}
         dimensions={[]}
         projectId={7}
+        {...extraProps}
       />
     </ConfirmProvider>
   );
@@ -180,5 +184,50 @@ describe('TaskSuperLinksEditor (vía TaskForm) — debounce real del peso', () =
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
 
     expect(updateCalls).toEqual([{ weight: 0.4 }]);
+  });
+});
+
+describe('TaskSuperLinksEditor con tarjeta nueva (task.id nulo)', () => {
+  it('se ve la lista de super-tareas y marcar/pesar NO escribe en la base: todo queda en memoria', async () => {
+    const pendingChanges = [];
+    renderTaskForm({ id: null }, { onPendingSuperLinksChange: (links) => pendingChanges.push(links) });
+
+    // La sección ya no depende de task.id: con la tarjeta nueva igual carga
+    // el catálogo de super-tareas del proyecto.
+    await screen.findByText('Meta X');
+    const checkbox = screen.getByRole('checkbox');
+    expect(checkbox.checked).toBe(false);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+    expect(pendingChanges.at(-1)).toEqual({ 1: 1.0 });
+
+    const weightInput = await screen.findByLabelText('peso de Meta X');
+    fireEvent.focus(weightInput);
+    fireEvent.change(weightInput, { target: { value: '0.4' } });
+    expect(pendingChanges.at(-1)).toEqual({ 1: 0.4 });
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+    expect(pendingChanges.at(-1)).toEqual({});
+
+    // Ninguna llamada tocó task_super_links: ni el select de enlaces (no hay
+    // tarea todavía) ni, sobre todo, ningún insert/update/delete.
+    const tablasConsultadas = fromMock.mock.calls.map(([tabla]) => tabla);
+    expect(tablasConsultadas).not.toContain('task_super_links');
+  });
+
+  it('con una tarjeta existente el comportamiento de siempre no cambió: marcar SÍ escribe en la base', async () => {
+    renderTaskForm(); // BASE_TASK.id = 42
+
+    // resolverFor("task_super_links") en modo select ya trae "Meta X" enlazada.
+    const checkbox = await screen.findByRole('checkbox');
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(checkbox); // desmarcar -> delete real
+    await waitFor(() => expect(checkbox.checked).toBe(false));
+
+    const tablasConsultadas = fromMock.mock.calls.map(([tabla]) => tabla);
+    expect(tablasConsultadas).toContain('task_super_links');
   });
 });

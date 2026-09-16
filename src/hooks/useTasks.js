@@ -33,9 +33,15 @@ export function useTasks({ projectId, dimensions, hasCustomFieldsSchema, activeU
     const { error } = await supabase.from('tasks').insert(dbTask);
     if (!error) {
       setTasks(prev => [...prev, task]);
+      // Devuelve la tarea creada (con su id ya confirmado en la base) para que
+      // quien llama pueda encadenar trabajo que depende de que el INSERT haya
+      // funcionado de verdad — p. ej. BoardTab insertando los enlaces a
+      // super-tareas que quedaron pendientes mientras la tarjeta no existía.
+      return task;
     } else {
       console.error('Error creando tarea:', error);
       toast('Error al guardar la tarea: ' + error.message, { type: 'error' });
+      return null;
     }
   };
 

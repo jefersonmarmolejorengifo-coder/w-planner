@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo, useId, memo } from "react";
+import { useState, useEffect, useMemo, useCallback, useId, memo } from "react";
 import { supabase } from "../../supabaseClient";
 import { useDialog } from "../../useDialog";
 import { STATUS_COLORS, STATUS_LIGHT, ESTADOS, DEFAULT_TASK_TYPES } from "../../constants";
 import { calcAporte } from "../../lib/aporte";
+import { buildSuperLinkRows } from "../../lib/superTaskLinks";
 import { getColombiaNow } from "../../lib/format";
 import { readCustomFieldValue } from "../../lib/customFields";
 import TaskForm from "./TaskForm";
@@ -230,6 +231,13 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   const [fDateFrom, setFDateFrom] = useState("");
   const [fDateTo, setFDateTo] = useState("");
   const [search, setSearch] = useState("");
+  // Super-tareas marcadas (con su peso) mientras la tarjeta todavía no existe
+  // en la base — task_super_links tiene FK a tasks, así que no se puede
+  // escribir ahí antes de crear la tarea. TaskSuperLinksEditor (dentro de
+  // TaskForm) reporta aquí cada cambio; save() los inserta en lote justo
+  // después de que createTask() confirme el id.
+  const [pendingSuperLinks, setPendingSuperLinks] = useState({});
+  const handlePendingSuperLinksChange = useCallback((links) => setPendingSuperLinks(links), []);
 
   const openNew = () => {
     // El id se reserva al GUARDAR (ver save()), no al abrir, para no quemar ids
@@ -240,6 +248,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     // abierta: nadie lo limpiaba (bug reportado por el dueño). `clear()`
     // también invalida cualquier consulta de historial que siga en vuelo.
     clearTaskHistory();
+    setPendingSuperLinks({});
     setModal("new");
   };
   const openEdit = (t) => {
@@ -303,7 +312,20 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
       }
       const activeDimensions = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;
       const newTask = { ...form, id, aporteSnapshot: parseFloat(calcAporte(form, activeDimensions).toFixed(1)) };
-      await createTask(newTask);
+      const created = await createTask(newTask);
+      if (!created) return; // createTask ya avisó el error con un toast; no perdemos nada porque nunca llegó a existir.
+      // La tarea ya existe: recién ahora se puede insertar en task_super_links
+      // (FK a tasks) lo que la persona marcó mientras el formulario era nuevo.
+      const rows = buildSuperLinkRows(id, pendingSuperLinks);
+      if (rows.length > 0) {
+        const { error: linkErr } = await supabase.from('task_super_links').insert(rows);
+        if (linkErr) {
+          // La tarea recién creada NO se pierde: solo avisamos que sus
+          // super-tareas no quedaron enlazadas y hay que reabrirla para reintentar.
+          toast(`La tarea #${id} se creó, pero no se pudieron guardar sus super-tareas: ${linkErr.message}`, { type: 'error' });
+        }
+      }
+      setPendingSuperLinks({});
     } else {
       await updateTask(form);
     }
@@ -400,7 +422,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
           onSave={save}
           onDelete={modal !== "new" ? del : undefined}
         >
-          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} customFieldDefs={taskFieldDefs} projectId={projectId} />
+          <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} customFieldDefs={taskFieldDefs} projectId={projectId} onPendingSuperLinksChange={handlePendingSuperLinksChange} />
         </Modal>
       )}
     </div>

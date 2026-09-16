@@ -305,4 +305,23 @@ describe('Reordenar subtareas', () => {
     expect(screen.getByRole('button', { name: 'Bajar la subtarea 1 de 2' }).disabled).toBe(false);
     expect(screen.getByRole('button', { name: 'Subir la subtarea 2 de 2' }).disabled).toBe(false);
   });
+
+  // Ajuste 2 (UX): en el arrastre nativo no responde al dedo, así que estas
+  // flechas son el único modo de reordenar en móvil — su área pulsable debe
+  // llegar al mínimo accesible de 24×24 px. El `getByRole` de arriba ya
+  // prueba que el aria-label sigue existiendo (si se borrara, esas consultas
+  // fallarían); esto comprueba además el tamaño mínimo del área pulsable.
+  it('las flechas tienen al menos 24x24 px de área pulsable', () => {
+    renderSubtasksForm([
+      { uid: 'a', text: 'Primera', done: false },
+      { uid: 'b', text: 'Segunda', done: false },
+    ]);
+
+    const subir = screen.getByRole('button', { name: 'Subir la subtarea 2 de 2' });
+    const bajar = screen.getByRole('button', { name: 'Bajar la subtarea 1 de 2' });
+    expect(subir.style.minWidth).toBe('24px');
+    expect(subir.style.minHeight).toBe('24px');
+    expect(bajar.style.minWidth).toBe('24px');
+    expect(bajar.style.minHeight).toBe('24px');
+  });
 });

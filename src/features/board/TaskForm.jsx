@@ -943,6 +943,12 @@ export default function TaskForm({ task, setTask, participants, indicators, task
                       style={{ cursor: "grab", color: "var(--color-text-tertiary, #969696)", fontSize: 14, flexShrink: 0, userSelect: "none", lineHeight: 1 }}
                     >⠿</span>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
+                      {/* Ajuste 2 (UX): el arrastre nativo no responde al dedo en
+                          móvil, así que estas flechas son el ÚNICO modo de
+                          reordenar subtareas en celular. minWidth/minHeight 24
+                          las lleva al mínimo accesible (antes ~11×11 px); el
+                          glifo se centra con flex para que no quede pegado a
+                          una esquina del área pulsable ya agrandada. */}
                       <button
                         type="button"
                         onClick={() => moveSubtask(i, i - 1)}
@@ -950,6 +956,7 @@ export default function TaskForm({ task, setTask, participants, indicators, task
                         aria-label={`Subir la subtarea ${i + 1} de ${task.subtasks.length}`}
                         style={{
                           background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 11,
+                          minWidth: 24, minHeight: 24, display: "flex", alignItems: "center", justifyContent: "center",
                           color: isFirst ? "#c9c9c9" : "#542c9c", cursor: isFirst ? "not-allowed" : "pointer",
                         }}
                       >▲</button>
@@ -960,6 +967,7 @@ export default function TaskForm({ task, setTask, participants, indicators, task
                         aria-label={`Bajar la subtarea ${i + 1} de ${task.subtasks.length}`}
                         style={{
                           background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 11,
+                          minWidth: 24, minHeight: 24, display: "flex", alignItems: "center", justifyContent: "center",
                           color: isLast ? "#c9c9c9" : "#542c9c", cursor: isLast ? "not-allowed" : "pointer",
                         }}
                       >▼</button>

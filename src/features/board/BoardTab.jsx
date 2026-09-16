@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useId, memo } from "react";
+import { useState, useEffect, useMemo, useCallback, useId, useRef, memo } from "react";
 import { supabase } from "../../supabaseClient";
 import { useDialog } from "../../useDialog";
 import { STATUS_COLORS, STATUS_LIGHT, ESTADOS, DEFAULT_TASK_TYPES } from "../../constants";
@@ -174,7 +174,11 @@ const TaskCard = memo(function TaskCard({ task, onClick, customFieldDefs = [], k
 // cerrar — decisión del dueño: salir nunca debe descartar trabajo por
 // accidente. `onDiscard` es la única vía que descarta a propósito (botón
 // "Descartar" del pie), y ya trae su propia confirmación si hace falta.
-function Modal({ title, onClose, onSave, onDiscard, onDelete, children, saveLabel = "Guardar" }) {
+// `saving` (Ajuste 1/3): mientras un guardado sigue en vuelo se deshabilita
+// TODO el pie (Guardar, Descartar, Eliminar) y la X, y el clic fuera del
+// diálogo tampoco cierra — así un doble clic o un Escape repetido no
+// disparan una segunda escritura mientras la primera no ha terminado.
+function Modal({ title, onClose, onSave, onDiscard, onDelete, children, saveLabel = "Guardar", saving = false }) {
   const titleId = useId();
   const dialogRef = useDialog(onClose);
   return (
@@ -185,7 +189,7 @@ function Modal({ title, onClose, onSave, onDiscard, onDelete, children, saveLabe
       display: "flex", alignItems: "flex-start", justifyContent: "center",
       zIndex: 1000, padding: "16px", overflowY: "auto",
     }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
+      onMouseDown={(e) => { if (saving) return; if (e.target === e.currentTarget) onClose?.(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} style={{
         background: "#ffffff",
         border: "1px solid rgba(84,44,156,0.15)",
@@ -198,27 +202,29 @@ function Modal({ title, onClose, onSave, onDiscard, onDelete, children, saveLabe
       }}>
         <div style={{ background: "linear-gradient(135deg, #542c9c, #6e3ebf)", borderRadius: "16px 16px 0 0", padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 id={titleId} style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#ffffff" }}>{title}</h2>
-          <button onClick={onClose} aria-label="Cerrar" style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 22, lineHeight: 1 }}>×</button>
+          <button onClick={onClose} disabled={saving} aria-label="Cerrar" style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.5 : 1, fontSize: 22, lineHeight: 1 }}>×</button>
         </div>
         <div style={{ padding: "20px 22px 4px" }}>{children}</div>
         <div style={{ padding: "0 22px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             {onDelete && (
-              <button onClick={onDelete} style={{
+              <button onClick={onDelete} disabled={saving} style={{
                 background: "#fde8e8", border: "1px solid #f5c6c6",
-                color: "#c0392b", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                color: "#c0392b", borderRadius: 8, padding: "7px 14px", cursor: saving ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600,
+                opacity: saving ? 0.6 : 1,
               }}>Eliminar tarea</button>
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={onDiscard} style={{
+            <button onClick={onDiscard} disabled={saving} style={{
               background: "#f4f4f4", border: "1px solid #e0e0e0",
-              color: "#666666", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13,
+              color: "#666666", borderRadius: 8, padding: "7px 16px", cursor: saving ? "not-allowed" : "pointer", fontSize: 13,
+              opacity: saving ? 0.6 : 1,
             }}>Descartar</button>
-            <button onClick={onSave} style={{
+            <button onClick={onSave} disabled={saving} style={{
               background: "linear-gradient(135deg, #ec6c04, #f07d1e)", border: "none", color: "#ffffff",
-              borderRadius: 8, padding: "9px 22px", cursor: "pointer", fontSize: 13, fontWeight: 700,
-              boxShadow: "0 3px 12px rgba(236,108,4,0.35)",
+              borderRadius: 8, padding: "9px 22px", cursor: saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700,
+              boxShadow: "0 3px 12px rgba(236,108,4,0.35)", opacity: saving ? 0.8 : 1,
             }}>{saveLabel}</button>
           </div>
         </div>
@@ -265,6 +271,13 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   // siendo abrir la tarjeta (clic) y cambiar el Estado desde el formulario.
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   const [dragOverStatus, setDragOverStatus] = useState(null);
+  // Candado contra doble guardado (Ajuste 1): `saving` fuerza el re-render que
+  // deshabilita el pie del modal; `savingRef` es la fuente de verdad SÍNCRONA
+  // que corta la segunda llamada aunque llegue antes de que React repinte el
+  // `disabled` (un segundo clic o un Escape repetido disparan su handler en el
+  // mismo tick, antes de que el estado nuevo exista en el DOM).
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const openNew = () => {
     // El id se reserva al GUARDAR (ver save()), no al abrir, para no quemar ids
@@ -310,70 +323,91 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     hasUnsavedChanges(form, originalForm) ||
     (modal === "new" && Object.keys(pendingSuperLinks).length > 0);
 
+  // Devuelve true solo si la escritura terminó de verdad (tarea creada o
+  // actualizada); false en cualquier salida temprana (validación, RPC fallida,
+  // createTask/updateTask rechazados). closeAttempt usa ese valor para saber
+  // si vale la pena avisar con un toast (Ajuste 3).
   const save = async () => {
-    if (!form.title.trim()) { toast("El título es obligatorio", { type: 'error' }); return; }
-    // El flag "Requerido" de los campos personalizados pintaba un asterisco y
-    // no lo validaba nadie: ni el cliente ni la base (custom_fields es jsonb sin
-    // CHECK). La tarea se guardaba vacía y el dato faltaba luego en informes.
-    const faltantes = (taskFieldDefs || [])
-      .filter(d => d.required && d.type !== 'auto' && !d.deleted_at)
-      .filter(d => {
-        const v = (form.customFields || {})[d.key];
-        return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
-      })
-      .map(d => d.label || d.key);
-    if (faltantes.length) {
-      toast(`Falta completar: ${faltantes.join(', ')}`, { type: 'error' });
-      return;
-    }
-    // El modal se cerraba ANTES de escribir en la base: si el guardado
-    // fallaba, la persona veía un toast de error pero la tarjeta ya se había
-    // ido con todo lo escrito. Ahora el cierre es el ÚLTIMO paso, y solo
-    // ocurre si la escritura confirmó éxito — si falla, el modal sigue
-    // abierto con los datos intactos para reintentar.
-    if (modal === "new") {
-      // Reservar el id atómicamente recién ahora (lock-free vía SEQUENCE, H-014).
-      let id = form.id;
-      if (id == null) {
-        // Antes, si claim_task_id fallaba se usaba `nextId` (un contador local).
-        // Ese "fallback" no salvaba nada: el id ya estaba tomado y el INSERT
-        // moría con 23505 clave duplicada. Preferimos parar y decirlo: fabricar
-        // un id condenado al choque solo mueve el fallo a un sitio más confuso.
-        let claimErr = null;
-        try {
-          const { data: claimedId, error } = await supabase.rpc('claim_task_id');
-          if (error || claimedId == null) claimErr = error?.message || 'sin respuesta';
-          else id = claimedId;
-        } catch (err) {
-          claimErr = err?.message || 'excepción';
-        }
+    // Candado (Ajuste 1): con un guardado ya en vuelo, ignora el repetido —
+    // sin esto un doble clic en la X o un Escape mantenido reservaban DOS ids
+    // (claim_task_id) e insertaban dos tareas duplicadas, o chocaban contra el
+    // guard de concurrencia optimista de updateTask con un toast de conflicto
+    // falso (la "otra persona" era la propia segunda llamada).
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      if (!form.title.trim()) { toast("El título es obligatorio", { type: 'error' }); return false; }
+      // El flag "Requerido" de los campos personalizados pintaba un asterisco y
+      // no lo validaba nadie: ni el cliente ni la base (custom_fields es jsonb sin
+      // CHECK). La tarea se guardaba vacía y el dato faltaba luego en informes.
+      const faltantes = (taskFieldDefs || [])
+        .filter(d => d.required && d.type !== 'auto' && !d.deleted_at)
+        .filter(d => {
+          const v = (form.customFields || {})[d.key];
+          return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+        })
+        .map(d => d.label || d.key);
+      if (faltantes.length) {
+        toast(`Falta completar: ${faltantes.join(', ')}`, { type: 'error' });
+        return false;
+      }
+      // El modal se cerraba ANTES de escribir en la base: si el guardado
+      // fallaba, la persona veía un toast de error pero la tarjeta ya se había
+      // ido con todo lo escrito. Ahora el cierre es el ÚLTIMO paso, y solo
+      // ocurre si la escritura confirmó éxito — si falla, el modal sigue
+      // abierto con los datos intactos para reintentar.
+      if (modal === "new") {
+        // Reservar el id atómicamente recién ahora (lock-free vía SEQUENCE, H-014).
+        let id = form.id;
         if (id == null) {
-          console.error('[save] claim_task_id falló:', claimErr);
-          toast('No se pudo reservar el número de la tarea. Revisa tu conexión e inténtalo de nuevo.', { type: 'error' });
-          return;
+          // Antes, si claim_task_id fallaba se usaba `nextId` (un contador local).
+          // Ese "fallback" no salvaba nada: el id ya estaba tomado y el INSERT
+          // moría con 23505 clave duplicada. Preferimos parar y decirlo: fabricar
+          // un id condenado al choque solo mueve el fallo a un sitio más confuso.
+          let claimErr = null;
+          try {
+            const { data: claimedId, error } = await supabase.rpc('claim_task_id');
+            if (error || claimedId == null) claimErr = error?.message || 'sin respuesta';
+            else id = claimedId;
+          } catch (err) {
+            claimErr = err?.message || 'excepción';
+          }
+          if (id == null) {
+            console.error('[save] claim_task_id falló:', claimErr);
+            toast('No se pudo reservar el número de la tarea. Revisa tu conexión e inténtalo de nuevo.', { type: 'error' });
+            return false;
+          }
         }
-      }
-      const activeDimensions = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;
-      const newTask = { ...form, id, aporteSnapshot: parseFloat(calcAporte(form, activeDimensions).toFixed(1)) };
-      const created = await createTask(newTask);
-      if (!created) return; // createTask ya avisó el error con un toast; el modal sigue abierto, nada se perdió.
-      setModal(null); // la tarea ya existe en la base: recién ahora es seguro cerrar.
-      // La tarea ya existe: recién ahora se puede insertar en task_super_links
-      // (FK a tasks) lo que la persona marcó mientras el formulario era nuevo.
-      const rows = buildSuperLinkRows(id, pendingSuperLinks);
-      if (rows.length > 0) {
-        const { error: linkErr } = await supabase.from('task_super_links').insert(rows);
-        if (linkErr) {
-          // La tarea recién creada NO se pierde: solo avisamos que sus
-          // super-tareas no quedaron enlazadas y hay que reabrirla para reintentar.
-          toast(`La tarea #${id} se creó, pero no se pudieron guardar sus super-tareas: ${linkErr.message}`, { type: 'error' });
+        const activeDimensions = Array.isArray(dimensions) && dimensions.length ? dimensions : weights;
+        const newTask = { ...form, id, aporteSnapshot: parseFloat(calcAporte(form, activeDimensions).toFixed(1)) };
+        const created = await createTask(newTask);
+        if (!created) return false; // createTask ya avisó el error con un toast; el modal sigue abierto, nada se perdió.
+        setModal(null); // la tarea ya existe en la base: recién ahora es seguro cerrar.
+        // La tarea ya existe: recién ahora se puede insertar en task_super_links
+        // (FK a tasks) lo que la persona marcó mientras el formulario era nuevo.
+        const rows = buildSuperLinkRows(id, pendingSuperLinks);
+        if (rows.length > 0) {
+          const { error: linkErr } = await supabase.from('task_super_links').insert(rows);
+          if (linkErr) {
+            // La tarea recién creada NO se pierde: solo avisamos que sus
+            // super-tareas no quedaron enlazadas y hay que reabrirla para reintentar.
+            toast(`La tarea #${id} se creó, pero no se pudieron guardar sus super-tareas: ${linkErr.message}`, { type: 'error' });
+          }
         }
+        setPendingSuperLinks({});
+        return true;
+      } else {
+        const ok = await updateTask(form);
+        if (!ok) return false; // updateTask ya avisó el error (o el conflicto) con un toast; el modal sigue abierto.
+        setModal(null);
+        return true;
       }
-      setPendingSuperLinks({});
-    } else {
-      const ok = await updateTask(form);
-      if (!ok) return; // updateTask ya avisó el error (o el conflicto) con un toast; el modal sigue abierto.
-      setModal(null);
+    } finally {
+      // SIEMPRE se libera, también si la validación no pasó o la escritura
+      // falló — de lo contrario la tarjeta quedaría bloqueada para siempre.
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -385,7 +419,12 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
   // si la validación falla o si la escritura no se pudo confirmar.
   const closeAttempt = async () => {
     if (!hasAnythingToLose()) { setModal(null); return; }
-    await save();
+    const guardado = await save();
+    // Ajuste 3: cerrar con la X/clic fuera/Escape guardaba en silencio — nada
+    // indicaba que sí se guardó. Un toast breve solo cuando de verdad había
+    // algo que perder Y la escritura terminó bien (si save() dejó el modal
+    // abierto por un error, ya avisó con su propio toast; no hay que sumar uno).
+    if (guardado) toast('Tarjeta guardada', { type: 'success' });
   };
 
   // Botón "Descartar" (antes "Cancelar"): esta es la única vía que tira el
@@ -575,6 +614,8 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
           onSave={save}
           onDiscard={discard}
           onDelete={modal !== "new" ? del : undefined}
+          saving={saving}
+          saveLabel={saving ? "Guardando…" : "Guardar"}
         >
           <TaskForm task={form} setTask={setForm} participants={participants} indicators={indicators} taskTypes={taskTypes} currentUser={currentUser} weights={weights} dimensions={dimensions} keyResults={keyResults} sprints={sprints} taskHistory={taskHistory} tasks={tasks} customFieldDefs={taskFieldDefs} projectId={projectId} onPendingSuperLinksChange={handlePendingSuperLinksChange} />
         </Modal>

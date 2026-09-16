@@ -6,6 +6,7 @@ import { calcAporte } from "../../lib/aporte";
 import { buildSuperLinkRows } from "../../lib/superTaskLinks";
 import { getColombiaNow } from "../../lib/format";
 import { readCustomFieldValue } from "../../lib/customFields";
+import { buildKrTitleMap, resolveKrTitle } from "../../lib/krTitle";
 import TaskForm from "./TaskForm";
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
@@ -68,15 +69,15 @@ function formatCardCustomField(def, task) {
 
 // Wrapper that binds a stable click handler per task so the memoized
 // TaskCard doesn't re-render when the parent recreates its arrow.
-const TaskCardWithClick = memo(function TaskCardWithClick({ task, openEdit, customFieldDefs }) {
+const TaskCardWithClick = memo(function TaskCardWithClick({ task, openEdit, customFieldDefs, krTitle }) {
   const onClick = useMemo(() => () => openEdit(task), [openEdit, task]);
-  return <TaskCard task={task} onClick={onClick} customFieldDefs={customFieldDefs} />;
+  return <TaskCard task={task} onClick={onClick} customFieldDefs={customFieldDefs} krTitle={krTitle} />;
 });
 
 // Memoized: avoids re-rendering every card when an unrelated piece of state
 // changes (kanban with hundreds of cards × dozens of defs would otherwise
 // run formatCardCustomField on every keystroke).
-const TaskCard = memo(function TaskCard({ task, onClick, customFieldDefs = [] }) {
+const TaskCard = memo(function TaskCard({ task, onClick, customFieldDefs = [], krTitle = null }) {
   const sc = STATUS_COLORS[task.status] || "#888";
   const sl = STATUS_LIGHT[task.status] || "#eee";
   const prog = task.type === "Otra" ? null : task.progressPercent;
@@ -111,6 +112,12 @@ const TaskCard = memo(function TaskCard({ task, onClick, customFieldDefs = [] })
       <div style={{ fontSize: 13, fontWeight: 600, color: "#2d2d2d", marginBottom: 8, lineHeight: 1.35, wordBreak: "break-word" }}>
         {task.title || "(Sin título)"}
       </div>
+      {krTitle && (
+        <div title={krTitle} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#542c9c", fontWeight: 500, marginBottom: 8 }}>
+          <span aria-hidden="true" style={{ flexShrink: 0 }}>🎯</span>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{krTitle}</span>
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span style={{
           fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 20,
@@ -362,6 +369,11 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
     [taskFieldDefs]
   );
 
+  // Mapa id -> título de los resultados clave, armado UNA vez por cambio de
+  // `keyResults` (no en cada tarjeta): TaskCard está memoizada y pasarle el
+  // arreglo completo rompería esa memoización en cada render de BoardTab.
+  const krTitleById = useMemo(() => buildKrTitleMap(keyResults), [keyResults]);
+
   const ss = { background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-secondary)", borderRadius: 6, padding: "6px 8px", fontSize: 12, cursor: "pointer", outline: "none", fontFamily: "inherit" };
   const si = { ...ss, color: "var(--color-text-primary)" };
 
@@ -409,7 +421,7 @@ export default function BoardTab({ tasks, createTask, updateTask, deleteTask, pa
               </span>
             </div>
             {(grouped[status] || []).map((task) => (
-              <TaskCardWithClick key={task.id} task={task} openEdit={openEdit} customFieldDefs={shownTaskFieldDefs} />
+              <TaskCardWithClick key={task.id} task={task} openEdit={openEdit} customFieldDefs={shownTaskFieldDefs} krTitle={resolveKrTitle(task.krId, krTitleById)} />
             ))}
           </div>
         ))}

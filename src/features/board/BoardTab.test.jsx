@@ -92,7 +92,7 @@ function renderBoard(overrides = {}) {
 }
 
 describe('BoardTab — candado contra doble guardado al cerrar (Ajuste 1)', () => {
-  it('cerrar dos veces seguidas mientras el primer guardado sigue en vuelo solo crea UNA tarea', async () => {
+  it('Escape repetido mientras el primer guardado sigue en vuelo solo crea UNA tarea', async () => {
     let resolveCreate;
     const createTask = vi.fn(() => new Promise((resolve) => { resolveCreate = resolve; }));
     renderBoard({ createTask });
@@ -100,11 +100,15 @@ describe('BoardTab — candado contra doble guardado al cerrar (Ajuste 1)', () =
     fireEvent.click(screen.getByRole('button', { name: '+ Nueva tarea' }));
     fireEvent.change(screen.getByPlaceholderText('Descripción breve...'), { target: { value: 'Tarea de prueba' } });
 
-    const closeBtn = screen.getByRole('button', { name: 'Cerrar' });
-    // Dos clics SIN await entre medio: el segundo debe llegar antes de que la
-    // promesa de createTask del primero se resuelva (conexión lenta).
-    fireEvent.click(closeBtn);
-    fireEvent.click(closeBtn);
+    // Escape (no un clic en el botón X): useDialog escucha 'keydown' en
+    // `document`, un camino que NO pasa por el atributo `disabled` del botón
+    // — así la prueba ataca de verdad el candado (`savingRef`), no el efecto
+    // colateral de que React ya haya deshabilitado el botón entre un clic y
+    // el siguiente. Dos Escape SIN await entre medio simulan la tecla
+    // repitiéndose sola al mantenerla presionada: el segundo debe llegar
+    // antes de que la promesa de createTask del primero se resuelva.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.keyDown(document, { key: 'Escape' });
 
     await waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
     // El candado también corta antes de reservar un segundo id.

@@ -4,6 +4,7 @@ import { applyWrite, describeWriteError } from '../../lib/dbWrite';
 import { useToast } from "../../ui/Toast";
 import { useConfirm } from "../../ui/ConfirmDialog";
 import { fechaDesdeISO } from '../../lib/format';
+import { calcKrProgress, getCountableLinkedTasks } from '../../lib/okrProgress';
 
 // Tab de OKRs (Objetivos y Resultados Clave). Prop-driven: recibe okrs/keyResults
 // y sus setters desde el orquestador. Extraído del monolito (H-002), cargado con
@@ -86,11 +87,10 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
     setKeyResults(prev => prev.filter(k => k.id !== id));
   };
 
-  const getKrPct = (kr) => {
-    const linked = tasks.filter(t => t.krId === kr.id);
-    if (linked.length) return (linked.filter(t => t.status === 'Finalizada').length / linked.length) * 100;
-    return Number(kr.target_value) > 0 ? (Number(kr.current_value) / Number(kr.target_value)) * 100 : 0;
-  };
+  // El avance de un KR es el promedio del avance real de sus tareas
+  // enlazadas (ver src/lib/okrProgress.js para la regla completa: Finalizada
+  // cuenta 100, Cancelada se excluye, sin tareas contables cae al manual).
+  const getKrPct = (kr) => calcKrProgress(kr, tasks);
 
   // Agrupa por año del start_date; los más recientes primero.
   const grouped = {};
@@ -183,8 +183,12 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {krs.map(kr => {
                     const pct = getKrPct(kr);
-                    const linked = tasks.filter(t => t.krId === kr.id);
-                    const fromTasks = linked.length > 0;
+                    // fromTasks apaga los botones manuales cuando hay tareas que
+                    // cuentan para el promedio. Si TODAS las enlazadas están
+                    // canceladas no cuentan ninguna, así que el KR vuelve a
+                    // comportarse como manual (igual que si no tuviera tareas).
+                    const countableLinked = getCountableLinkedTasks(kr, tasks);
+                    const fromTasks = countableLinked.length > 0;
                     return (
                       <div key={kr.id} style={{ background: '#faf8ff', borderRadius: 10, padding: '10px 14px', border: '1px solid #e8e0f4' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -197,7 +201,7 @@ export default function OKRsTab({ projectId, okrs, setOkrs, keyResults, setKeyRe
                             </div>
                           )}
                           {fromTasks && (
-                            <span style={{ fontSize: 11, color: '#542c9c', fontWeight: 600 }}>{linked.filter(t => t.status === 'Finalizada').length}/{linked.length} tareas</span>
+                            <span style={{ fontSize: 11, color: '#542c9c', fontWeight: 600 }}>Promedio de {countableLinked.length} tarea{countableLinked.length === 1 ? '' : 's'}</span>
                           )}
                           <button onClick={() => deleteKr(kr.id)} style={{ ...btn('danger'), padding: '2px 8px' }}>✕</button>
                         </div>

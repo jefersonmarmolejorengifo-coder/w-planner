@@ -171,7 +171,7 @@ function TaskSuperLinksEditor({ taskId, projectId }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ fontSize: 11, color: "#666", marginBottom: 2 }}>
-        Marca las super-tareas a las que esta tarea aporta. El peso va de 0 a 1 (se escribe con punto o coma) y multiplica el aporte cuando se cierre: 1 = aporte completo, 0.5 = la mitad.
+        Marca las super-tareas a las que esta tarea aporta. El peso es mayor que 0 y hasta 1 (se escribe con punto o coma) y multiplica el aporte cuando se cierre: 1 = aporte completo, 0.5 = la mitad.
       </div>
       {superTasks.map(st => {
         const selected = links[st.id] !== undefined;

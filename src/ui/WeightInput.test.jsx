@@ -154,4 +154,41 @@ describe('WeightInput', () => {
 
     expect(input.disabled).toBe(true);
   });
+
+  // Hueco que encontró la revisión rompiendo el código a propósito: si
+  // parseWeight volviera a aceptar hasta 5, NINGUNA prueba de este archivo
+  // se enteraba (todas tecleaban valores dentro de (0, 1]). Esta es la que
+  // lo distingue: teclea un valor fuera de rango, no una letra ni un cero.
+  it('teclear "1.5" (fuera de rango) no confirma, marca inválido y al salir vuelve al último valor bueno', () => {
+    const onCommit = vi.fn();
+    render(<Controlled initial={1} onCommit={onCommit} />);
+    const input = screen.getByLabelText('peso de Tarea X');
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '1.5' } });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+
+    fireEvent.blur(input);
+    expect(input.value).toBe('1');
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('con "0" el aviso invita a desmarcar la casilla, no a corregir el rango', () => {
+    render(<Controlled initial={1} />);
+    const input = screen.getByLabelText('peso de Tarea X');
+    const hintId = input.getAttribute('aria-describedby');
+    const hint = document.getElementById(hintId);
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '0' } });
+    expect(hint.textContent).toBe('Si no aporta, desmarca la casilla');
+
+    // Para otro texto inválido que NO es un cero explícito, se mantiene el
+    // aviso genérico de rango (contraste: si el aviso quedara siempre en
+    // "desmarca la casilla", este caso lo delataría).
+    fireEvent.change(input, { target: { value: '' } });
+    expect(hint.textContent).toBe('De 0.01 a 1');
+  });
 });

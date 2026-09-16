@@ -41,6 +41,14 @@ export default function WeightInput({ value, onCommit, ariaLabel, disabled = fal
   // rango (p. ej. 1.5 de datos viejos) que nadie tocó no debe verse en rojo.
   const invalid = focused && parseWeight(draft) === null;
 
+  // Si lo tecleado es un CERO explícito ("0", "0.0", "0,00" — no un
+  // intermedio ambiguo como "." o "0."), el problema no es "está fuera de
+  // rango": es que la persona no quiere que la tarea aporte, y lo que
+  // corresponde es desmarcar la casilla, no forzar un número. Para
+  // cualquier otro texto inválido se usa el aviso genérico de rango.
+  const isExplicitZero = invalid && /^0+([.,]0*)?$/.test(draft);
+  const hintText = isExplicitZero ? "Si no aporta, desmarca la casilla" : "De 0.01 a 1";
+
   const handleFocus = (e) => {
     setFocused(true);
     e.target.select(); // escribir reemplaza el valor, sin tener que borrarlo
@@ -118,7 +126,7 @@ export default function WeightInput({ value, onCommit, ariaLabel, disabled = fal
             : { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }
         }
       >
-        De 0.01 a 1
+        {hintText}
       </span>
     </>
   );

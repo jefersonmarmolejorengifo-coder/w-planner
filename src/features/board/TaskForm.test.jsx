@@ -12,9 +12,11 @@
 //
 // No hay @testing-library/user-event instalado: se usa fireEvent, igual que
 // WeightInput.test.jsx y AuthScreen.test.jsx.
+import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { ConfirmProvider } from '../../ui/ConfirmDialog';
+import { calcProgressFromSubtasks } from '../../lib/aporte';
 import TaskForm from './TaskForm.jsx';
 
 const fromMock = vi.hoisted(() => vi.fn());
@@ -229,5 +231,78 @@ describe('TaskSuperLinksEditor con tarjeta nueva (task.id nulo)', () => {
 
     const tablasConsultadas = fromMock.mock.calls.map(([tabla]) => tabla);
     expect(tablasConsultadas).toContain('task_super_links');
+  });
+});
+
+// ─── Reordenar subtareas ───────────────────────────────────
+// A diferencia de renderTaskForm (setTask={() => {}}, un no-op para probar
+// otra cosa), acá se necesita un setTask REAL: mover una subtarea solo se ve
+// si el estado cambia de verdad y TaskForm vuelve a renderizar con el array
+// ya reordenado. projectId se omite a propósito para que no aparezca el
+// checkbox de "Meta X" (TaskSuperLinksEditor) y así getAllByRole('checkbox')
+// devuelva únicamente las casillas de las subtareas.
+function renderSubtasksForm(subtasks) {
+  function Wrapper() {
+    // Como en un dato real ya cargado de la base, progressPercent viene
+    // precalculado — nadie dispara addSubtask/toggle antes de este render.
+    const [task, setTask] = useState({ ...BASE_TASK, subtasks, progressPercent: calcProgressFromSubtasks(subtasks) ?? 0 });
+    return (
+      <ConfirmProvider>
+        <TaskForm
+          task={task}
+          setTask={setTask}
+          participants={[]}
+          indicators={[]}
+          taskTypes={[]}
+          currentUser={{}}
+          weights={[]}
+          dimensions={[]}
+        />
+      </ConfirmProvider>
+    );
+  }
+  return render(<Wrapper />);
+}
+
+describe('Reordenar subtareas', () => {
+  it('la flecha "subir" reordena de verdad la lista visible, mueve el estado done con la fila, y el avance no cambia', () => {
+    renderSubtasksForm([
+      { uid: 'a', text: 'Primera', done: true },
+      { uid: 'b', text: 'Segunda', done: false },
+      { uid: 'c', text: 'Tercera', done: false },
+    ]);
+
+    // Antes de mover: 1 de 3 done -> 33.3%, orden Primera/Segunda/Tercera.
+    expect(screen.getByText('33.3%')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Subtarea 1').value).toBe('Primera');
+    expect(screen.getByPlaceholderText('Subtarea 2').value).toBe('Segunda');
+    expect(screen.getAllByRole('checkbox')[0].checked).toBe(true);
+    expect(screen.getAllByRole('checkbox')[1].checked).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Subir la subtarea 2 de 3' }));
+
+    // "Segunda" pasa al puesto 1 y "Primera" baja al puesto 2 — el texto Y su
+    // casilla viajan juntos (si viajara solo el texto, el checkbox marcado se
+    // quedaría en el índice 0 y "Segunda" aparecería marcada por error).
+    expect(screen.getByPlaceholderText('Subtarea 1').value).toBe('Segunda');
+    expect(screen.getByPlaceholderText('Subtarea 2').value).toBe('Primera');
+    expect(screen.getByPlaceholderText('Subtarea 3').value).toBe('Tercera');
+    expect(screen.getAllByRole('checkbox')[0].checked).toBe(false);
+    expect(screen.getAllByRole('checkbox')[1].checked).toBe(true);
+
+    // calcProgressFromSubtasks es agnóstico del orden: sigue 1 de 3 -> 33.3%.
+    expect(screen.getByText('33.3%')).toBeTruthy();
+  });
+
+  it('las flechas se deshabilitan en los extremos', () => {
+    renderSubtasksForm([
+      { uid: 'a', text: 'Primera', done: false },
+      { uid: 'b', text: 'Segunda', done: false },
+    ]);
+
+    expect(screen.getByRole('button', { name: 'Subir la subtarea 1 de 2' }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Bajar la subtarea 2 de 2' }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Bajar la subtarea 1 de 2' }).disabled).toBe(false);
+    expect(screen.getByRole('button', { name: 'Subir la subtarea 2 de 2' }).disabled).toBe(false);
   });
 });

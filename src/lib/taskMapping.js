@@ -29,9 +29,16 @@ export const dbToTask = (r) => ({
   responsible: r.responsible || '',
   comments: r.comments || '',
   progressPercent: r.progress_percent ?? 0,
-  subtasks: (r.subtasks || []).map(s =>
-    typeof s === 'string' ? { text: s, done: false } : s
-  ),
+  subtasks: (r.subtasks || []).map(s => {
+    const item = typeof s === 'string' ? { text: s, done: false } : s;
+    // Filas viejas (creadas antes de esta versión) no traen `uid`: se genera
+    // uno estable al normalizar para que el reordenamiento (arrastre/flechas
+    // en TaskForm) tenga una key que no sea el índice. Mismo patrón que
+    // CustomFieldsRenderer.jsx para sub-ítems.
+    if (item.uid) return item;
+    const uid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    return { ...item, uid };
+  }),
   dependentTask: r.dependent_task || '',
   aporteSnapshot: r.aporte_snapshot ?? null,
   finalizedAt: r.finalized_at || null,

@@ -3,6 +3,7 @@ import { supabase } from "../../supabaseClient";
 import { STATUS_COLORS, ESTADOS, DEFAULT_TASK_TYPES } from "../../constants";
 import { calcAporte, calcProgressFromSubtasks, DEFAULT_DIMENSIONS } from "../../lib/aporte";
 import { parseDeps } from "../../lib/deps";
+import { moveItem } from "../../lib/reorder";
 import { CustomFieldsRenderer } from "../../lib/CustomFieldsRenderer";
 import { inp, readonlyInp } from "../../lib/formStyles";
 import { getHistoryFieldLabel } from "../../lib/taskHistoryLabels";
@@ -461,6 +462,10 @@ export default function TaskForm({ task, setTask, participants, indicators, task
   const isSuperUser = currentUser?.isSuperUser;
   const typeOptions = taskTypes.length ? taskTypes.map((t) => t.name) : DEFAULT_TASK_TYPES;
   const [depInput, setDepInput] = useState("");
+  // Estado del arrastre nativo de subtareas: qué fila se está arrastrando y
+  // sobre cuál está pasando ahora mismo (para pintar la línea de destino).
+  const [dragIndex, setDragIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   const upd = (key, val) =>
     setTask((prev) => {
@@ -471,7 +476,10 @@ export default function TaskForm({ task, setTask, participants, indicators, task
 
   const addSubtask = () => {
     if (task.subtasks.length < 20) {
-      const nextSubtasks = [...task.subtasks, { text: "", done: false }];
+      // uid estable (no el índice) para que reordenar/editar una fila no le
+      // robe el foco a otra — mismo patrón que CustomFieldsRenderer.jsx.
+      const uid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const nextSubtasks = [...task.subtasks, { uid, text: "", done: false }];
       const autoProgress = calcProgressFromSubtasks(nextSubtasks);
       upd("subtasks", nextSubtasks);
       if (autoProgress !== null) upd("progressPercent", autoProgress);
@@ -495,6 +503,16 @@ export default function TaskForm({ task, setTask, participants, indicators, task
     const arr = task.subtasks.filter((_, idx) => idx !== i);
     const autoProgress = calcProgressFromSubtasks(arr);
     upd("subtasks", arr);
+    if (autoProgress !== null) upd("progressPercent", autoProgress);
+  };
+  const moveSubtask = (from, to) => {
+    const next = moveItem(task.subtasks, from, to);
+    if (next === task.subtasks) return; // índices iguales o fuera de rango: no-op
+    // calcProgressFromSubtasks es agnóstico del orden (solo cuenta cuántas
+    // están done), así que el avance no cambia — pero se recalcula igual
+    // para seguir el mismo camino que addSubtask/updSubtask/toggle/del.
+    const autoProgress = calcProgressFromSubtasks(next);
+    upd("subtasks", next);
     if (autoProgress !== null) upd("progressPercent", autoProgress);
   };
 
@@ -881,26 +899,90 @@ export default function TaskForm({ task, setTask, participants, indicators, task
 
           <F label={`Subtareas (${task.subtasks.length}/20)`}>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {task.subtasks.map((st, i) => (
-                <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={st.done}
-                    onChange={() => toggleSubtask(i)}
-                    style={{ width: 16, height: 16, accentColor: "#ec6c04", cursor: "pointer", flexShrink: 0 }}
-                  />
-                  <input
-                    style={{ ...inp, flex: 1, textDecoration: st.done ? "line-through" : "none", color: st.done ? "#969696" : undefined }}
-                    value={st.text}
-                    onChange={(e) => updSubtask(i, e.target.value)}
-                    placeholder={`Subtarea ${i + 1}`}
-                  />
-                  <button onClick={() => delSubtask(i)} style={{
-                    background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)",
-                    color: "var(--color-text-danger)", borderRadius: 6, padding: "0 10px", cursor: "pointer", fontSize: 14,
-                  }}>✕</button>
-                </div>
-              ))}
+              {task.subtasks.map((st, i) => {
+                const isFirst = i === 0;
+                const isLast = i === task.subtasks.length - 1;
+                const isDragging = dragIndex === i;
+                // Línea de destino: solo se pinta sobre una fila distinta a
+                // la que se está arrastrando (soltar sobre sí misma es no-op).
+                const isDropTarget = dragOverIndex === i && dragIndex !== null && dragIndex !== i;
+                return (
+                  <div
+                    key={st.uid || `idx-${i}`}
+                    onDragOver={(e) => {
+                      if (dragIndex === null) return;
+                      e.preventDefault(); // requerido por el navegador para permitir soltar aquí
+                      e.dataTransfer.dropEffect = "move";
+                      if (dragOverIndex !== i) setDragOverIndex(i);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragIndex !== null) moveSubtask(dragIndex, i);
+                      setDragIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    style={{
+                      display: "flex", gap: 6, alignItems: "center",
+                      borderTop: isDropTarget ? "2px solid #542c9c" : "2px solid transparent",
+                      opacity: isDragging ? 0.5 : 1,
+                    }}
+                  >
+                    {/* Asa de arrastre: se arrastra por acá, no por el input de
+                        texto ni la casilla. Solo mouse/touch — el camino
+                        accesible por teclado son las flechas de al lado. */}
+                    <span
+                      draggable
+                      aria-hidden="true"
+                      title="Arrastra para reordenar"
+                      onDragStart={(e) => {
+                        setDragIndex(i);
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", String(i)); // Firefox exige setData para iniciar el arrastre
+                      }}
+                      onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
+                      style={{ cursor: "grab", color: "var(--color-text-tertiary, #969696)", fontSize: 14, flexShrink: 0, userSelect: "none", lineHeight: 1 }}
+                    >⠿</span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() => moveSubtask(i, i - 1)}
+                        disabled={isFirst}
+                        aria-label={`Subir la subtarea ${i + 1} de ${task.subtasks.length}`}
+                        style={{
+                          background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 11,
+                          color: isFirst ? "#c9c9c9" : "#542c9c", cursor: isFirst ? "not-allowed" : "pointer",
+                        }}
+                      >▲</button>
+                      <button
+                        type="button"
+                        onClick={() => moveSubtask(i, i + 1)}
+                        disabled={isLast}
+                        aria-label={`Bajar la subtarea ${i + 1} de ${task.subtasks.length}`}
+                        style={{
+                          background: "none", border: "none", padding: 0, lineHeight: 1, fontSize: 11,
+                          color: isLast ? "#c9c9c9" : "#542c9c", cursor: isLast ? "not-allowed" : "pointer",
+                        }}
+                      >▼</button>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={st.done}
+                      onChange={() => toggleSubtask(i)}
+                      style={{ width: 16, height: 16, accentColor: "#ec6c04", cursor: "pointer", flexShrink: 0 }}
+                    />
+                    <input
+                      style={{ ...inp, flex: 1, textDecoration: st.done ? "line-through" : "none", color: st.done ? "#969696" : undefined }}
+                      value={st.text}
+                      onChange={(e) => updSubtask(i, e.target.value)}
+                      placeholder={`Subtarea ${i + 1}`}
+                    />
+                    <button onClick={() => delSubtask(i)} style={{
+                      background: "var(--color-background-danger)", border: "0.5px solid var(--color-border-danger)",
+                      color: "var(--color-text-danger)", borderRadius: 6, padding: "0 10px", cursor: "pointer", fontSize: 14,
+                    }}>✕</button>
+                  </div>
+                );
+              })}
               {task.subtasks.length < 20 && (
                 <button onClick={addSubtask} style={{
                   background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)",

@@ -13,6 +13,8 @@
 - **Detector de deriva de plantillas** (H-056, H-058): `--check` sale 1 si producción difiere, `--apply` exige `SUPABASE_PROJECT_REF` explícito, y `scripts/auth-email/published.json` + test de huella en el CI.
 - **Aviso de enlace viejo** (H-065) y mensaje honesto cuando se agota el tope de correos (H-062).
 - **CAPTCHA (Cloudflare Turnstile) ACTIVO en producción desde 2026-09-15** (H-054): widget "Productivity-Plus login" creado por API, clave pública en Vercel, secreto en Supabase; pedir un código sin CAPTCHA se rechaza (`captcha_failed`) y el tope de correos subió de 30 a 100/h. Comprobado que el login por código y la renovación de sesión siguen funcionando. Si Turnstile no carga, la persona ve qué pasa, puede reintentar y, al segundo fallo, tiene el contacto info@softatumedida.com. Reversión: `SUPABASE_PROJECT_REF=pkccbrzsvcipkmnllxhz node scripts/enable-auth-captcha.mjs --disable`.
+- **Monitoreo del CAPTCHA (2026-09-22):** en las últimas 24 h de logs de Auth no hubo NI UN rechazo de CAPTCHA; sí 2 logins exitosos y 2 renovaciones de sesión. Config viva: Turnstile activo, tope 100 correos/h, código de 8 dígitos y 15 min. Límite honesto: el plan gratuito solo guarda 24 h de logs.
+- **Barrido de los otros proyectos (2026-09-22, solo lectura):** Cuadre es el más dañado —12 usuarios corporativos, 9 nunca entraron, todos con el correo ya confirmado (lo confirmó el escáner)— frente a 0 de 12 personales. VoxLab: 1 de 4 corporativos. TuAgendaApp sin señal. El Hub ya tiene pantalla de código: solo sobra el enlace de respaldo de su plantilla. Cuadre y VoxLab canjean el token en el GET de su propia ruta, así que basta exigir un clic (POST) antes de canjear.
 - **Pruebas de componente del login** (jsdom + Testing Library, H-053), incluidas las rutas de CAPTCHA y de fallo, con sabotajes que fallan donde deben.
 - **"El código llega pero siempre dice vencido" (2026-09-15) → ARREGLADO.**
   - Causa, con logs de Auth: la persona escribía el código de un correo anterior, ya anulado porque cada pedido anula los previos. Los correos tenían el mismo asunto y Outlook los agrupaba en una conversación. Verificaciones `otp_expired` a los 9-16 s de cada envío, con el token vigente sin usar. El servidor está sano (`--check` limpio).
@@ -45,8 +47,7 @@
 
 | Pendiente | Depende de | Prioridad |
 |---|---|---|
-| Prueba final: entrar con jdmarmolejo@ingeniopichichi.com (CAPTCHA + código + plan Pro Team) | Jefer | Alta |
-| Vigilar `captcha_failed` en los logs de Auth durante 48 h (si sube, revertir con `enable-auth-captcha --disable`) | — | Media |
+| Arreglar el correo de confirmación y el de recuperación en **Cuadre** (12 usuarios corporativos, 9 nunca entraron) y luego VoxLab | OK de Jefer | Alta |
 | Arreglar el bug de enlaces: Cuadre y VoxLab → TuAgendaApp → Hub (quitar el enlace de respaldo) → hirly (`email_change`) → Triada | Jefer lo dejó para el final (repos aparte; el Hub cruza la frontera de afiliados) | Alta en los que tengan usuarios corporativos |
 | Vista global de actividad del tablero (quién cambió qué y en qué tarea), además del historial por tarjeta | Decisión de Jefer | Media |
 | Cerrar `user_onboarding` a `anon` (`REVOKE ALL ... FROM anon`); hoy no es explotable porque la RLS lo impide | OK de Jefer (migración con ensayo) | Media |

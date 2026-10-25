@@ -205,6 +205,9 @@ function computeRange(config) {
 }
 
 
+// Una retro solo se abre para sprints que terminaron hace como mucho este número de días.
+export const RETRO_ANTIGUEDAD_MAX_DIAS = 30;
+
 // ─── Generación e invocación de endpoints ──────────────────
 const ENDPOINT_BY_TYPE = {
   scrum: "/api/generate-scrum-report",
@@ -542,12 +545,19 @@ export default async function handler(req, res) {
       const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
         .toISOString().slice(0, 10);
 
-      // Sprints elegibles: status='closed' OR end_date <= cutoff,
-      // sin período de retro abierto todavía.
+      // Tope de antigüedad: sin él, al activar team_pulse en un proyecto se abrían
+      // (y se notificaban por correo) las retros de todos sus sprints viejos de golpe.
+      // Fecha civil de Colombia (UTC-5, sin horario de verano) para que el límite no corra un día a partir de las 19:00.
+      const limiteAntiguedad = new Date(Date.now() - 5 * 60 * 60 * 1000 - RETRO_ANTIGUEDAD_MAX_DIAS * 24 * 60 * 60 * 1000)
+        .toISOString().slice(0, 10);
+
+      // Sprints elegibles: (status='closed' OR end_date <= cutoff) y que hayan
+      // terminado en los últimos RETRO_ANTIGUEDAD_MAX_DIAS, sin período de retro abierto todavía.
       const { data: candidates } = await supabase
         .from("sprints")
         .select("id, project_id, name, end_date, status")
-        .or(`status.eq.closed,end_date.lte.${cutoff}`);
+        .or(`status.eq.closed,end_date.lte.${cutoff}`)
+        .gte("end_date", limiteAntiguedad);
 
       for (const sp of candidates || []) {
         const { data: existing } = await supabase

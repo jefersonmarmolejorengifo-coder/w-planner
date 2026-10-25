@@ -547,7 +547,8 @@ export default async function handler(req, res) {
 
       // Tope de antigüedad: sin él, al activar team_pulse en un proyecto se abrían
       // (y se notificaban por correo) las retros de todos sus sprints viejos de golpe.
-      const limiteAntiguedad = new Date(Date.now() - RETRO_ANTIGUEDAD_MAX_DIAS * 24 * 60 * 60 * 1000)
+      // Fecha civil de Colombia (UTC-5, sin horario de verano) para que el límite no corra un día a partir de las 19:00.
+      const limiteAntiguedad = new Date(Date.now() - 5 * 60 * 60 * 1000 - RETRO_ANTIGUEDAD_MAX_DIAS * 24 * 60 * 60 * 1000)
         .toISOString().slice(0, 10);
 
       // Sprints elegibles: (status='closed' OR end_date <= cutoff) y que hayan

@@ -1,4 +1,4 @@
-import { createSupabase, createAdminClient, fetchWithTimeout } from "./_auth.js";
+import { createSupabase, createAdminClient, fetchWithTimeout, getAppBaseUrl } from "./_auth.js";
 import { getResendConfig, normalizeRecipients, sanitizeReportHtml } from "./_email.js";
 import { notificarPagoAlHub } from "./_hub-client.js";
 import { extractUsageMarker } from "../src/aiModels.js";
@@ -204,10 +204,6 @@ function computeRange(config) {
   return { weekStart: fmt(now), weekEnd: fmt(now) };
 }
 
-const getBaseUrl = () =>
-  process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : process.env.APP_BASE_URL || "https://productivity-plus.vercel.app";
 
 // ─── Generación e invocación de endpoints ──────────────────
 const ENDPOINT_BY_TYPE = {
@@ -227,7 +223,7 @@ async function generateReport({ projectId, reportType, range }) {
     ? { projectId, monthStart: range.weekStart, monthEnd: range.weekEnd }
     : { projectId, weekStart: range.weekStart, weekEnd: range.weekEnd };
 
-  const genRes = await fetchWithTimeout(`${getBaseUrl()}${endpoint}`, {
+  const genRes = await fetchWithTimeout(`${getAppBaseUrl()}${endpoint}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -569,7 +565,7 @@ export default async function handler(req, res) {
 
         const trigger = sp.status === "closed" ? "sprint_closed" : "end_date_passed";
         try {
-          await fetchWithTimeout(`${getBaseUrl()}/api/open-retro`, {
+          await fetchWithTimeout(`${getAppBaseUrl()}/api/open-retro`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-Cron-Secret": process.env.CRON_SECRET },
             body: JSON.stringify({ sprintId: sp.id, trigger }),
